@@ -1,0 +1,4 @@
+pyrr
+numpy
+moderngl
+moderngl-window
