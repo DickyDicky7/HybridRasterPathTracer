@@ -157,90 +157,197 @@ class HybridRenderer(mglw.WindowConfig):
         # (x, y, z), (nx, ny, nz), (r, g, b)
         # (x, y, z), (nx, ny, nz), (r, g, b)
 
+        class SceneBatch:
+#       class SceneBatch:
+            def __init__(self, vao: mgl.VertexArray, number_of_instances: int) -> None:
+#           def __init__(self, vao: mgl.VertexArray, number_of_instances: int) -> None:
+                self.vao: mgl.VertexArray = vao
+#               self.vao: mgl.VertexArray = vao
+                self.number_of_instances: int = number_of_instances
+#               self.number_of_instances: int = number_of_instances
+                pass
+#               pass
+
+        self.scene_batches: list[SceneBatch] = []
+#       self.scene_batches: list[SceneBatch] = []
+
         # Helper to create face data
         # Helper to create face data
-        def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32, face_color: vec3f32):
-#       def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32, face_color: vec3f32):
+        def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32):
+#       def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32):
             return np.array([
 #           return np.array([
-                *vertex_a, *face_normal, *face_color,
-#               *vertex_a, *face_normal, *face_color,
-                *vertex_b, *face_normal, *face_color,
-#               *vertex_b, *face_normal, *face_color,
-                *vertex_c, *face_normal, *face_color,
-#               *vertex_c, *face_normal, *face_color,
-                *vertex_c, *face_normal, *face_color,
-#               *vertex_c, *face_normal, *face_color,
-                *vertex_d, *face_normal, *face_color,
-#               *vertex_d, *face_normal, *face_color,
-                *vertex_a, *face_normal, *face_color,
-#               *vertex_a, *face_normal, *face_color,
+                *vertex_a, *face_normal,
+#               *vertex_a, *face_normal,
+                *vertex_b, *face_normal,
+#               *vertex_b, *face_normal,
+                *vertex_c, *face_normal,
+#               *vertex_c, *face_normal,
+                *vertex_c, *face_normal,
+#               *vertex_c, *face_normal,
+                *vertex_d, *face_normal,
+#               *vertex_d, *face_normal,
+                *vertex_a, *face_normal,
+#               *vertex_a, *face_normal,
             ], dtype="f4")
 #           ], dtype="f4")
 
-        # Vertices
-        # Vertices
-        point0: vec3f32 = (-0.5, -0.5,  0.5)
-#       point0: vec3f32 = (-0.5, -0.5,  0.5)
-        point1: vec3f32 = ( 0.5, -0.5,  0.5)
-#       point1: vec3f32 = ( 0.5, -0.5,  0.5)
-        point2: vec3f32 = ( 0.5,  0.5,  0.5)
-#       point2: vec3f32 = ( 0.5,  0.5,  0.5)
-        point3: vec3f32 = (-0.5,  0.5,  0.5)
-#       point3: vec3f32 = (-0.5,  0.5,  0.5)
-        point4: vec3f32 = (-0.5, -0.5, -0.5)
-#       point4: vec3f32 = (-0.5, -0.5, -0.5)
-        point5: vec3f32 = ( 0.5, -0.5, -0.5)
-#       point5: vec3f32 = ( 0.5, -0.5, -0.5)
-        point6: vec3f32 = ( 0.5,  0.5, -0.5)
-#       point6: vec3f32 = ( 0.5,  0.5, -0.5)
-        point7: vec3f32 = (-0.5,  0.5, -0.5)
-#       point7: vec3f32 = (-0.5,  0.5, -0.5)
+        cube_instance_data: list = []
+#       cube_instance_data: list = []
+        plane_instance_data: list = []
+#       plane_instance_data: list = []
 
-        color_red    : vec3f32 = (1.0, 0.0, 0.0)
-#       color_red    : vec3f32 = (1.0, 0.0, 0.0)
-        color_green  : vec3f32 = (0.0, 1.0, 0.0)
-#       color_green  : vec3f32 = (0.0, 1.0, 0.0)
-        color_blue   : vec3f32 = (0.0, 0.0, 1.0)
-#       color_blue   : vec3f32 = (0.0, 0.0, 1.0)
-        color_yellow : vec3f32 = (1.0, 1.0, 0.0)
-#       color_yellow : vec3f32 = (1.0, 1.0, 0.0)
-        color_cyan   : vec3f32 = (0.0, 1.0, 1.0)
-#       color_cyan   : vec3f32 = (0.0, 1.0, 1.0)
-        color_magenta: vec3f32 = (1.0, 0.0, 1.0)
-#       color_magenta: vec3f32 = (1.0, 0.0, 1.0)
+        def add_cube(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+#       def add_cube(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+            matrix_translation = rr.Matrix44.from_translation(position)
+#           matrix_translation = rr.Matrix44.from_translation(position)
+            matrix_rotation = rr.Matrix44.from_eulers(rotation)
+#           matrix_rotation = rr.Matrix44.from_eulers(rotation)
+            matrix_scale = rr.Matrix44.from_scale(scale)
+#           matrix_scale = rr.Matrix44.from_scale(scale)
+            matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+#           matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+            data = np.concatenate([matrix.flatten(), color]).astype("f4")
+#           data = np.concatenate([matrix.flatten(), color]).astype("f4")
+            cube_instance_data.append(data)
+#           cube_instance_data.append(data)
 
-        vertices = np.concatenate([
-#       vertices = np.concatenate([
-            face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=( 0.0,  0.0,  1.0), face_color=color_red), # Front
-#           face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=( 0.0,  0.0,  1.0), face_color=color_red), # Front
-            face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=( 0.0,  0.0, -1.0), face_color=color_cyan), # Back
-#           face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=( 0.0,  0.0, -1.0), face_color=color_cyan), # Back
-            face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0,  0.0,  0.0), face_color=color_yellow), # Left
-#           face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0,  0.0,  0.0), face_color=color_yellow), # Left
-            face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=( 1.0,  0.0,  0.0), face_color=color_green), # Right
-#           face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=( 1.0,  0.0,  0.0), face_color=color_green), # Right
-            face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=( 0.0,  1.0,  0.0), face_color=color_magenta), # Top
-#           face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=( 0.0,  1.0,  0.0), face_color=color_magenta), # Top
-            face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=( 0.0, -1.0,  0.0), face_color=color_blue), # Bottom
-#           face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=( 0.0, -1.0,  0.0), face_color=color_blue), # Bottom
-        ])
-#       ])
+        def add_plane(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+#       def add_plane(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+            matrix_translation = rr.Matrix44.from_translation(position)
+#           matrix_translation = rr.Matrix44.from_translation(position)
+            matrix_rotation = rr.Matrix44.from_eulers(rotation)
+#           matrix_rotation = rr.Matrix44.from_eulers(rotation)
+            matrix_scale = rr.Matrix44.from_scale(scale)
+#           matrix_scale = rr.Matrix44.from_scale(scale)
+            matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+#           matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+            data = np.concatenate([matrix.flatten(), color]).astype("f4")
+#           data = np.concatenate([matrix.flatten(), color]).astype("f4")
+            plane_instance_data.append(data)
+#           plane_instance_data.append(data)
 
-        self.vbo_geometry: mgl.Buffer = self.ctx.buffer(vertices.tobytes())
-#       self.vbo_geometry: mgl.Buffer = self.ctx.buffer(vertices.tobytes())
-        self.vao_geometry: mgl.VertexArray = self.ctx.vertex_array(
-#       self.vao_geometry: mgl.VertexArray = self.ctx.vertex_array(
-            self.program_geometry,
-#           self.program_geometry,
-            [
-#           [
-                (self.vbo_geometry, "3f 3f 3f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexAlbedo"),
-#               (self.vbo_geometry, "3f 3f 3f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexAlbedo"),
-            ],
-#           ],
-        )
-#       )
+        add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(1.0, 0.2, 0.1)) # Warm Red
+#       add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(1.0, 0.2, 0.1)) # Warm Red
+        add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.4, 0.8, 0.1)) # Warm Green
+#       add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.4, 0.8, 0.1)) # Warm Green
+        add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
+#       add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
+
+        add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
+#       add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
+
+        # Create Cube Batch
+        # Create Cube Batch
+        if cube_instance_data:
+#       if cube_instance_data:
+            # 1. Geometry
+            # 1. Geometry
+            point0: vec3f32 = (-0.5, -0.5, 0.5)
+#           point0: vec3f32 = (-0.5, -0.5, 0.5)
+            point1: vec3f32 = (0.5, -0.5, 0.5)
+#           point1: vec3f32 = (0.5, -0.5, 0.5)
+            point2: vec3f32 = (0.5, 0.5, 0.5)
+#           point2: vec3f32 = (0.5, 0.5, 0.5)
+            point3: vec3f32 = (-0.5, 0.5, 0.5)
+#           point3: vec3f32 = (-0.5, 0.5, 0.5)
+            point4: vec3f32 = (-0.5, -0.5, -0.5)
+#           point4: vec3f32 = (-0.5, -0.5, -0.5)
+            point5: vec3f32 = (0.5, -0.5, -0.5)
+#           point5: vec3f32 = (0.5, -0.5, -0.5)
+            point6: vec3f32 = (0.5, 0.5, -0.5)
+#           point6: vec3f32 = (0.5, 0.5, -0.5)
+            point7: vec3f32 = (-0.5, 0.5, -0.5)
+#           point7: vec3f32 = (-0.5, 0.5, -0.5)
+
+            geometries: list = []
+#           geometries: list = []
+            geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
+#           geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
+            geometries.append(face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=(0.0, 0.0, -1.0)))
+#           geometries.append(face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=(0.0, 0.0, -1.0)))
+            geometries.append(face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0, 0.0, 0.0)))
+#           geometries.append(face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0, 0.0, 0.0)))
+            geometries.append(face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=(1.0, 0.0, 0.0)))
+#           geometries.append(face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=(1.0, 0.0, 0.0)))
+            geometries.append(face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=(0.0, 1.0, 0.0)))
+#           geometries.append(face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=(0.0, 1.0, 0.0)))
+            geometries.append(face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=(0.0, -1.0, 0.0)))
+#           geometries.append(face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=(0.0, -1.0, 0.0)))
+
+            vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
+#           vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
+
+            # 2. Instances
+            # 2. Instances
+            instance_bytes: bytes = np.concatenate(cube_instance_data).tobytes()
+#           instance_bytes: bytes = np.concatenate(cube_instance_data).tobytes()
+            vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+#           vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+
+            vao_cube: mgl.VertexArray = self.ctx.vertex_array(
+#           vao_cube: mgl.VertexArray = self.ctx.vertex_array(
+                self.program_geometry,
+#               self.program_geometry,
+                [
+#               [
+                    (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+#                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+                    (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                ],
+#               ],
+            )
+#           )
+            self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data)))
+#           self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data)))
+
+        # Create Plane Batch
+        # Create Plane Batch
+        if plane_instance_data:
+#       if plane_instance_data:
+            # 1. Geometry
+            # 1. Geometry
+            point0: vec3f32 = (-0.5, 0.0, 0.5)
+#           point0: vec3f32 = (-0.5, 0.0, 0.5)
+            point1: vec3f32 = (0.5, 0.0, 0.5)
+#           point1: vec3f32 = (0.5, 0.0, 0.5)
+            point2: vec3f32 = (0.5, 0.0, -0.5)
+#           point2: vec3f32 = (0.5, 0.0, -0.5)
+            point3: vec3f32 = (-0.5, 0.0, -0.5)
+#           point3: vec3f32 = (-0.5, 0.0, -0.5)
+
+            geometries: list = []
+#           geometries: list = []
+            geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
+#           geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
+
+            vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
+#           vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
+
+            # 2. Instances
+            # 2. Instances
+            instance_bytes: bytes = np.concatenate(plane_instance_data).tobytes()
+#           instance_bytes: bytes = np.concatenate(plane_instance_data).tobytes()
+            vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+#           vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+
+            vao_plane: mgl.VertexArray = self.ctx.vertex_array(
+#           vao_plane: mgl.VertexArray = self.ctx.vertex_array(
+                self.program_geometry,
+#               self.program_geometry,
+                [
+#               [
+                    (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+#                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+                    (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                ],
+#               ],
+            )
+#           )
+            self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
+#           self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
 
         self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
@@ -283,18 +390,15 @@ class HybridRenderer(mglw.WindowConfig):
         self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 #       self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 
-        transform_model: rr.Matrix44 = rr.Matrix44.from_y_rotation(theta=time)
-#       transform_model: rr.Matrix44 = rr.Matrix44.from_y_rotation(theta=time)
-
-        self.program_geometry["uTransformModel"].write(transform_model.astype("f4").tobytes())
-#       self.program_geometry["uTransformModel"].write(transform_model.astype("f4").tobytes())
         self.program_geometry["uTransformView"].write(self.transform_view.astype("f4").tobytes())
 #       self.program_geometry["uTransformView"].write(self.transform_view.astype("f4").tobytes())
         self.program_geometry["uTransformProjection"].write(self.transform_projection.astype("f4").tobytes())
 #       self.program_geometry["uTransformProjection"].write(self.transform_projection.astype("f4").tobytes())
 
-        self.vao_geometry.render()
-#       self.vao_geometry.render()
+        for scene_batch in self.scene_batches:
+#       for scene_batch in self.scene_batches:
+            scene_batch.vao.render(instances=scene_batch.number_of_instances)
+#           scene_batch.vao.render(instances=scene_batch.number_of_instances)
 
         # 2. Compute Shade
         # 2. Compute Shade
