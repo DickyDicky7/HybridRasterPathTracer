@@ -665,19 +665,7 @@
         imageStore(textureAccum, pixelCoordinates, vec4(newAverage, 1.0));
 //      imageStore(textureAccum, pixelCoordinates, vec4(newAverage, 1.0));
 
-        vec3 finalColor = newAverage;
-//      vec3 finalColor = newAverage;
-
-        // ACES Tone Mapping
-        // ACES Tone Mapping
-        finalColor = reinhard(finalColor);
-//      finalColor = reinhard(finalColor);
-        // Gamma Correction
-        // Gamma Correction
-        finalColor = pow(finalColor, vec3(1.0/2.2));
-//      finalColor = pow(finalColor, vec3(1.0/2.2));
-
-        imageStore(textureOutput, pixelCoordinates, vec4(finalColor, 1.0));
-//      imageStore(textureOutput, pixelCoordinates, vec4(finalColor, 1.0));
+        // Note: Tone mapping and output moved to hybrid_denoise_cs.glsl
+        // Note: Tone mapping and output moved to hybrid_denoise_cs.glsl
     }
 //  }

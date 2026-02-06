@@ -153,6 +153,15 @@ class HybridRenderer(mglw.WindowConfig):
         self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 #       self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 
+        # Denoise Shader
+        # Denoise Shader
+        hybrid_denoise_cs_path: pl.Path = self.resource_dir / "hybrid_denoise_cs.glsl"
+#       hybrid_denoise_cs_path: pl.Path = self.resource_dir / "hybrid_denoise_cs.glsl"
+        hybrid_denoise_cs_code: str = resolve_includes(hybrid_denoise_cs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_denoise_cs_code: str = resolve_includes(hybrid_denoise_cs_path.read_text(encoding="utf-8"), self.resource_dir)
+        self.program_denoise: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_denoise_cs_code)
+#       self.program_denoise: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_denoise_cs_code)
+
         # -----------------------------
         # 4. Rasterization Shader (Renderer Pass)
         # 4. Rasterization Shader (Renderer Pass)
@@ -687,8 +696,26 @@ class HybridRenderer(mglw.WindowConfig):
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
-        # 3. Display Result to Screen
-        # 3. Display Result to Screen
+        # 3. Denoise
+        # 3. Denoise
+        # Bind textures for Denoise (Output is write target, Accum/Geo are read sources)
+        # Bind textures for Denoise (Output is write target, Accum/Geo are read sources)
+        self.texture_output.bind_to_image(0, read=False, write=True)
+#       self.texture_output.bind_to_image(0, read=False, write=True)
+        self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
+#       self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
+        self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
+#       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
+        self.texture_accum.bind_to_image(6, read=True, write=False)
+#       self.texture_accum.bind_to_image(6, read=True, write=False)
+        
+        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # 4. Display Result to Screen
+        # 4. Display Result to Screen
         self.ctx.screen.use()
 #       self.ctx.screen.use()
         self.ctx.clear()

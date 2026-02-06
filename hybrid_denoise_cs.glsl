@@ -1,0 +1,163 @@
+    #version 430
+//  #version 430
+    layout(local_size_x = 16, local_size_y = 16) in;
+//  layout(local_size_x = 16, local_size_y = 16) in;
+
+    layout(binding = 0, rgba32f) uniform image2D textureOutput;
+//  layout(binding = 0, rgba32f) uniform image2D textureOutput;
+    layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
+//  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
+    layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
+//  layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
+// Texture Accum is our input "Noisy" (but temporally stabilized) image
+// Texture Accum is our input "Noisy" (but temporally stabilized) image
+    layout(binding = 6, rgba32f) uniform image2D textureAccum;
+//  layout(binding = 6, rgba32f) uniform image2D textureAccum;
+
+// Configuration
+// Configuration
+    const int KERNEL_RADIUS = 2; // 5x5 Kernel
+//  const int KERNEL_RADIUS = 2; // 5x5 Kernel
+    const float SIGMA_SPATIAL = 1.0;
+//  const float SIGMA_SPATIAL = 1.0;
+    const float SIGMA_COLOR = 0.8;
+//  const float SIGMA_COLOR = 0.8;
+    const float SIGMA_NORMAL = 0.5;
+//  const float SIGMA_NORMAL = 0.5;
+    const float SIGMA_POSITION = 0.2;
+//  const float SIGMA_POSITION = 0.2;
+
+    vec3 reinhard(vec3 x) {
+//  vec3 reinhard(vec3 x) {
+        return x / (x + vec3(1.0));
+//      return x / (x + vec3(1.0));
+    }
+//  }
+
+    void main() {
+//  void main() {
+        ivec2 centerCoord = ivec2(gl_GlobalInvocationID.xy);
+//      ivec2 centerCoord = ivec2(gl_GlobalInvocationID.xy);
+        ivec2 size = imageSize(textureOutput);
+//      ivec2 size = imageSize(textureOutput);
+
+        if (centerCoord.x >= size.x || centerCoord.y >= size.y) {
+//      if (centerCoord.x >= size.x || centerCoord.y >= size.y) {
+            return;
+//          return;
+        }
+//      }
+
+        // Load Center Data
+        // Load Center Data
+        vec4 centerPos = imageLoad(textureGeometryGlobalPosition, centerCoord);
+//      vec4 centerPos = imageLoad(textureGeometryGlobalPosition, centerCoord);
+        vec4 centerNorm = imageLoad(textureGeometryGlobalNormal, centerCoord);
+//      vec4 centerNorm = imageLoad(textureGeometryGlobalNormal, centerCoord);
+        vec4 centerColor = imageLoad(textureAccum, centerCoord);
+//      vec4 centerColor = imageLoad(textureAccum, centerCoord);
+
+        // If background (sky), just pass through
+        // If background (sky), just pass through
+        if (centerPos.w == 0.0) {
+//      if (centerPos.w == 0.0) {
+            // Tone Map Sky
+            // Tone Map Sky
+            vec3 final = centerColor.rgb;
+//          vec3 final = centerColor.rgb;
+            final = reinhard(final);
+//          final = reinhard(final);
+            final = pow(final, vec3(1.0/2.2));
+//          final = pow(final, vec3(1.0/2.2));
+            imageStore(textureOutput, centerCoord, vec4(final, 1.0));
+//          imageStore(textureOutput, centerCoord, vec4(final, 1.0));
+            return;
+//          return;
+        }
+//      }
+
+        vec3 sumColor = vec3(0.0);
+//      vec3 sumColor = vec3(0.0);
+        float sumWeight = 0.0;
+//      float sumWeight = 0.0;
+
+        // Simple Bilateral Filter Loop
+        // Simple Bilateral Filter Loop
+        for (int y = -KERNEL_RADIUS; y <= KERNEL_RADIUS; y++) {
+//      for (int y = -KERNEL_RADIUS; y <= KERNEL_RADIUS; y++) {
+            for (int x = -KERNEL_RADIUS; x <= KERNEL_RADIUS; x++) {
+//          for (int x = -KERNEL_RADIUS; x <= KERNEL_RADIUS; x++) {
+                ivec2 tapCoord = centerCoord + ivec2(x, y);
+//              ivec2 tapCoord = centerCoord + ivec2(x, y);
+
+                // Clamp to screen
+                // Clamp to screen
+                tapCoord = clamp(tapCoord, ivec2(0), size - ivec2(1));
+//              tapCoord = clamp(tapCoord, ivec2(0), size - ivec2(1));
+
+                vec4 tapPos = imageLoad(textureGeometryGlobalPosition, tapCoord);
+//              vec4 tapPos = imageLoad(textureGeometryGlobalPosition, tapCoord);
+                vec4 tapNorm = imageLoad(textureGeometryGlobalNormal, tapCoord);
+//              vec4 tapNorm = imageLoad(textureGeometryGlobalNormal, tapCoord);
+                vec4 tapColor = imageLoad(textureAccum, tapCoord);
+//              vec4 tapColor = imageLoad(textureAccum, tapCoord);
+
+                // Calculate Weights
+                // Calculate Weights
+
+                // 1. Spatial Weight (Gaussian)
+                // 1. Spatial Weight (Gaussian)
+                float dist2 = float(x*x + y*y);
+//              float dist2 = float(x*x + y*y);
+                float wSpatial = exp(-(dist2) / (2.0 * SIGMA_SPATIAL * SIGMA_SPATIAL));
+//              float wSpatial = exp(-(dist2) / (2.0 * SIGMA_SPATIAL * SIGMA_SPATIAL));
+
+                // 2. Position Weight (Edge Stopping) - Distinguish objects
+                // 2. Position Weight (Edge Stopping) - Distinguish objects
+                float distPos = distance(centerPos.xyz, tapPos.xyz);
+//              float distPos = distance(centerPos.xyz, tapPos.xyz);
+                float wPos = exp(-(distPos * distPos) / (2.0 * SIGMA_POSITION * SIGMA_POSITION));
+//              float wPos = exp(-(distPos * distPos) / (2.0 * SIGMA_POSITION * SIGMA_POSITION));
+
+                // 3. Normal Weight (Edge Stopping) - Distinguish surfaces
+                // 3. Normal Weight (Edge Stopping) - Distinguish surfaces
+                float distNorm = 1.0 - max(0.0, dot(centerNorm.xyz, tapNorm.xyz));
+//              float distNorm = 1.0 - max(0.0, dot(centerNorm.xyz, tapNorm.xyz));
+                float wNorm = exp(-(distNorm * distNorm) / (2.0 * SIGMA_NORMAL * SIGMA_NORMAL));
+//              float wNorm = exp(-(distNorm * distNorm) / (2.0 * SIGMA_NORMAL * SIGMA_NORMAL));
+
+                // 4. Color Weight (Intensity Stopping) - Preserve texture detail
+                // 4. Color Weight (Intensity Stopping) - Preserve texture detail
+                float distColor = distance(centerColor.rgb, tapColor.rgb);
+//              float distColor = distance(centerColor.rgb, tapColor.rgb);
+                float wColor = exp(-(distColor * distColor) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
+//              float wColor = exp(-(distColor * distColor) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
+
+                // Combined Weight
+                // Combined Weight
+                float weight = wSpatial * wPos * wNorm * wColor;
+//              float weight = wSpatial * wPos * wNorm * wColor;
+
+                sumColor += tapColor.rgb * weight;
+//              sumColor += tapColor.rgb * weight;
+                sumWeight += weight;
+//              sumWeight += weight;
+            }
+//          }
+        }
+//      }
+
+        vec3 finalColor = sumColor / sumWeight;
+//      vec3 finalColor = sumColor / sumWeight;
+
+        // Final Tone Mapping (Moved from Shading CS)
+        // Final Tone Mapping (Moved from Shading CS)
+        finalColor = reinhard(finalColor);
+//      finalColor = reinhard(finalColor);
+        finalColor = pow(finalColor, vec3(1.0/2.2));
+//      finalColor = pow(finalColor, vec3(1.0/2.2));
+
+        imageStore(textureOutput, centerCoord, vec4(finalColor, 1.0));
+//      imageStore(textureOutput, centerCoord, vec4(finalColor, 1.0));
+    }
+//  }
