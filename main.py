@@ -4,33 +4,80 @@ import moderngl_window as mglw
 import moderngl_window as mglw
 import numpy as np
 import numpy as np
+import numpy.typing as npt
+import numpy.typing as npt
 import pyrr as rr
 import pyrr as rr
 import pathlib as pl
 import pathlib as pl
+import re
+import re
+import typing
+import typing
+import bvh
+import bvh
 
 type vec2f32 = tuple[float, float]
 type vec3f32 = tuple[float, float, float]
 type vec4f32 = tuple[float, float, float, float]
 
+def resolve_includes(source: str, base_path: pl.Path) -> str:
+    """
+    Recursively resolves #include "filename" directives in GLSL source code.
+    Recursively resolves #include "filename" directives in GLSL source code.
+    """
+    # Match: #include "filename" (handling optional whitespace)
+    # Match: #include "filename" (handling optional whitespace)
+    pattern: re.Pattern[str] = re.compile(pattern=r'^\s*#include\s+"([^"]+)"', flags=re.MULTILINE)
+#   pattern: re.Pattern[str] = re.compile(pattern=r'^\s*#include\s+"([^"]+)"', flags=re.MULTILINE)
+
+    def replace(match: re.Match[str]) -> str:
+#   def replace(match: re.Match[str]) -> str:
+        filename: str | typing.Any = match.group(1)
+#       filename: str | typing.Any = match.group(1)
+        included_path: pl.Path | typing.Any = base_path / filename
+#       included_path: pl.Path | typing.Any = base_path / filename
+
+        if not included_path.exists():
+#       if not included_path.exists():
+            # You might want to raise an error or just warn
+            # You might want to raise an error or just warn
+            print(f"Warning: Included file not found: {included_path}")
+#           print(f"Warning: Included file not found: {included_path}")
+            return f"// ERROR: Include not found {filename}\n"
+#           return f"// ERROR: Include not found {filename}\n"
+
+        included_content: str | typing.Any = included_path.read_text(encoding="utf-8")
+#       included_content: str | typing.Any = included_path.read_text(encoding="utf-8")
+        # Recursively resolve includes within the included file
+        # Recursively resolve includes within the included file
+        return resolve_includes(source=included_content, base_path=base_path)
+#       return resolve_includes(source=included_content, base_path=base_path)
+
+    return pattern.sub(replace, source)
+#   return pattern.sub(replace, source)
+
 class HybridRenderer(mglw.WindowConfig):
-    gl_version = (4, 3)
-#   gl_version = (4, 3)
-    title = "Hybrid Rendering: Rasterization + Path Tracing"
-#   title = "Hybrid Rendering: Rasterization + Path Tracing"
-    window_size = (800, 600)
-#   window_size = (800, 600)
-    aspect_ratio = window_size[0] / window_size[1]
-#   aspect_ratio = window_size[0] / window_size[1]
-    resizable = False
-#   resizable = False
-    resource_dir = pl.Path(__file__).parent.resolve(strict=False)
-#   resource_dir = pl.Path(__file__).parent.resolve(strict=False)
+    gl_version: tuple[int, int] = (4, 3)
+#   gl_version: tuple[int, int] = (4, 3)
+    title: str = "Hybrid Rendering: Rasterization + Path Tracing"
+#   title: str = "Hybrid Rendering: Rasterization + Path Tracing"
+    window_size: tuple[int, int] = (800, 600)
+#   window_size: tuple[int, int] = (800, 600)
+    aspect_ratio: float = window_size[0] / window_size[1]
+#   aspect_ratio: float = window_size[0] / window_size[1]
+    resizable: bool = False
+#   resizable: bool = False
+    resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
+#   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
 
     def __init__(self, **kwargs) -> None:
 #   def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 #       super().__init__(**kwargs)
+
+        self.frame_count: int = 0
+#       self.frame_count: int = 0
 
         # -----------------------------
         # 1. G-Buffer Setup
@@ -69,18 +116,23 @@ class HybridRenderer(mglw.WindowConfig):
         self.texture_output.filter = (mgl.NEAREST, mgl.NEAREST)
 #       self.texture_output.filter = (mgl.NEAREST, mgl.NEAREST)
 
+        self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+#       self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+        self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
+#       self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
+
         # -----------------------------
         # 2. Rasterization Shader (Geometry Pass)
         # 2. Rasterization Shader (Geometry Pass)
         # -----------------------------
         hybrid_geometry_vs_path: pl.Path = self.resource_dir / "hybrid_geometry_vs.glsl"
 #       hybrid_geometry_vs_path: pl.Path = self.resource_dir / "hybrid_geometry_vs.glsl"
-        hybrid_geometry_vs_code: str = hybrid_geometry_vs_path.read_text(encoding="utf-8")
-#       hybrid_geometry_vs_code: str = hybrid_geometry_vs_path.read_text(encoding="utf-8")
+        hybrid_geometry_vs_code: str = resolve_includes(hybrid_geometry_vs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_geometry_vs_code: str = resolve_includes(hybrid_geometry_vs_path.read_text(encoding="utf-8"), self.resource_dir)
         hybrid_geometry_fs_path: pl.Path = self.resource_dir / "hybrid_geometry_fs.glsl"
 #       hybrid_geometry_fs_path: pl.Path = self.resource_dir / "hybrid_geometry_fs.glsl"
-        hybrid_geometry_fs_code: str = hybrid_geometry_fs_path.read_text(encoding="utf-8")
-#       hybrid_geometry_fs_code: str = hybrid_geometry_fs_path.read_text(encoding="utf-8")
+        hybrid_geometry_fs_code: str = resolve_includes(hybrid_geometry_fs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_geometry_fs_code: str = resolve_includes(hybrid_geometry_fs_path.read_text(encoding="utf-8"), self.resource_dir)
         self.program_geometry: mgl.Program = self.ctx.program(
 #       self.program_geometry: mgl.Program = self.ctx.program(
               vertex_shader=hybrid_geometry_vs_code,
@@ -96,8 +148,8 @@ class HybridRenderer(mglw.WindowConfig):
         # -----------------------------
         hybrid_shading_cs_path: pl.Path = self.resource_dir / "hybrid_shading_cs.glsl"
 #       hybrid_shading_cs_path: pl.Path = self.resource_dir / "hybrid_shading_cs.glsl"
-        hybrid_shading_cs_code: str = hybrid_shading_cs_path.read_text(encoding="utf-8")
-#       hybrid_shading_cs_code: str = hybrid_shading_cs_path.read_text(encoding="utf-8")
+        hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir)
         self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 #       self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 
@@ -107,12 +159,12 @@ class HybridRenderer(mglw.WindowConfig):
         # -----------------------------
         hybrid_renderer_vs_path: pl.Path = self.resource_dir / "hybrid_renderer_vs.glsl"
 #       hybrid_renderer_vs_path: pl.Path = self.resource_dir / "hybrid_renderer_vs.glsl"
-        hybrid_renderer_vs_code: str = hybrid_renderer_vs_path.read_text(encoding="utf-8")
-#       hybrid_renderer_vs_code: str = hybrid_renderer_vs_path.read_text(encoding="utf-8")
+        hybrid_renderer_vs_code: str = resolve_includes(hybrid_renderer_vs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_renderer_vs_code: str = resolve_includes(hybrid_renderer_vs_path.read_text(encoding="utf-8"), self.resource_dir)
         hybrid_renderer_fs_path: pl.Path = self.resource_dir / "hybrid_renderer_fs.glsl"
 #       hybrid_renderer_fs_path: pl.Path = self.resource_dir / "hybrid_renderer_fs.glsl"
-        hybrid_renderer_fs_code: str = hybrid_renderer_fs_path.read_text(encoding="utf-8")
-#       hybrid_renderer_fs_code: str = hybrid_renderer_fs_path.read_text(encoding="utf-8")
+        hybrid_renderer_fs_code: str = resolve_includes(hybrid_renderer_fs_path.read_text(encoding="utf-8"), self.resource_dir)
+#       hybrid_renderer_fs_code: str = resolve_includes(hybrid_renderer_fs_path.read_text(encoding="utf-8"), self.resource_dir)
         self.program_renderer: mgl.Program = self.ctx.program(
 #       self.program_renderer: mgl.Program = self.ctx.program(
               vertex_shader=hybrid_renderer_vs_code,
@@ -123,8 +175,8 @@ class HybridRenderer(mglw.WindowConfig):
 #       )
         # Screen data (x, y, u, v)
         # Screen data (x, y, u, v)
-        screen_data = np.array([
-#       screen_data = np.array([
+        screen_data: npt.NDArray[np.float32] = np.array([
+#       screen_data: npt.NDArray[np.float32] = np.array([
             -1.0, -1.0,  0.0,  0.0,
 #           -1.0, -1.0,  0.0,  0.0,
              1.0, -1.0,  1.0,  0.0,
@@ -173,8 +225,8 @@ class HybridRenderer(mglw.WindowConfig):
 
         # Helper to create face data
         # Helper to create face data
-        def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32):
-#       def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32):
+        def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
+#       def face(vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
             return np.array([
 #           return np.array([
                 *vertex_a, *face_normal,
@@ -192,38 +244,38 @@ class HybridRenderer(mglw.WindowConfig):
             ], dtype="f4")
 #           ], dtype="f4")
 
-        cube_instance_data: list = []
-#       cube_instance_data: list = []
-        plane_instance_data: list = []
-#       plane_instance_data: list = []
+        cube_instance_data: list[npt.NDArray[np.float32]] = []
+#       cube_instance_data: list[npt.NDArray[np.float32]] = []
+        plane_instance_data: list[npt.NDArray[np.float32]] = []
+#       plane_instance_data: list[npt.NDArray[np.float32]] = []
 
         def add_cube(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
 #       def add_cube(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
-            matrix_translation = rr.Matrix44.from_translation(position)
-#           matrix_translation = rr.Matrix44.from_translation(position)
-            matrix_rotation = rr.Matrix44.from_eulers(rotation)
-#           matrix_rotation = rr.Matrix44.from_eulers(rotation)
-            matrix_scale = rr.Matrix44.from_scale(scale)
-#           matrix_scale = rr.Matrix44.from_scale(scale)
-            matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-#           matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-            data = np.concatenate([matrix.flatten(), color]).astype("f4")
-#           data = np.concatenate([matrix.flatten(), color]).astype("f4")
+            matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
+#           matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
+            matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
+#           matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
+            matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
+#           matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
+            matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+#           matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+            data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
+#           data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
             cube_instance_data.append(data)
 #           cube_instance_data.append(data)
 
         def add_plane(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
 #       def add_plane(position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
-            matrix_translation = rr.Matrix44.from_translation(position)
-#           matrix_translation = rr.Matrix44.from_translation(position)
-            matrix_rotation = rr.Matrix44.from_eulers(rotation)
-#           matrix_rotation = rr.Matrix44.from_eulers(rotation)
-            matrix_scale = rr.Matrix44.from_scale(scale)
-#           matrix_scale = rr.Matrix44.from_scale(scale)
-            matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-#           matrix = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-            data = np.concatenate([matrix.flatten(), color]).astype("f4")
-#           data = np.concatenate([matrix.flatten(), color]).astype("f4")
+            matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
+#           matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
+            matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
+#           matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
+            matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
+#           matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
+            matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+#           matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+            data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
+#           data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
             plane_instance_data.append(data)
 #           plane_instance_data.append(data)
 
@@ -236,6 +288,80 @@ class HybridRenderer(mglw.WindowConfig):
 
         add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
 #       add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
+
+        # -----------------------------
+        # 6. BVH Construction
+        # 6. BVH Construction
+        # -----------------------------
+        # We need to gather all world-space triangles to build the BVH.
+        # We need to gather all world-space triangles to build the BVH.
+        scene_triangles: list[npt.NDArray[np.float32]] = []
+#       scene_triangles: list[npt.NDArray[np.float32]] = []
+
+        # Helper to transform triangles
+        # Helper to transform triangles
+        def append_transformed_triangles(
+#       def append_transformed_triangles(
+            instance_data_list: list[npt.NDArray[np.float32]],
+#           instance_data_list: list[npt.NDArray[np.float32]],
+            base_triangles: list[npt.NDArray[np.float32]]
+#           base_triangles: list[npt.NDArray[np.float32]]
+        ) -> None:
+#       ) -> None:
+            for instance_data in instance_data_list:
+#           for instance_data in instance_data_list:
+                # Extract 4x4 model matrix (first 16 floats)
+                # Extract 4x4 model matrix (first 16 floats)
+                model_matrix_flat: npt.NDArray[np.float32] = instance_data[:16]
+#               model_matrix_flat: npt.NDArray[np.float32] = instance_data[:16]
+                model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
+#               model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
+                
+                # Transform each triangle
+                # Transform each triangle
+                for tri_verts in base_triangles:
+#               for tri_verts in base_triangles:
+                    # tri_verts shape: (3, 3) -> (v0, v1, v2)
+                    # tri_verts shape: (3, 3) -> (v0, v1, v2)
+                    # Convert to homogeneous coordinates (3, 4)
+                    # Convert to homogeneous coordinates (3, 4)
+                    ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
+#                   ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
+                    verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
+#                   verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
+                    
+                    # Apply transformation: v_world = M * v_local
+                    # Apply transformation: v_world = M * v_local
+                    # Since our vectors are rows in numpy (N, 4), we do v @ M.T
+                    # Since our vectors are rows in numpy (N, 4), we do v @ M.T
+                    # Or using pyrr logic, matrix multiplication.
+                    # Or using pyrr logic, matrix multiplication.
+                    # Note: moderngl/glsl matrices are column-major, but when flattened and read into numpy
+                    # Note: moderngl/glsl matrices are column-major, but when flattened and read into numpy
+                    # as (4,4), the layout depends on how it was constructed.
+                    # as (4,4), the layout depends on how it was constructed.
+                    # Pyrr matrices are row-major in memory if used as numpy arrays? No, usually column-major logic.
+                    # Pyrr matrices are row-major in memory if used as numpy arrays? No, usually column-major logic.
+                    # Let's rely on matrix multiplication `matrix @ vector` where vector is column.
+                    # Let's rely on matrix multiplication `matrix @ vector` where vector is column.
+                    
+                    # Transpose to (4, 3) to multiply: M @ V_T
+                    # Transpose to (4, 3) to multiply: M @ V_T
+                    transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
+#                   transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
+                    
+                    # Transpose back to (3, 4)
+                    # Transpose back to (3, 4)
+                    transformed_verts_h = transformed_verts_h.T
+#                   transformed_verts_h = transformed_verts_h.T
+                    
+                    # Extract xyz
+                    # Extract xyz
+                    transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
+#                   transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
+                    scene_triangles.append(transformed_tri.copy())
+#                   scene_triangles.append(transformed_tri.copy())
+
 
         # Create Cube Batch
         # Create Cube Batch
@@ -260,8 +386,60 @@ class HybridRenderer(mglw.WindowConfig):
             point7: vec3f32 = (-0.5, 0.5, -0.5)
 #           point7: vec3f32 = (-0.5, 0.5, -0.5)
 
-            geometries: list = []
-#           geometries: list = []
+            # Base Cube Triangles (Local Space)
+            # Base Cube Triangles (Local Space)
+            cube_base_triangles: list[npt.NDArray[np.float32]] = []
+#           cube_base_triangles: list[npt.NDArray[np.float32]] = []
+            
+            # Helper to just return the triangle vertices (3, 3)
+            # Helper to just return the triangle vertices (3, 3)
+            def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
+#           def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
+                return np.array([v0, v1, v2], dtype="f4")
+#               return np.array([v0, v1, v2], dtype="f4")
+
+            # Front
+            # Front
+            cube_base_triangles.append(get_tri_verts(point0, point1, point2))
+#           cube_base_triangles.append(get_tri_verts(point0, point1, point2))
+            cube_base_triangles.append(get_tri_verts(point0, point2, point3))
+#           cube_base_triangles.append(get_tri_verts(point0, point2, point3))
+            # Back
+            # Back
+            cube_base_triangles.append(get_tri_verts(point5, point4, point7))
+#           cube_base_triangles.append(get_tri_verts(point5, point4, point7))
+            cube_base_triangles.append(get_tri_verts(point5, point7, point6))
+#           cube_base_triangles.append(get_tri_verts(point5, point7, point6))
+            # Left
+            # Left
+            cube_base_triangles.append(get_tri_verts(point4, point0, point3))
+#           cube_base_triangles.append(get_tri_verts(point4, point0, point3))
+            cube_base_triangles.append(get_tri_verts(point4, point3, point7))
+#           cube_base_triangles.append(get_tri_verts(point4, point3, point7))
+            # Right
+            # Right
+            cube_base_triangles.append(get_tri_verts(point1, point5, point6))
+#           cube_base_triangles.append(get_tri_verts(point1, point5, point6))
+            cube_base_triangles.append(get_tri_verts(point1, point6, point2))
+#           cube_base_triangles.append(get_tri_verts(point1, point6, point2))
+            # Top
+            # Top
+            cube_base_triangles.append(get_tri_verts(point3, point2, point6))
+#           cube_base_triangles.append(get_tri_verts(point3, point2, point6))
+            cube_base_triangles.append(get_tri_verts(point3, point6, point7))
+#           cube_base_triangles.append(get_tri_verts(point3, point6, point7))
+            # Bottom
+            # Bottom
+            cube_base_triangles.append(get_tri_verts(point4, point5, point1))
+#           cube_base_triangles.append(get_tri_verts(point4, point5, point1))
+            cube_base_triangles.append(get_tri_verts(point4, point1, point0))
+#           cube_base_triangles.append(get_tri_verts(point4, point1, point0))
+
+            append_transformed_triangles(cube_instance_data, cube_base_triangles)
+#           append_transformed_triangles(cube_instance_data, cube_base_triangles)
+
+            geometries: list[npt.NDArray[np.float32]] = []
+#           geometries: list[npt.NDArray[np.float32]] = []
             geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
 #           geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
             geometries.append(face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=(0.0, 0.0, -1.0)))
@@ -317,8 +495,32 @@ class HybridRenderer(mglw.WindowConfig):
             point3: vec3f32 = (-0.5, 0.0, -0.5)
 #           point3: vec3f32 = (-0.5, 0.0, -0.5)
 
-            geometries: list = []
-#           geometries: list = []
+            # Base Plane Triangles
+            # Base Plane Triangles
+            plane_base_triangles: list[npt.NDArray[np.float32]] = []
+#           plane_base_triangles: list[npt.NDArray[np.float32]] = []
+            
+            # Helper duplicate
+            # Helper duplicate
+            def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
+#           def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
+                return np.array([v0, v1, v2], dtype="f4")
+#               return np.array([v0, v1, v2], dtype="f4")
+            
+            # Triangle 1
+            # Triangle 1
+            plane_base_triangles.append(get_tri_verts(point0, point1, point2))
+#           plane_base_triangles.append(get_tri_verts(point0, point1, point2))
+            # Triangle 2
+            # Triangle 2
+            plane_base_triangles.append(get_tri_verts(point0, point2, point3))
+#           plane_base_triangles.append(get_tri_verts(point0, point2, point3))
+            
+            append_transformed_triangles(plane_instance_data, plane_base_triangles)
+#           append_transformed_triangles(plane_instance_data, plane_base_triangles)
+
+            geometries: list[npt.NDArray[np.float32]] = []
+#           geometries: list[npt.NDArray[np.float32]] = []
             geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
 #           geometries.append(face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
 
@@ -349,6 +551,31 @@ class HybridRenderer(mglw.WindowConfig):
             self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
 #           self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
 
+        # Build BVH
+        # Build BVH
+        world_triangles: npt.NDArray[np.float32] = np.array(scene_triangles, dtype="f4")
+#       world_triangles: npt.NDArray[np.float32] = np.array(scene_triangles, dtype="f4")
+        self.bvh: bvh.LBVH = bvh.LBVH(world_triangles)
+#       self.bvh: bvh.LBVH = bvh.LBVH(world_triangles)
+        bvh_data: bytes = self.bvh.simple_build()
+#       bvh_data: bytes = self.bvh.simple_build()
+        
+        # Upload to SSBOs
+        # Upload to SSBOs
+        # 1. Nodes (already bytes)
+        # 1. Nodes (already bytes)
+        self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
+#       self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
+        
+        # 2. Triangles (flattened world space)
+        # 2. Triangles (flattened world space)
+        # We need to flatten (N, 3, 3) -> (N * 9) floats.
+        # We need to flatten (N, 3, 3) -> (N * 9) floats.
+        # Ensure it is float32
+        # Ensure it is float32
+        self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=world_triangles.flatten().tobytes())
+#       self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=world_triangles.flatten().tobytes())
+
         self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
 
@@ -356,8 +583,8 @@ class HybridRenderer(mglw.WindowConfig):
         # Camera
         self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
 #       self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
-        self.transform_projection = rr.Matrix44.perspective_projection(
-#       self.transform_projection = rr.Matrix44.perspective_projection(
+        self.transform_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
+#       self.transform_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
             fovy=60.0,
 #           fovy=60.0,
             aspect=self.aspect_ratio,
@@ -383,6 +610,9 @@ class HybridRenderer(mglw.WindowConfig):
 
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
+        self.frame_count += 1
+#       self.frame_count += 1
+
         # 1. Rasterize to G-Buffer
         # 1. Rasterize to G-Buffer
         self.gbuffer.use()
@@ -410,6 +640,16 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
         self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
 #       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+        
+        # Bind BVH buffers
+        # Bind BVH buffers
+        self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
+#       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
+        self.ssbo_triangles.bind_to_storage_buffer(binding=5)
+#       self.ssbo_triangles.bind_to_storage_buffer(binding=5)
+
+        self.texture_accum.bind_to_image(6, read=True, write=True)
+#       self.texture_accum.bind_to_image(6, read=True, write=True)
 
         # Update Uniforms
         # Update Uniforms
@@ -419,12 +659,22 @@ class HybridRenderer(mglw.WindowConfig):
 #           self.program_shading["uTime"] = time
         if "uPointLight001GlobalPosition" in self.program_shading:
 #       if "uPointLight001GlobalPosition" in self.program_shading:
-            self.program_shading["uPointLight001GlobalPosition"] = (5.0, 5.0, 5.0)
-#           self.program_shading["uPointLight001GlobalPosition"] = (5.0, 5.0, 5.0)
+            radius = 6.0
+#           radius = 6.0
+            x = np.cos(time) * radius
+#           x = np.cos(time) * radius
+            z = np.sin(time) * radius
+#           z = np.sin(time) * radius
+            self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
+#           self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
         if "uCameraGlobalPosition" in self.program_shading:
 #       if "uCameraGlobalPosition" in self.program_shading:
             self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_global_position)
 #           self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_global_position)
+        if "uFrameCount" in self.program_shading:
+#       if "uFrameCount" in self.program_shading:
+            self.program_shading["uFrameCount"] = self.frame_count
+#           self.program_shading["uFrameCount"] = self.frame_count
 
         # Dispatch
         # Dispatch

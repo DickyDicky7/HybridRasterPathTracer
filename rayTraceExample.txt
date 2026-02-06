@@ -1,0 +1,267 @@
+    fn _rayTraceMain(initialRay: Ray, maxDepth: u32, backgroundType: u32, rng: ptr<function, RNG>) -> TracingResult
+//  fn _rayTraceMain(initialRay: Ray, maxDepth: u32, backgroundType: u32, rng: ptr<function, RNG>) -> TracingResult
+{
+        var tracingResult: TracingResult;
+//      var tracingResult: TracingResult;
+        var accumulatedColor: vec3<f32> = vec3<f32>(0.00, 0.00, 0.00); // @radiance@
+//      var accumulatedColor: vec3<f32> = vec3<f32>(0.00, 0.00, 0.00); // @radiance@
+        var attenuation     : vec3<f32> = vec3<f32>(1.00, 1.00, 1.00); // throughput
+//      var attenuation     : vec3<f32> = vec3<f32>(1.00, 1.00, 1.00); // throughput
+        var currentRay: Ray = initialRay;
+//      var currentRay: Ray = initialRay;
+        var pixelNormal: vec3<f32>;
+//      var pixelNormal: vec3<f32>;
+/* --- FOG --- */
+//         var firstMinDistance: f32 = 1.0e+4;
+// //      var firstMinDistance: f32 = 1.0e+4;
+/* --- FOG --- */
+
+
+        for (var depth: u32 = 0u; depth < maxDepth; depth++)
+//      for (var depth: u32 = 0u; depth < maxDepth; depth++)
+        {
+            let rayHitResultClosestHit: RayHitResult = _rayHitLBVH_ClosestHit(currentRay, Interval(1.0e-4, 1.0e+4));
+//          let rayHitResultClosestHit: RayHitResult = _rayHitLBVH_ClosestHit(currentRay, Interval(1.0e-4, 1.0e+4));
+            let rayHitResult: RayHitResult = _finalizeFromRayHitResultClosestHit(currentRay, rayHitResultClosestHit);
+//          let rayHitResult: RayHitResult = _finalizeFromRayHitResultClosestHit(currentRay, rayHitResultClosestHit);
+
+
+            pixelNormal = select(pixelNormal, select(vec3<f32>(0.0, 1.0, 0.0), rayHitResult.hittedSideNormal, rayHitResult.isHitted), depth == 0u);
+//          pixelNormal = select(pixelNormal, select(vec3<f32>(0.0, 1.0, 0.0), rayHitResult.hittedSideNormal, rayHitResult.isHitted), depth == 0u);
+/* --- FOG --- */
+//             firstMinDistance = select(firstMinDistance, select(firstMinDistance, rayHitResult.minDistance, rayHitResult.isHitted), depth == 0u);
+// //          firstMinDistance = select(firstMinDistance, select(firstMinDistance, rayHitResult.minDistance, rayHitResult.isHitted), depth == 0u);
+/* --- FOG --- */
+
+
+            if (!rayHitResult.isHitted)
+//          if (!rayHitResult.isHitted)
+            {
+                var backgroundColor: vec3<f32>;
+//              var backgroundColor: vec3<f32>;
+                switch (backgroundType)
+//              switch (backgroundType)
+                {
+                    case BACKGROUND_TYPE_SKY_BOX_BLUE:
+//                  case BACKGROUND_TYPE_SKY_BOX_BLUE:
+                    {
+                        let normalizedRayDirection: vec3<f32> = normalize(currentRay.direction);
+//                      let normalizedRayDirection: vec3<f32> = normalize(currentRay.direction);
+                        let ratio: f32 = 0.5 * (normalizedRayDirection.y + 1.0);
+//                      let ratio: f32 = 0.5 * (normalizedRayDirection.y + 1.0);
+                        backgroundColor = mix(vec3<f32>(1.00, 1.00, 1.00), vec3<f32>(0.50, 0.70, 1.00), ratio);
+//                      backgroundColor = mix(vec3<f32>(1.00, 1.00, 1.00), vec3<f32>(0.50, 0.70, 1.00), ratio);
+                    }
+
+
+                    case BACKGROUND_TYPE_SKY_BOX_DARK:
+//                  case BACKGROUND_TYPE_SKY_BOX_DARK:
+                    {
+                        backgroundColor = vec3<f32>(0.00, 0.00, 0.00);
+//                      backgroundColor = vec3<f32>(0.00, 0.00, 0.00);
+                    }
+
+
+                    case BACKGROUND_TYPE_SKY_BOX_HDRI:
+//                  case BACKGROUND_TYPE_SKY_BOX_HDRI:
+                    {
+                        let theta: f32 = acos (-currentRay.direction.y); // latitude
+//                      let theta: f32 = acos (-currentRay.direction.y); // latitude
+                        let phi  : f32 = atan2(-currentRay.direction.z, currentRay.direction.x) + PI; // longitude
+//                      let phi  : f32 = atan2(-currentRay.direction.z, currentRay.direction.x) + PI; // longitude
+
+                        var u: f32 = phi   / (2.0 * PI);
+//                      var u: f32 = phi   / (2.0 * PI);
+                        var v: f32 = theta /        PI ;
+//                      var v: f32 = theta /        PI ;
+
+                        u = clamp(u, 0.0, 1.0);
+//                      u = clamp(u, 0.0, 1.0);
+                        v = clamp(v, 0.0, 1.0);
+//                      v = clamp(v, 0.0, 1.0);
+
+
+                        // Tonemapping Solution
+                        // Tonemapping Solution
+                        /*
+                        backgroundColor = _tonemapACES(textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb);
+//                      backgroundColor = _tonemapACES(textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb);
+                        */
+
+
+                        // Radiance Clamping Solution
+                        // Radiance Clamping Solution
+
+                        let rawBackgroundColor: vec3<f32> = textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb;
+//                      let rawBackgroundColor: vec3<f32> = textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb;
+                        let radianceClampValue: f32 = 10.0; // Tune this value to control fireflies
+//                      let radianceClampValue: f32 = 10.0; // Tune this value to control fireflies
+                        backgroundColor = min(rawBackgroundColor, vec3<f32>(radianceClampValue));
+//                      backgroundColor = min(rawBackgroundColor, vec3<f32>(radianceClampValue));
+
+
+
+                        // No Solution
+                        // No Solution
+                        /*
+                        backgroundColor = textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb;
+//                      backgroundColor = textureSampleLevel(hdriTexture, hdriSampler, vec2<f32>(u, v), 0.0).rgb;
+                        */
+                    }
+
+
+                    default:
+//                  default:
+                    {
+                        backgroundColor = vec3<f32>(1.00, 1.00, 1.00);
+//                      backgroundColor = vec3<f32>(1.00, 1.00, 1.00);
+                    }
+                }
+
+                accumulatedColor += attenuation * backgroundColor;
+//              accumulatedColor += attenuation * backgroundColor;
+                break;
+//              break;
+            }
+
+
+            let materialLightScatteringResult: MaterialLightScatteringResult = _rayScatter(currentRay, rayHitResult, rng);
+//          let materialLightScatteringResult: MaterialLightScatteringResult = _rayScatter(currentRay, rayHitResult, rng);
+
+            accumulatedColor += attenuation * materialLightScatteringResult.emission;
+//          accumulatedColor += attenuation * materialLightScatteringResult.emission;
+
+
+            // --- Multiple Importance Sampling: Next Event Estimation ---
+            // --- Multiple Importance Sampling: Next Event Estimation ---
+            // Explicitly sample the sun for surfaces to add its direct light contribution.
+            // Explicitly sample the sun for surfaces to add its direct light contribution.
+
+            // Hard Shadow (Point Light) Solution
+            // Hard Shadow (Point Light) Solution
+            /*
+            let sunDirection: vec3<f32> = vec3<f32>(0.0, 0.707, 0.5);
+//          let sunDirection: vec3<f32> = vec3<f32>(0.0, 0.707, 0.5);
+            let sunColor: vec3<f32> = vec3<f32>(2.0, 2.0, 2.0);
+//          let sunColor: vec3<f32> = vec3<f32>(2.0, 2.0, 2.0);
+
+            let shadowRay: Ray = _makeRay(rayHitResult.at, sunDirection);
+//          let shadowRay: Ray = _makeRay(rayHitResult.at, sunDirection);
+
+            // Hard Shadow (AnyHit Optimization)
+//          // Hard Shadow (AnyHit Optimization)
+            if (!_rayHitLBVH_AnyHit(shadowRay, Interval(1.0e-4, 1.0e+4)))
+//          if (!_rayHitLBVH_AnyHit(shadowRay, Interval(1.0e-4, 1.0e+4)))
+            {
+                // The path to the sun is clear. Add direct light.
+                // The path to the sun is clear. Add direct light.
+                let cosTheta: f32 = max(0.0, dot(rayHitResult.hittedSideNormal, sunDirection));
+//              let cosTheta: f32 = max(0.0, dot(rayHitResult.hittedSideNormal, sunDirection));
+
+                // Attenuation in scatter result is the albedo/color.
+                // Attenuation in scatter result is the albedo/color.
+                let albedo: vec3<f32> = materialLightScatteringResult.attenuation;
+//              let albedo: vec3<f32> = materialLightScatteringResult.attenuation;
+
+                let directLight: vec3<f32> = albedo * sunColor * cosTheta / PI;
+//              let directLight: vec3<f32> = albedo * sunColor * cosTheta / PI;
+
+                accumulatedColor += attenuation * directLight;
+//              accumulatedColor += attenuation * directLight;
+            }
+            */
+
+
+            // Soft Shadow (Area Light) Solution
+            // Soft Shadow (Area Light) Solution
+
+            let sunDirectionCenter: vec3<f32> = vec3<f32>(0.0, 0.707, 0.707);
+//          let sunDirectionCenter: vec3<f32> = vec3<f32>(0.0, 0.707, 0.707);
+            let sunColor: vec3<f32> = vec3<f32>(2.0, 2.0, 2.0);
+//          let sunColor: vec3<f32> = vec3<f32>(2.0, 2.0, 2.0);
+            let sunRadius: f32 = 0.025; // Increase for softer shadows. Decrease for harder shadows.
+//          let sunRadius: f32 = 0.025; // Increase for softer shadows. Decrease for harder shadows.
+
+            // Jitter the sun direction to simulate an area light and get soft shadows.
+            // Jitter the sun direction to simulate an area light and get soft shadows.
+            let jitteredSunDirection: vec3<f32> = normalize(sunDirectionCenter + _generateRandomUnitVector(rng) * sunRadius);
+//          let jitteredSunDirection: vec3<f32> = normalize(sunDirectionCenter + _generateRandomUnitVector(rng) * sunRadius);
+
+            let shadowRay: Ray = _makeRay(rayHitResult.at, jitteredSunDirection);
+//          let shadowRay: Ray = _makeRay(rayHitResult.at, jitteredSunDirection);
+
+            // Soft Shadow (AnyHit Optimization)
+//          // Soft Shadow (AnyHit Optimization)
+            if (!_rayHitLBVH_AnyHit(shadowRay, Interval(1.0e-4, 1.0e+4)))
+//          if (!_rayHitLBVH_AnyHit(shadowRay, Interval(1.0e-4, 1.0e+4)))
+            {
+                // The path to the sun is clear. Add direct light.
+                // The path to the sun is clear. Add direct light.
+                let cosTheta: f32 = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDirection));
+//              let cosTheta: f32 = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDirection));
+
+                // Attenuation in scatter result is the albedo/color.
+                // Attenuation in scatter result is the albedo/color.
+                let albedo: vec3<f32> = materialLightScatteringResult.attenuation;
+//              let albedo: vec3<f32> = materialLightScatteringResult.attenuation;
+
+                let directLight: vec3<f32> = albedo * sunColor * cosTheta / PI;
+//              let directLight: vec3<f32> = albedo * sunColor * cosTheta / PI;
+
+                accumulatedColor += attenuation * directLight;
+//              accumulatedColor += attenuation * directLight;
+            }
+
+
+
+
+            if (!materialLightScatteringResult.isScattered)
+//          if (!materialLightScatteringResult.isScattered)
+            {
+                break;
+//              break;
+            }
+
+            attenuation *= materialLightScatteringResult.attenuation;
+//          attenuation *= materialLightScatteringResult.attenuation;
+
+
+            // Russian Roulette Solution
+            // Russian Roulette Solution
+
+            let minBouncesForRR: u32 = 4u;
+//          let minBouncesForRR: u32 = 4u;
+            if (depth >= minBouncesForRR)
+//          if (depth >= minBouncesForRR)
+            {
+                let p: f32 = max(attenuation.r, max(attenuation.g, attenuation.b));
+//              let p: f32 = max(attenuation.r, max(attenuation.g, attenuation.b));
+                if (_pcg32Next(rng) > p)
+//              if (_pcg32Next(rng) > p)
+                {
+                    break; // Terminate the ray
+//                  break; // Terminate the ray
+                }
+                attenuation *= 1.0 / p; // Boost the survivor
+//              attenuation *= 1.0 / p; // Boost the survivor
+            }
+
+
+
+            currentRay   = materialLightScatteringResult.scatteredRay;
+//          currentRay   = materialLightScatteringResult.scatteredRay;
+        }
+
+/* --- FOG --- */
+//         accumulatedColor = _applyFogHeight(accumulatedColor, firstMinDistance, initialRay, FOG_HEIGHT_COLOR, FOG_HEIGHT_DENSITY, FOG_HEIGHT_FALLOFF);
+// //      accumulatedColor = _applyFogHeight(accumulatedColor, firstMinDistance, initialRay, FOG_HEIGHT_COLOR, FOG_HEIGHT_DENSITY, FOG_HEIGHT_FALLOFF);
+/* --- FOG --- */
+
+        tracingResult.pixelOutput = vec4<f32>(accumulatedColor, 1.0);
+//      tracingResult.pixelOutput = vec4<f32>(accumulatedColor, 1.0);
+        tracingResult.pixelNormal = vec4<f32>((pixelNormal + 1.0) * 0.5, 1.0);
+//      tracingResult.pixelNormal = vec4<f32>((pixelNormal + 1.0) * 0.5, 1.0);
+
+        return tracingResult;
+//      return tracingResult;
+}
