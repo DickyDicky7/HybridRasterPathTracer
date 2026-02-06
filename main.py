@@ -121,6 +121,11 @@ class HybridRenderer(mglw.WindowConfig):
         self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
 #       self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
 
+        self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+#       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+        self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
+#       self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
+
         # -----------------------------
         # 2. Rasterization Shader (Geometry Pass)
         # 2. Rasterization Shader (Geometry Pass)
@@ -325,7 +330,7 @@ class HybridRenderer(mglw.WindowConfig):
 #               model_matrix_flat: npt.NDArray[np.float32] = instance_data[:16]
                 model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
 #               model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
-                
+
                 # Transform each triangle
                 # Transform each triangle
                 for tri_verts in base_triangles:
@@ -338,7 +343,7 @@ class HybridRenderer(mglw.WindowConfig):
 #                   ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
                     verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
 #                   verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
-                    
+
                     # Apply transformation: v_world = M * v_local
                     # Apply transformation: v_world = M * v_local
                     # Since our vectors are rows in numpy (N, 4), we do v @ M.T
@@ -353,17 +358,17 @@ class HybridRenderer(mglw.WindowConfig):
                     # Pyrr matrices are row-major in memory if used as numpy arrays? No, usually column-major logic.
                     # Let's rely on matrix multiplication `matrix @ vector` where vector is column.
                     # Let's rely on matrix multiplication `matrix @ vector` where vector is column.
-                    
+
                     # Transpose to (4, 3) to multiply: M @ V_T
                     # Transpose to (4, 3) to multiply: M @ V_T
                     transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
 #                   transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
-                    
+
                     # Transpose back to (3, 4)
                     # Transpose back to (3, 4)
                     transformed_verts_h = transformed_verts_h.T
 #                   transformed_verts_h = transformed_verts_h.T
-                    
+
                     # Extract xyz
                     # Extract xyz
                     transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
@@ -399,7 +404,7 @@ class HybridRenderer(mglw.WindowConfig):
             # Base Cube Triangles (Local Space)
             cube_base_triangles: list[npt.NDArray[np.float32]] = []
 #           cube_base_triangles: list[npt.NDArray[np.float32]] = []
-            
+
             # Helper to just return the triangle vertices (3, 3)
             # Helper to just return the triangle vertices (3, 3)
             def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
@@ -508,14 +513,14 @@ class HybridRenderer(mglw.WindowConfig):
             # Base Plane Triangles
             plane_base_triangles: list[npt.NDArray[np.float32]] = []
 #           plane_base_triangles: list[npt.NDArray[np.float32]] = []
-            
+
             # Helper duplicate
             # Helper duplicate
             def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
 #           def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
                 return np.array([v0, v1, v2], dtype="f4")
 #               return np.array([v0, v1, v2], dtype="f4")
-            
+
             # Triangle 1
             # Triangle 1
             plane_base_triangles.append(get_tri_verts(point0, point1, point2))
@@ -524,7 +529,7 @@ class HybridRenderer(mglw.WindowConfig):
             # Triangle 2
             plane_base_triangles.append(get_tri_verts(point0, point2, point3))
 #           plane_base_triangles.append(get_tri_verts(point0, point2, point3))
-            
+
             append_transformed_triangles(plane_instance_data, plane_base_triangles)
 #           append_transformed_triangles(plane_instance_data, plane_base_triangles)
 
@@ -568,14 +573,14 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.bvh: bvh.LBVH = bvh.LBVH(world_triangles)
         bvh_data: bytes = self.bvh.simple_build()
 #       bvh_data: bytes = self.bvh.simple_build()
-        
+
         # Upload to SSBOs
         # Upload to SSBOs
         # 1. Nodes (already bytes)
         # 1. Nodes (already bytes)
         self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
 #       self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
-        
+
         # 2. Triangles (flattened world space)
         # 2. Triangles (flattened world space)
         # We need to flatten (N, 3, 3) -> (N * 9) floats.
@@ -649,7 +654,7 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
         self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
 #       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-        
+
         # Bind BVH buffers
         # Bind BVH buffers
         self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
@@ -696,19 +701,72 @@ class HybridRenderer(mglw.WindowConfig):
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
-        # 3. Denoise
-        # 3. Denoise
-        # Bind textures for Denoise (Output is write target, Accum/Geo are read sources)
-        # Bind textures for Denoise (Output is write target, Accum/Geo are read sources)
-        self.texture_output.bind_to_image(0, read=False, write=True)
-#       self.texture_output.bind_to_image(0, read=False, write=True)
+        # 3. Denoise (Multi-Pass A-Trous)
+        # 3. Denoise (Multi-Pass A-Trous)
+
+        # Pass 1: Accum -> Ping (Step 1)
+        # Pass 1: Accum -> Ping (Step 1)
+        self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
+#       self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
+        self.texture_accum.bind_to_image(5, read=True, write=False)  # Input
+#       self.texture_accum.bind_to_image(5, read=True, write=False)  # Input
         self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
 #       self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
         self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
 #       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-        self.texture_accum.bind_to_image(6, read=True, write=False)
-#       self.texture_accum.bind_to_image(6, read=True, write=False)
-        
+
+        self.program_denoise["uStepSize"] = 1
+#       self.program_denoise["uStepSize"] = 1
+        self.program_denoise["uFinalPass"] = 0
+#       self.program_denoise["uFinalPass"] = 0
+        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # Pass 2: Ping -> Output (Step 2)
+        # Pass 2: Ping -> Output (Step 2)
+        self.texture_output.bind_to_image(0, read=False, write=True) # Output
+#       self.texture_output.bind_to_image(0, read=False, write=True) # Output
+        self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
+#       self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
+
+        self.program_denoise["uStepSize"] = 2
+#       self.program_denoise["uStepSize"] = 2
+        self.program_denoise["uFinalPass"] = 0
+#       self.program_denoise["uFinalPass"] = 0
+        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # Pass 3: Output -> Ping (Step 4)
+        # Pass 3: Output -> Ping (Step 4)
+        self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
+#       self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
+        self.texture_output.bind_to_image(5, read=True, write=False) # Input
+#       self.texture_output.bind_to_image(5, read=True, write=False) # Input
+
+        self.program_denoise["uStepSize"] = 4
+#       self.program_denoise["uStepSize"] = 4
+        self.program_denoise["uFinalPass"] = 0
+#       self.program_denoise["uFinalPass"] = 0
+        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # Pass 4: Ping -> Output (Step 8, Final Tone Map)
+        # Pass 4: Ping -> Output (Step 8, Final Tone Map)
+        self.texture_output.bind_to_image(0, read=False, write=True) # Output
+#       self.texture_output.bind_to_image(0, read=False, write=True) # Output
+        self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
+#       self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
+
+        self.program_denoise["uStepSize"] = 8
+#       self.program_denoise["uStepSize"] = 8
+        self.program_denoise["uFinalPass"] = 1
+#       self.program_denoise["uFinalPass"] = 1
         self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
