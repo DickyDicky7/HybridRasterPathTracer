@@ -225,12 +225,14 @@ class HybridRenderer(mglw.WindowConfig):
 
         class SceneBatch:
 #       class SceneBatch:
-            def __init__(self, vao: mgl.VertexArray, number_of_instances: int) -> None:
-#           def __init__(self, vao: mgl.VertexArray, number_of_instances: int) -> None:
+            def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
+#           def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
                 self.vao: mgl.VertexArray = vao
 #               self.vao: mgl.VertexArray = vao
                 self.number_of_instances: int = number_of_instances
 #               self.number_of_instances: int = number_of_instances
+                self.triangle_count_per_instance: int = triangle_count_per_instance
+#               self.triangle_count_per_instance: int = triangle_count_per_instance
                 pass
 #               pass
 
@@ -300,8 +302,8 @@ class HybridRenderer(mglw.WindowConfig):
         add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
 #       add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
 
-        add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
-#       add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.5, 0.5, 0.5)) # Gray Plane
+        add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.3, 0.3, 0.3)) # Gray Plane
+#       add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.3, 0.3, 0.3)) # Gray Plane
 
         # -----------------------------
         # 6. BVH Construction
@@ -311,6 +313,8 @@ class HybridRenderer(mglw.WindowConfig):
         # We need to gather all world-space triangles to build the BVH.
         scene_triangles: list[npt.NDArray[np.float32]] = []
 #       scene_triangles: list[npt.NDArray[np.float32]] = []
+        scene_materials: list[npt.NDArray[np.float32]] = []
+#       scene_materials: list[npt.NDArray[np.float32]] = []
 
         # Helper to transform triangles
         # Helper to transform triangles
@@ -330,6 +334,44 @@ class HybridRenderer(mglw.WindowConfig):
 #               model_matrix_flat: npt.NDArray[np.float32] = instance_data[:16]
                 model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
 #               model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
+
+                # Extract Color
+                # Extract Color
+                color: npt.NDArray[np.float32] = instance_data[16:19]
+#               color: npt.NDArray[np.float32] = instance_data[16:19]
+                
+                # Material Parameters (Default Principled)
+                # Material Parameters (Default Principled)
+                # struct Material {
+                # struct Material {
+                #     vec4 albedo; // .w unused
+                #     vec4 albedo; // .w unused
+                #     float roughness;
+                #     float roughness;
+                #     float metallic;
+                #     float metallic;
+                #     float transmission;
+                #     float transmission;
+                #     float ior;
+                #     float ior;
+                # };
+                # };
+                # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
+#               # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
+                material_data = np.array([
+#               material_data = np.array([
+                    color[0], color[1], color[2], 0.0, # Albedo + Padding
+#                   color[0], color[1], color[2], 0.0, # Albedo + Padding
+                    0.0,                               # Roughness
+#                   0.0,                               # Roughness
+                    1.0,                               # Metallic
+#                   1.0,                               # Metallic
+                    0.0,                               # Transmission
+#                   0.0,                               # Transmission
+                    1.45                               # IOR
+#                   1.45                               # IOR
+                ], dtype="f4")
+#               ], dtype="f4")
 
                 # Transform each triangle
                 # Transform each triangle
@@ -375,6 +417,8 @@ class HybridRenderer(mglw.WindowConfig):
 #                   transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
                     scene_triangles.append(transformed_tri.copy())
 #                   scene_triangles.append(transformed_tri.copy())
+                    scene_materials.append(material_data)
+#                   scene_materials.append(material_data)
 
 
         # Create Cube Batch
@@ -491,8 +535,8 @@ class HybridRenderer(mglw.WindowConfig):
 #               ],
             )
 #           )
-            self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data)))
-#           self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data)))
+            self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data), triangle_count_per_instance=12))
+#           self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(cube_instance_data), triangle_count_per_instance=12))
 
         # Create Plane Batch
         # Create Plane Batch
@@ -562,8 +606,8 @@ class HybridRenderer(mglw.WindowConfig):
 #               ],
             )
 #           )
-            self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
-#           self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data)))
+            self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data), triangle_count_per_instance=2))
+#           self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(plane_instance_data), triangle_count_per_instance=2))
 
         # Build BVH
         # Build BVH
@@ -589,6 +633,15 @@ class HybridRenderer(mglw.WindowConfig):
         # Ensure it is float32
         self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=world_triangles.flatten().tobytes())
 #       self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=world_triangles.flatten().tobytes())
+
+        # 3. Materials (Albedos)
+        # 3. Materials (Albedos)
+        world_materials: npt.NDArray[np.float32] = np.array(scene_materials, dtype="f4")
+#       world_materials: npt.NDArray[np.float32] = np.array(scene_materials, dtype="f4")
+        # Flatten? It is list of (8,) arrays, so (N, 8). Flatten to N*8 floats.
+        # Flatten? It is list of (8,) arrays, so (N, 8). Flatten to N*8 floats.
+        self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=world_materials.flatten().tobytes())
+#       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=world_materials.flatten().tobytes())
 
         self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
@@ -639,10 +692,22 @@ class HybridRenderer(mglw.WindowConfig):
         self.program_geometry["uTransformProjection"].write(self.transform_projection.astype("f4").tobytes())
 #       self.program_geometry["uTransformProjection"].write(self.transform_projection.astype("f4").tobytes())
 
+        current_tri_offset = 0
+#       current_tri_offset = 0
         for scene_batch in self.scene_batches:
 #       for scene_batch in self.scene_batches:
+            if "uBaseTriangleIndexOffset" in self.program_geometry:
+#           if "uBaseTriangleIndexOffset" in self.program_geometry:
+                self.program_geometry["uBaseTriangleIndexOffset"] = current_tri_offset
+#               self.program_geometry["uBaseTriangleIndexOffset"] = current_tri_offset
+            if "uTriangleCountPerInstance" in self.program_geometry:
+#           if "uTriangleCountPerInstance" in self.program_geometry:
+                self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
+#               self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
             scene_batch.vao.render(instances=scene_batch.number_of_instances)
 #           scene_batch.vao.render(instances=scene_batch.number_of_instances)
+            current_tri_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
+#           current_tri_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
 
         # 2. Compute Shade
         # 2. Compute Shade
@@ -661,6 +726,8 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
         self.ssbo_triangles.bind_to_storage_buffer(binding=5)
 #       self.ssbo_triangles.bind_to_storage_buffer(binding=5)
+        self.ssbo_materials.bind_to_storage_buffer(binding=7)
+#       self.ssbo_materials.bind_to_storage_buffer(binding=7)
 
         self.texture_accum.bind_to_image(6, read=True, write=True)
 #       self.texture_accum.bind_to_image(6, read=True, write=True)

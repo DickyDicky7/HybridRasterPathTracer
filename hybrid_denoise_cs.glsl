@@ -71,8 +71,10 @@
 //          if (uFinalPass == 1) {
                 final = reinhard(final);
 //              final = reinhard(final);
+                /*
                 final = pow(final, vec3(1.0/2.2));
 //              final = pow(final, vec3(1.0/2.2));
+                */
             }
 //          }
 
@@ -169,8 +171,10 @@
             // Final Tone Mapping (Moved from Shading CS)
             finalColor = reinhard(finalColor);
 //          finalColor = reinhard(finalColor);
+            /*
             finalColor = pow(finalColor, vec3(1.0/2.2));
 //          finalColor = pow(finalColor, vec3(1.0/2.2));
+            */
         }
 //      }
 

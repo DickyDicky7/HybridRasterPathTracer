@@ -16,6 +16,8 @@
 //  layout(location = 1) out vec3 outVertexGlobalNormal;
     layout(location = 2) out vec3 outInstanceAlbedo;
 //  layout(location = 2) out vec3 outInstanceAlbedo;
+    flat out int vInstanceID;
+//  flat out int vInstanceID;
 
     uniform mat4 uTransformView;
 //  uniform mat4 uTransformView;
@@ -24,6 +26,8 @@
 
     void main() {
 //  void main() {
+        vInstanceID = gl_InstanceID;
+//      vInstanceID = gl_InstanceID;
         vec4 vertexGlobalPosition = inInstanceTransformModel * vec4(inVertexLocalPosition, 1.0);
 //      vec4 vertexGlobalPosition = inInstanceTransformModel * vec4(inVertexLocalPosition, 1.0);
         outVertexGlobalPosition = vertexGlobalPosition.xyz;
