@@ -650,8 +650,11 @@ class HybridRenderer(mglw.WindowConfig):
         # Camera
         self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
 #       self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
-        self.transform_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
-#       self.transform_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
+
+        # Base Projection (No Jitter)
+        # Base Projection (No Jitter)
+        self.base_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
+#       self.base_projection: rr.Matrix44 = rr.Matrix44.perspective_projection(
             fovy=60.0,
 #           fovy=60.0,
             aspect=self.aspect_ratio,
@@ -662,6 +665,9 @@ class HybridRenderer(mglw.WindowConfig):
 #           far=100.0,
         )
 #       )
+        self.transform_projection = self.base_projection # Initial
+#       self.transform_projection = self.base_projection # Initial
+
         self.transform_view: rr.Matrix44 = rr.Matrix44.look_at(
 #       self.transform_view: rr.Matrix44 = rr.Matrix44.look_at(
             eye=self.camera_global_position,
@@ -675,10 +681,90 @@ class HybridRenderer(mglw.WindowConfig):
         pass
 #       pass
 
+    def get_halton_jitter(self, index: int, base: int) -> float:
+#   def get_halton_jitter(self, index: int, base: int) -> float:
+        result: float = 0.0
+#       result: float = 0.0
+        f: float = 1.0 / base
+#       f: float = 1.0 / base
+        i: int = index
+#       i: int = index
+        while i > 0:
+#       while i > 0:
+            result += f * (i % base)
+#           result += f * (i % base)
+            i //= base
+#           i //= base
+            f /= base
+#           f /= base
+        return result
+#       return result
+
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
         self.frame_count += 1
 #       self.frame_count += 1
+
+        # TAA Jitter
+        # TAA Jitter
+        # Halton sequence for x (base 2) and y (base 3)
+        # Halton sequence for x (base 2) and y (base 3)
+        # Scale to [-0.5, 0.5] pixels
+        # Scale to [-0.5, 0.5] pixels
+        jitter_x = (self.get_halton_jitter(self.frame_count, 2) - 0.5)
+#       jitter_x = (self.get_halton_jitter(self.frame_count, 2) - 0.5)
+        jitter_y = (self.get_halton_jitter(self.frame_count, 3) - 0.5)
+#       jitter_y = (self.get_halton_jitter(self.frame_count, 3) - 0.5)
+
+        # Convert pixel offset to clip space offset
+        # Convert pixel offset to clip space offset
+        # Clip space is [-1, 1], size is 2.0. Pixel size is 2.0 / resolution.
+        # Clip space is [-1, 1], size is 2.0. Pixel size is 2.0 / resolution.
+        w, h = self.window_size
+#       w, h = self.window_size
+        jitter_clip_x = (jitter_x * 2.0) / w
+#       jitter_clip_x = (jitter_x * 2.0) / w
+        jitter_clip_y = (jitter_y * 2.0) / h
+#       jitter_clip_y = (jitter_y * 2.0) / h
+
+        # Apply jitter to projection matrix
+        # Apply jitter to projection matrix
+        # Projection matrix layout (column-major logic in memory?):
+        # Projection matrix layout (column-major logic in memory?):
+        # [0][0]  [1][0]  [2][0]  [3][0]
+        # [0][0]  [1][0]  [2][0]  [3][0]
+        # ...     ...     [2][2]  [3][2]
+        # ...     ...     [2][2]  [3][2]
+        # ...     ...     ...     ...
+        # ...     ...     ...     ...
+        # Pyrr Matrix44 is basically a numpy array. Access might be row-major in numpy wrapper.
+        # Pyrr Matrix44 is basically a numpy array. Access might be row-major in numpy wrapper.
+        # Standard Perspective Matrix:
+        # Standard Perspective Matrix:
+        # X 0 A 0
+        # X 0 A 0
+        # 0 Y B 0
+        # 0 Y B 0
+        # ...
+        # ...
+        # We need to add jitter to A (m20) and B (m21) in column-major notation.
+        # We need to add jitter to A (m20) and B (m21) in column-major notation.
+        # In numpy (row-major): m[2][0] and m[2][1] if indices are [row][col].
+        # In numpy (row-major): m[2][0] and m[2][1] if indices are [row][col].
+
+        self.transform_projection = self.base_projection.copy()
+#       self.transform_projection = self.base_projection.copy()
+
+        # Pyrr/Numpy access: m[2, 0] corresponds to the 3rd row, 1st column.
+        # Pyrr/Numpy access: m[2, 0] corresponds to the 3rd row, 1st column.
+        # In OpenGL memory (column-major), this is the element at index 8 and 9.
+        # In OpenGL memory (column-major), this is the element at index 8 and 9.
+        # This is indeed the projection offset.
+        # This is indeed the projection offset.
+        self.transform_projection[2][0] += jitter_clip_x
+#       self.transform_projection[2][0] += jitter_clip_x
+        self.transform_projection[2][1] += jitter_clip_y
+#       self.transform_projection[2][1] += jitter_clip_y
 
         # 1. Rasterize to G-Buffer
         # 1. Rasterize to G-Buffer
