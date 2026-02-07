@@ -16,6 +16,12 @@ import typing
 import typing
 import bvh
 import bvh
+import os
+import os
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+import cv2
+import cv2
 
 type vec2f32 = tuple[float, float]
 type vec3f32 = tuple[float, float, float]
@@ -125,6 +131,37 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
         self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
 #       self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
+
+        # HDRI Texture Loading
+        # HDRI Texture Loading
+        hdri_path: pl.Path = self.resource_dir / "rostock_laage_airport_4k.exr"
+#       hdri_path: pl.Path = self.resource_dir / "rostock_laage_airport_4k.exr"
+        self.use_hdri: bool = hdri_path.exists()
+#       self.use_hdri: bool = hdri_path.exists()
+        if self.use_hdri:
+#       if self.use_hdri:
+            hdri_data: npt.NDArray[np.float32] = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED).astype("f4")
+#           hdri_data: npt.NDArray[np.float32] = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED).astype("f4")
+            hdri_data = cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB)
+#           hdri_data = cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB)
+            hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
+#           hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
+            h, w, c = hdri_data.shape
+#           h, w, c = hdri_data.shape
+            self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
+#           self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
+            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+            self.texture_hdri.repeat_x = True
+#           self.texture_hdri.repeat_x = True
+            self.texture_hdri.repeat_y = False
+#           self.texture_hdri.repeat_y = False
+        else:
+#       else:
+            # Create dummy 1x1 texture
+            # Create dummy 1x1 texture
+            self.texture_hdri: mgl.Texture = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
+#           self.texture_hdri: mgl.Texture = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
 
         # -----------------------------
         # 2. Rasterization Shader (Geometry Pass)
@@ -339,7 +376,7 @@ class HybridRenderer(mglw.WindowConfig):
                 # Extract Color
                 color: npt.NDArray[np.float32] = instance_data[16:19]
 #               color: npt.NDArray[np.float32] = instance_data[16:19]
-                
+
                 # Material Parameters (Default Principled)
                 # Material Parameters (Default Principled)
                 # struct Material {
@@ -648,8 +685,38 @@ class HybridRenderer(mglw.WindowConfig):
 
         # Camera
         # Camera
-        self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
-#       self.camera_global_position: rr.Vector3 = rr.Vector3([3.0, 3.0, 3.0])
+        self.camera_look_from: rr.Vector3 = rr.Vector3([-28.284, 0.0, -28.284])
+#       self.camera_look_from: rr.Vector3 = rr.Vector3([-28.284, 0.0, -28.284])
+        self.camera_look_at: rr.Vector3 = rr.Vector3([0.0, 0.0, 0.0])
+#       self.camera_look_at: rr.Vector3 = rr.Vector3([0.0, 0.0, 0.0])
+        self.camera_view_up: rr.Vector3 = rr.Vector3([0.0, 1.0, 0.0])
+#       self.camera_view_up: rr.Vector3 = rr.Vector3([0.0, 1.0, 0.0])
+
+        self.key_state: dict[str, bool] = {
+#       self.key_state: dict[str, bool] = {
+            "W": False, "A": False, "S": False, "D": False,
+#           "W": False, "A": False, "S": False, "D": False,
+            "Q": False, "E": False,
+#           "Q": False, "E": False,
+            "UP": False, "DOWN": False, "LEFT": False, "RIGHT": False,
+#           "UP": False, "DOWN": False, "LEFT": False, "RIGHT": False,
+        }
+#       }
+        self.movement_speed: float = 10.0
+#       self.movement_speed: float = 10.0
+        self.camera_yaw: float = 0.0
+#       self.camera_yaw: float = 0.0
+        self.camera_pitch: float = 0.0
+#       self.camera_pitch: float = 0.0
+
+        # Initialize yaw/pitch from look_at - look_from
+        # Initialize yaw/pitch from look_at - look_from
+        direction: rr.Vector3 = rr.vector.normalize(self.camera_look_at - self.camera_look_from)
+#       direction: rr.Vector3 = rr.vector.normalize(self.camera_look_at - self.camera_look_from)
+        self.camera_yaw = np.arctan2(direction[2], direction[0])
+#       self.camera_yaw = np.arctan2(direction[2], direction[0])
+        self.camera_pitch = np.arcsin(direction[1])
+#       self.camera_pitch = np.arcsin(direction[1])
 
         # Base Projection (No Jitter)
         # Base Projection (No Jitter)
@@ -670,12 +737,12 @@ class HybridRenderer(mglw.WindowConfig):
 
         self.transform_view: rr.Matrix44 = rr.Matrix44.look_at(
 #       self.transform_view: rr.Matrix44 = rr.Matrix44.look_at(
-            eye=self.camera_global_position,
-#           eye=self.camera_global_position,
-            target=rr.Vector3([0.0, 0.0, 0.0]),
-#           target=rr.Vector3([0.0, 0.0, 0.0]),
-            up=rr.Vector3([0.0, 1.0, 0.0]),
-#           up=rr.Vector3([0.0, 1.0, 0.0]),
+            eye=self.camera_look_from,
+#           eye=self.camera_look_from,
+            target=self.camera_look_at,
+#           target=self.camera_look_at,
+            up=self.camera_view_up,
+#           up=self.camera_view_up,
         )
 #       )
         pass
@@ -700,10 +767,158 @@ class HybridRenderer(mglw.WindowConfig):
         return result
 #       return result
 
+    def key_event(self, key: int, action: int, modifiers: int) -> None:
+#   def key_event(self, key: int, action: int, modifiers: int) -> None:
+        keys: typing.Any = self.wnd.keys
+#       keys: typing.Any = self.wnd.keys
+        if action == keys.ACTION_PRESS:
+#       if action == keys.ACTION_PRESS:
+            if key == keys.W: self.key_state["W"] = True
+#           if key == keys.W: self.key_state["W"] = True
+            elif key == keys.S: self.key_state["S"] = True
+#           elif key == keys.S: self.key_state["S"] = True
+            elif key == keys.A: self.key_state["A"] = True
+#           elif key == keys.A: self.key_state["A"] = True
+            elif key == keys.D: self.key_state["D"] = True
+#           elif key == keys.D: self.key_state["D"] = True
+            elif key == keys.Q: self.key_state["Q"] = True
+#           elif key == keys.Q: self.key_state["Q"] = True
+            elif key == keys.E: self.key_state["E"] = True
+#           elif key == keys.E: self.key_state["E"] = True
+            elif key == keys.UP: self.key_state["UP"] = True
+#           elif key == keys.UP: self.key_state["UP"] = True
+            elif key == keys.DOWN: self.key_state["DOWN"] = True
+#           elif key == keys.DOWN: self.key_state["DOWN"] = True
+            elif key == keys.LEFT: self.key_state["LEFT"] = True
+#           elif key == keys.LEFT: self.key_state["LEFT"] = True
+            elif key == keys.RIGHT: self.key_state["RIGHT"] = True
+#           elif key == keys.RIGHT: self.key_state["RIGHT"] = True
+        elif action == keys.ACTION_RELEASE:
+#       elif action == keys.ACTION_RELEASE:
+            if key == keys.W: self.key_state["W"] = False
+#           if key == keys.W: self.key_state["W"] = False
+            elif key == keys.S: self.key_state["S"] = False
+#           elif key == keys.S: self.key_state["S"] = False
+            elif key == keys.A: self.key_state["A"] = False
+#           elif key == keys.A: self.key_state["A"] = False
+            elif key == keys.D: self.key_state["D"] = False
+#           elif key == keys.D: self.key_state["D"] = False
+            elif key == keys.Q: self.key_state["Q"] = False
+#           elif key == keys.Q: self.key_state["Q"] = False
+            elif key == keys.E: self.key_state["E"] = False
+#           elif key == keys.E: self.key_state["E"] = False
+            elif key == keys.UP: self.key_state["UP"] = False
+#           elif key == keys.UP: self.key_state["UP"] = False
+            elif key == keys.DOWN: self.key_state["DOWN"] = False
+#           elif key == keys.DOWN: self.key_state["DOWN"] = False
+            elif key == keys.LEFT: self.key_state["LEFT"] = False
+#           elif key == keys.LEFT: self.key_state["LEFT"] = False
+            elif key == keys.RIGHT: self.key_state["RIGHT"] = False
+#           elif key == keys.RIGHT: self.key_state["RIGHT"] = False
+
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
         self.frame_count += 1
 #       self.frame_count += 1
+
+        # Poll keys (Backup for key_event)
+        # Poll keys (Backup for key_event)
+        keys: typing.Any = self.wnd.keys
+#       keys: typing.Any = self.wnd.keys
+        try:
+#       try:
+            self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
+#           self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
+            self.key_state["S"] = self.wnd.is_key_pressed(keys.S)
+#           self.key_state["S"] = self.wnd.is_key_pressed(keys.S)
+            self.key_state["A"] = self.wnd.is_key_pressed(keys.A)
+#           self.key_state["A"] = self.wnd.is_key_pressed(keys.A)
+            self.key_state["D"] = self.wnd.is_key_pressed(keys.D)
+#           self.key_state["D"] = self.wnd.is_key_pressed(keys.D)
+            self.key_state["Q"] = self.wnd.is_key_pressed(keys.Q)
+#           self.key_state["Q"] = self.wnd.is_key_pressed(keys.Q)
+            self.key_state["E"] = self.wnd.is_key_pressed(keys.E)
+#           self.key_state["E"] = self.wnd.is_key_pressed(keys.E)
+            self.key_state["UP"] = self.wnd.is_key_pressed(keys.UP)
+#           self.key_state["UP"] = self.wnd.is_key_pressed(keys.UP)
+            self.key_state["DOWN"] = self.wnd.is_key_pressed(keys.DOWN)
+#           self.key_state["DOWN"] = self.wnd.is_key_pressed(keys.DOWN)
+            self.key_state["LEFT"] = self.wnd.is_key_pressed(keys.LEFT)
+#           self.key_state["LEFT"] = self.wnd.is_key_pressed(keys.LEFT)
+            self.key_state["RIGHT"] = self.wnd.is_key_pressed(keys.RIGHT)
+#           self.key_state["RIGHT"] = self.wnd.is_key_pressed(keys.RIGHT)
+        except AttributeError:
+#       except AttributeError:
+            pass # method might not exist on all backends
+#           pass # method might not exist on all backends
+
+        # Rotation from Keys
+        # Rotation from Keys
+        rotation_speed: float = 2.0 * frame_time
+#       rotation_speed: float = 2.0 * frame_time
+        if self.key_state["LEFT"]: self.camera_yaw -= rotation_speed
+#       if self.key_state["LEFT"]: self.camera_yaw -= rotation_speed
+        if self.key_state["RIGHT"]: self.camera_yaw += rotation_speed
+#       if self.key_state["RIGHT"]: self.camera_yaw += rotation_speed
+        if self.key_state["UP"]: self.camera_pitch += rotation_speed
+#       if self.key_state["UP"]: self.camera_pitch += rotation_speed
+        if self.key_state["DOWN"]: self.camera_pitch -= rotation_speed
+#       if self.key_state["DOWN"]: self.camera_pitch -= rotation_speed
+        self.camera_pitch = max(-np.pi/2 + 0.1, min(np.pi/2 - 0.1, self.camera_pitch))
+#       self.camera_pitch = max(-np.pi/2 + 0.1, min(np.pi/2 - 0.1, self.camera_pitch))
+
+        # Direction from Yaw/Pitch
+        # Direction from Yaw/Pitch
+        direction: rr.Vector3 = rr.Vector3([
+#       direction: rr.Vector3 = rr.Vector3([
+            np.cos(self.camera_yaw) * np.cos(self.camera_pitch),
+#           np.cos(self.camera_yaw) * np.cos(self.camera_pitch),
+            np.sin(self.camera_pitch),
+#           np.sin(self.camera_pitch),
+            np.sin(self.camera_yaw) * np.cos(self.camera_pitch)
+#           np.sin(self.camera_yaw) * np.cos(self.camera_pitch)
+        ])
+#       ])
+
+        forward: rr.Vector3 = rr.vector.normalize(direction)
+#       forward: rr.Vector3 = rr.vector.normalize(direction)
+        right: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(forward, self.camera_view_up))
+#       right: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(forward, self.camera_view_up))
+        # up: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(right, forward))
+#       # up: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(right, forward))
+
+        # Movement
+        # Movement
+        velocity: float = self.movement_speed * frame_time
+#       velocity: float = self.movement_speed * frame_time
+        if self.key_state["W"]: self.camera_look_from += forward * velocity
+#       if self.key_state["W"]: self.camera_look_from += forward * velocity
+        if self.key_state["S"]: self.camera_look_from -= forward * velocity
+#       if self.key_state["S"]: self.camera_look_from -= forward * velocity
+        if self.key_state["A"]: self.camera_look_from -= right * velocity
+#       if self.key_state["A"]: self.camera_look_from -= right * velocity
+        if self.key_state["D"]: self.camera_look_from += right * velocity
+#       if self.key_state["D"]: self.camera_look_from += right * velocity
+        if self.key_state["Q"]: self.camera_look_from += rr.Vector3([0.0, 1.0, 0.0]) * velocity
+#       if self.key_state["Q"]: self.camera_look_from += rr.Vector3([0.0, 1.0, 0.0]) * velocity
+        if self.key_state["E"]: self.camera_look_from -= rr.Vector3([0.0, 1.0, 0.0]) * velocity
+#       if self.key_state["E"]: self.camera_look_from -= rr.Vector3([0.0, 1.0, 0.0]) * velocity
+
+        # Re-calculate LookAt for Matrix
+        # Re-calculate LookAt for Matrix
+        self.camera_look_at = self.camera_look_from + forward
+#       self.camera_look_at = self.camera_look_from + forward
+
+        self.transform_view = rr.Matrix44.look_at(
+#       self.transform_view = rr.Matrix44.look_at(
+            eye=self.camera_look_from,
+#           eye=self.camera_look_from,
+            target=self.camera_look_at,
+#           target=self.camera_look_at,
+            up=self.camera_view_up
+#           up=self.camera_view_up
+        )
+#       )
 
         # TAA Jitter
         # TAA Jitter
@@ -711,10 +926,10 @@ class HybridRenderer(mglw.WindowConfig):
         # Halton sequence for x (base 2) and y (base 3)
         # Scale to [-0.5, 0.5] pixels
         # Scale to [-0.5, 0.5] pixels
-        jitter_x = (self.get_halton_jitter(self.frame_count, 2) - 0.5)
-#       jitter_x = (self.get_halton_jitter(self.frame_count, 2) - 0.5)
-        jitter_y = (self.get_halton_jitter(self.frame_count, 3) - 0.5)
-#       jitter_y = (self.get_halton_jitter(self.frame_count, 3) - 0.5)
+        jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+#       jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+        jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+#       jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 
         # Convert pixel offset to clip space offset
         # Convert pixel offset to clip space offset
@@ -722,10 +937,10 @@ class HybridRenderer(mglw.WindowConfig):
         # Clip space is [-1, 1], size is 2.0. Pixel size is 2.0 / resolution.
         w, h = self.window_size
 #       w, h = self.window_size
-        jitter_clip_x = (jitter_x * 2.0) / w
-#       jitter_clip_x = (jitter_x * 2.0) / w
-        jitter_clip_y = (jitter_y * 2.0) / h
-#       jitter_clip_y = (jitter_y * 2.0) / h
+        jitter_clip_x: float = (jitter_x * 2.0) / w
+#       jitter_clip_x: float = (jitter_x * 2.0) / w
+        jitter_clip_y: float = (jitter_y * 2.0) / h
+#       jitter_clip_y: float = (jitter_y * 2.0) / h
 
         # Apply jitter to projection matrix
         # Apply jitter to projection matrix
@@ -752,8 +967,8 @@ class HybridRenderer(mglw.WindowConfig):
         # In numpy (row-major): m[2][0] and m[2][1] if indices are [row][col].
         # In numpy (row-major): m[2][0] and m[2][1] if indices are [row][col].
 
-        self.transform_projection = self.base_projection.copy()
-#       self.transform_projection = self.base_projection.copy()
+        self.transform_projection: rr.Matrix44 = self.base_projection.copy()
+#       self.transform_projection: rr.Matrix44 = self.base_projection.copy()
 
         # Pyrr/Numpy access: m[2, 0] corresponds to the 3rd row, 1st column.
         # Pyrr/Numpy access: m[2, 0] corresponds to the 3rd row, 1st column.
@@ -836,17 +1051,81 @@ class HybridRenderer(mglw.WindowConfig):
 #           self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
         if "uCameraGlobalPosition" in self.program_shading:
 #       if "uCameraGlobalPosition" in self.program_shading:
-            self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_global_position)
-#           self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_global_position)
+            self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_look_from)
+#           self.program_shading["uCameraGlobalPosition"] = tuple(self.camera_look_from)
         if "uFrameCount" in self.program_shading:
 #       if "uFrameCount" in self.program_shading:
             self.program_shading["uFrameCount"] = self.frame_count
 #           self.program_shading["uFrameCount"] = self.frame_count
 
-        # Dispatch
-        # Dispatch
+        # HDRI Texture
+        # HDRI Texture
+        self.texture_hdri.use(location=8)
+#       self.texture_hdri.use(location=8)
+        if "uHdriTexture" in self.program_shading:
+#       if "uHdriTexture" in self.program_shading:
+            self.program_shading["uHdriTexture"] = 8
+#           self.program_shading["uHdriTexture"] = 8
+        if "uUseHdri" in self.program_shading:
+#       if "uUseHdri" in self.program_shading:
+            self.program_shading["uUseHdri"] = self.use_hdri
+#           self.program_shading["uUseHdri"] = self.use_hdri
+
+
         w, h = self.window_size
 #       w, h = self.window_size
+
+        # Manual Ray Construction Uniforms
+#       # Manual Ray Construction Uniforms
+        if "uPixel00Coordinates" in self.program_shading:
+#       if "uPixel00Coordinates" in self.program_shading:
+            cam_look_from = self.camera_look_from
+#           cam_look_from = self.camera_look_from
+            cam_look_at = self.camera_look_at
+#           cam_look_at = self.camera_look_at
+            cam_view_up = self.camera_view_up
+#           cam_view_up = self.camera_view_up
+
+            cam_w = rr.vector.normalize(cam_look_from - cam_look_at)
+#           cam_w = rr.vector.normalize(cam_look_from - cam_look_at)
+            cam_u = rr.vector.normalize(rr.vector3.cross(cam_view_up, cam_w))
+#           cam_u = rr.vector.normalize(rr.vector3.cross(cam_view_up, cam_w))
+            cam_v = rr.vector3.cross(cam_w, cam_u)
+#           cam_v = rr.vector3.cross(cam_w, cam_u)
+
+            focal_length = rr.vector.length(cam_look_from - cam_look_at)
+#           focal_length = rr.vector.length(cam_look_from - cam_look_at)
+            tan_half_fovy = np.tan(np.deg2rad(60.0) / 2.0)
+#           tan_half_fovy = np.tan(np.deg2rad(60.0) / 2.0)
+            viewport_height = 2.0 * tan_half_fovy * focal_length
+#           viewport_height = 2.0 * tan_half_fovy * focal_length
+            viewport_width = viewport_height * self.aspect_ratio
+#           viewport_width = viewport_height * self.aspect_ratio
+
+            viewport_u = cam_u * viewport_width
+#           viewport_u = cam_u * viewport_width
+            viewport_v = cam_v * viewport_height
+#           viewport_v = cam_v * viewport_height
+
+            pixel_delta_u = viewport_u / w
+#           pixel_delta_u = viewport_u / w
+            pixel_delta_v = viewport_v / h
+#           pixel_delta_v = viewport_v / h
+
+            viewport_upper_left = cam_look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
+#           viewport_upper_left = cam_look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
+            pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
+#           pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
+
+            self.program_shading["uPixel00Coordinates"] = tuple(pixel00_loc)
+#           self.program_shading["uPixel00Coordinates"] = tuple(pixel00_loc)
+            self.program_shading["uPixelDeltaU"] = tuple(pixel_delta_u)
+#           self.program_shading["uPixelDeltaU"] = tuple(pixel_delta_u)
+            self.program_shading["uPixelDeltaV"] = tuple(pixel_delta_v)
+#           self.program_shading["uPixelDeltaV"] = tuple(pixel_delta_v)
+            self.program_shading["uJitter"] = (jitter_x, jitter_y)
+#           self.program_shading["uJitter"] = (jitter_x, jitter_y)
+
         gx, gy = (w + 15) // 16, (h + 15) // 16
 #       gx, gy = (w + 15) // 16, (h + 15) // 16
         self.program_shading.run(group_x=gx, group_y=gy, group_z=1)

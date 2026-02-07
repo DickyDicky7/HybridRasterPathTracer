@@ -74,6 +74,19 @@
 //  uniform vec3 uCameraGlobalPosition;
     uniform int uFrameCount;
 //  uniform int uFrameCount;
+    uniform sampler2D uHdriTexture;
+//  uniform sampler2D uHdriTexture;
+    uniform bool uUseHdri;
+//  uniform bool uUseHdri;
+
+    uniform vec3 uPixel00Coordinates;
+//  uniform vec3 uPixel00Coordinates;
+    uniform vec3 uPixelDeltaU;
+//  uniform vec3 uPixelDeltaU;
+    uniform vec3 uPixelDeltaV;
+//  uniform vec3 uPixelDeltaV;
+    uniform vec2 uJitter;
+//  uniform vec2 uJitter;
 
     const float PI = 3.14159265359;
 //  const float PI = 3.14159265359;
@@ -136,6 +149,28 @@
     // Sky Color
     vec3 getSkyColor(vec3 dir) {
 //  vec3 getSkyColor(vec3 dir) {
+        if (uUseHdri) {
+//      if (uUseHdri) {
+            // Equirectangular mapping
+            // Equirectangular mapping
+            float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
+//          float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
+            float phi = atan(-dir.z, dir.x) + PI; // longitude: 0 to 2*PI
+//          float phi = atan(-dir.z, dir.x) + PI; // longitude: 0 to 2*PI
+            float u = clamp(phi / (2.0 * PI), 0.0, 1.0);
+//          float u = clamp(phi / (2.0 * PI), 0.0, 1.0);
+            float v = clamp(theta / PI, 0.0, 1.0);
+//          float v = clamp(theta / PI, 0.0, 1.0);
+            vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
+//          vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
+            // Radiance clamping to reduce fireflies
+            // Radiance clamping to reduce fireflies
+            return min(hdriColor, vec3(10.0));
+//          return min(hdriColor, vec3(10.0));
+        }
+//      }
+        // Fallback: procedural gradient sky
+        // Fallback: procedural gradient sky
         float t = 0.5 * (dir.y + 1.0);
 //      float t = 0.5 * (dir.y + 1.0);
         return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), t);
@@ -390,30 +425,6 @@
 
         return x * local.x + y * local.y + n * local.z;
 //      return x * local.x + y * local.y + n * local.z;
-    }
-//  }
-
-    vec3 aces(vec3 x) {
-//  vec3 aces(vec3 x) {
-        const float a = 2.51;
-//      const float a = 2.51;
-        const float b = 0.03;
-//      const float b = 0.03;
-        const float c = 2.43;
-//      const float c = 2.43;
-        const float d = 0.59;
-//      const float d = 0.59;
-        const float e = 0.14;
-//      const float e = 0.14;
-        return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-//      return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
-    }
-//  }
-
-    vec3 reinhard(vec3 x) {
-//  vec3 reinhard(vec3 x) {
-        return x / (x + vec3(1.0));
-//      return x / (x + vec3(1.0));
     }
 //  }
 
@@ -688,12 +699,23 @@
 //      if (sampleGlobalPosition.w == 0.0) {
             // Missed geometry in raster pass -> Sky
 //          // Missed geometry in raster pass -> Sky
-            vec2 uv = (vec2(pixelCoordinates) + 0.5) / vec2(dimensions);
-//          vec2 uv = (vec2(pixelCoordinates) + 0.5) / vec2(dimensions);
-            vec3 sky = mix(vec3(0.7, 0.8, 0.9), vec3(0.4, 0.7, 1.0), uv.y);
-//          vec3 sky = mix(vec3(0.7, 0.8, 0.9), vec3(0.4, 0.7, 1.0), uv.y);
-            accumulatedColor = sky;
-//          accumulatedColor = sky;
+            // Manual Ray Construction (Path Tracing Pinhole Camera)
+//          // Manual Ray Construction (Path Tracing Pinhole Camera)
+
+            // Note: uPixel00Coordinates is the center of the top-left pixel (0,0).
+//          // Note: uPixel00Coordinates is the center of the top-left pixel (0,0).
+            // We use uJitter to apply TAA/sub-pixel jitter.
+//          // We use uJitter to apply TAA/sub-pixel jitter.
+            vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
+//          vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
+
+            rayOrigin = uCameraGlobalPosition;
+//          rayOrigin = uCameraGlobalPosition;
+            rayDir = normalize(pixelSampleCenter - rayOrigin);
+//          rayDir = normalize(pixelSampleCenter - rayOrigin);
+
+            accumulatedColor = getSkyColor(rayDir);
+//          accumulatedColor = getSkyColor(rayDir);
             hitSky = true;
 //          hitSky = true;
         } else {

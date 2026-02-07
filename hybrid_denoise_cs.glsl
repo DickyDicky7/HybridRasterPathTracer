@@ -30,12 +30,7 @@
     uniform int uFinalPass;
 //  uniform int uFinalPass;
 
-    vec3 reinhard(vec3 x) {
-//  vec3 reinhard(vec3 x) {
-        return x / (x + vec3(1.0));
-//      return x / (x + vec3(1.0));
-    }
-//  }
+    #include "tonemap.glsl"
 
     void main() {
 //  void main() {
@@ -69,8 +64,8 @@
 
             if (uFinalPass == 1) {
 //          if (uFinalPass == 1) {
-                final = reinhard(final);
-//              final = reinhard(final);
+                final = aces(final);
+//              final = aces(final);
                 /*
                 final = pow(final, vec3(1.0/2.2));
 //              final = pow(final, vec3(1.0/2.2));
@@ -169,8 +164,8 @@
 //      if (uFinalPass == 1) {
             // Final Tone Mapping (Moved from Shading CS)
             // Final Tone Mapping (Moved from Shading CS)
-            finalColor = reinhard(finalColor);
-//          finalColor = reinhard(finalColor);
+            finalColor = aces(finalColor);
+//          finalColor = aces(finalColor);
             /*
             finalColor = pow(finalColor, vec3(1.0/2.2));
 //          finalColor = pow(finalColor, vec3(1.0/2.2));

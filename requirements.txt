@@ -2,3 +2,4 @@ pyrr
 numpy
 moderngl
 moderngl-window
+opencv-python
