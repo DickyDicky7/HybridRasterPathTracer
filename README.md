@@ -8,5 +8,5 @@
 <div align="center"><p>An experimental real-time hybrid renderer that uses a traditional rasterization pipeline for primary visibility and a Monte Carlo path tracing compute pipeline for global illumination and shading.</p></div>
 -->
 
-[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/default.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
-[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/default.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
+[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/hqdefault.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
+[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/hqdefault.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
