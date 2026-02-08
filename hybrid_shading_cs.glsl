@@ -1,4 +1,4 @@
-#version 430
+    #version 430
 //  #version 430
 
     layout(local_size_x = 16, local_size_y = 16) in;
@@ -63,6 +63,49 @@
 //  layout(std430, binding = 7) buffer SceneMaterials {
         Material materials[];
 //      Material materials[];
+    };
+//  };
+
+    struct Ray {
+//  struct Ray {
+        vec3 origin;
+//      vec3 origin;
+        vec3 direction;
+//      vec3 direction;
+    };
+//  };
+
+    struct RayHitResult {
+//  struct RayHitResult {
+        vec3 at;
+//      vec3 at;
+        vec3 hittedSideNormal;
+//      vec3 hittedSideNormal;
+        vec2 uvSurfaceCoordinate;
+//      vec2 uvSurfaceCoordinate;
+        float minDistance;
+//      float minDistance;
+        bool isHitted;
+//      bool isHitted;
+        bool isFrontFaceHitted;
+//      bool isFrontFaceHitted;
+        int materialIndex;
+//      int materialIndex;
+        int triangleIndex;
+//      int triangleIndex;
+    };
+//  };
+
+    struct MaterialLightScatteringResult {
+//  struct MaterialLightScatteringResult {
+        Ray scatteredRay;
+//      Ray scatteredRay;
+        vec3 attenuation;
+//      vec3 attenuation;
+        vec3 emission;
+//      vec3 emission;
+        bool isScattered;
+//      bool isScattered;
     };
 //  };
 
@@ -178,46 +221,94 @@
     }
 //  }
 
-    // Ray-AABB Intersection
-    // Ray-AABB Intersection
-    bool intersectAABB(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax, float tMax) {
-//  bool intersectAABB(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax, float tMax) {
-        vec3 t1 = (boxMin - origin) * invDir;
-//      vec3 t1 = (boxMin - origin) * invDir;
-        vec3 t2 = (boxMax - origin) * invDir;
-//      vec3 t2 = (boxMax - origin) * invDir;
+    // New Structs and Helper Functions
+//  // New Structs and Helper Functions
+
+    struct Interval {
+//  struct Interval {
+        float min;
+//      float min;
+        float max;
+//      float max;
+    };
+//  };
+
+    bool intervalContain(Interval interval, float value) { return interval.min <= value && value <= interval.max; }
+//  bool intervalContain(Interval interval, float value) { return interval.min <= value && value <= interval.max; }
+    bool intervalSurround(Interval interval, float value) { return interval.min < value && value < interval.max; }
+//  bool intervalSurround(Interval interval, float value) { return interval.min < value && value < interval.max; }
+
+    // Helper to get component
+//  // Helper to get component
+    float maxVec3(vec3 v) { return max(v.x, max(v.y, v.z)); }
+//  float maxVec3(vec3 v) { return max(v.x, max(v.y, v.z)); }
+    float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
+//  float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
+
+    // Intersect AABB
+//  // Intersect AABB
+    bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
+//  bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
+        vec3 t1 = (boxMin - ray.origin) * invDir;
+//      vec3 t1 = (boxMin - ray.origin) * invDir;
+        vec3 t2 = (boxMax - ray.origin) * invDir;
+//      vec3 t2 = (boxMax - ray.origin) * invDir;
         vec3 tMin = min(t1, t2);
 //      vec3 tMin = min(t1, t2);
         vec3 tMaxVec = max(t1, t2);
 //      vec3 tMaxVec = max(t1, t2);
-        float tEnter = max(max(tMin.x, tMin.y), tMin.z);
-//      float tEnter = max(max(tMin.x, tMin.y), tMin.z);
-        float tExit = min(min(tMaxVec.x, tMaxVec.y), tMaxVec.z);
-//      float tExit = min(min(tMaxVec.x, tMaxVec.y), tMaxVec.z);
-        return tEnter <= tExit && tEnter < tMax && tExit > 0.0;
-//      return tEnter <= tExit && tEnter < tMax && tExit > 0.0;
+        
+        float overallDistanceMin = maxVec3(tMin);
+//      float overallDistanceMin = maxVec3(tMin);
+        float overallDistanceMax = minVec3(tMaxVec);
+//      float overallDistanceMax = minVec3(tMaxVec);
+        
+        float finalDistanceMin = max(rayTravelDistanceLimit.min, overallDistanceMin);
+//      float finalDistanceMin = max(rayTravelDistanceLimit.min, overallDistanceMin);
+        float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
+//      float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
+        
+        return finalDistanceMax > finalDistanceMin;
+//      return finalDistanceMax > finalDistanceMin;
     }
 //  }
 
-    struct Hit {
-//  struct Hit {
-        float t;
-//      float t;
-        float u;
-//      float u;
-        float v;
-//      float v;
-        int triIdx;
-//      int triIdx;
-    };
-//  };
+    // Calculate Distance to AABB (for sorting)
+//  // Calculate Distance to AABB (for sorting)
+    float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
+//  float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
+        vec3 t1 = (boxMin - ray.origin) * invDir;
+//      vec3 t1 = (boxMin - ray.origin) * invDir;
+        vec3 t2 = (boxMax - ray.origin) * invDir;
+//      vec3 t2 = (boxMax - ray.origin) * invDir;
+        
+        vec3 distancesMin = max(min(t1, t2), vec3(rayTravelDistanceLimit.min));
+//      vec3 distancesMin = max(min(t1, t2), vec3(rayTravelDistanceLimit.min));
+        vec3 distancesMax = min(max(t1, t2), vec3(rayTravelDistanceLimit.max));
+//      vec3 distancesMax = min(max(t1, t2), vec3(rayTravelDistanceLimit.max));
+        
+        float distanceToBoxMin = maxVec3(distancesMin);
+//      float distanceToBoxMin = maxVec3(distancesMin);
+        float distanceToBoxMax = minVec3(distancesMax);
+//      float distanceToBoxMax = minVec3(distancesMax);
+        
+        if (distanceToBoxMax >= distanceToBoxMin && distanceToBoxMin < rayTravelDistanceLimit.max) {
+//      if (distanceToBoxMax >= distanceToBoxMin && distanceToBoxMin < rayTravelDistanceLimit.max) {
+            return distanceToBoxMin;
+//          return distanceToBoxMin;
+        }
+//      }
+        return 9999999.0;
+//      return 9999999.0;
+    }
+//  }
 
-    // Ray-Triangle Intersection (Moller-Trumbore) - Closest Hit
-    // Ray-Triangle Intersection (Moller-Trumbore) - Closest Hit
-    bool intersectTriangleClosest(vec3 origin, vec3 dir, int triIdx, inout Hit closestHit) {
-//  bool intersectTriangleClosest(vec3 origin, vec3 dir, int triIdx, inout Hit closestHit) {
-        int offset = triIdx * 9;
-//      int offset = triIdx * 9;
+    // intersectTriangleAnyHit
+//  // intersectTriangleAnyHit
+    bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
+//  bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
+        int offset = triangleIndex * 9;
+//      int offset = triangleIndex * 9;
         vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
 //      vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
         vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
@@ -225,49 +316,216 @@
         vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 //      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 
+        const float EPSILON = 1.0e-4;
+//      const float EPSILON = 1.0e-4;
+        
         vec3 e1 = v1 - v0;
 //      vec3 e1 = v1 - v0;
         vec3 e2 = v2 - v0;
 //      vec3 e2 = v2 - v0;
-        vec3 h = cross(dir, e2);
-//      vec3 h = cross(dir, e2);
+        
+        vec3 h = cross(ray.direction, e2);
+//      vec3 h = cross(ray.direction, e2);
         float a = dot(e1, h);
 //      float a = dot(e1, h);
-
-        if (a > -0.00001 && a < 0.00001) return false;
-//      if (a > -0.00001 && a < 0.00001) return false;
-
+        
+        if (abs(a) < EPSILON) return false;
+//      if (abs(a) < EPSILON) return false;
+        
         float f = 1.0 / a;
 //      float f = 1.0 / a;
-        vec3 s = origin - v0;
-//      vec3 s = origin - v0;
+        vec3 s = ray.origin - v0;
+//      vec3 s = ray.origin - v0;
         float u = f * dot(s, h);
 //      float u = f * dot(s, h);
+        
         if (u < 0.0 || u > 1.0) return false;
 //      if (u < 0.0 || u > 1.0) return false;
-
+        
         vec3 q = cross(s, e1);
 //      vec3 q = cross(s, e1);
-        float v = f * dot(dir, q);
-//      float v = f * dot(dir, q);
+        float v = f * dot(ray.direction, q);
+//      float v = f * dot(ray.direction, q);
+        
         if (v < 0.0 || u + v > 1.0) return false;
 //      if (v < 0.0 || u + v > 1.0) return false;
-
+        
         float t = f * dot(e2, q);
 //      float t = f * dot(e2, q);
+        
+        if (!intervalSurround(rayTravelDistanceLimit, t)) return false;
+//      if (!intervalSurround(rayTravelDistanceLimit, t)) return false;
+        
+        return true;
+//      return true;
+    }
+//  }
 
-        if (t > 0.001 && t < closestHit.t) {
-//      if (t > 0.001 && t < closestHit.t) {
-            closestHit.t = t;
-//          closestHit.t = t;
-            closestHit.u = u;
-//          closestHit.u = u;
-            closestHit.v = v;
-//          closestHit.v = v;
-            closestHit.triIdx = triIdx;
-//          closestHit.triIdx = triIdx;
-            return true;
-//          return true;
+    // intersectTriangleClosestHit
+//  // intersectTriangleClosestHit
+    RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
+//  RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
+        RayHitResult result;
+//      RayHitResult result;
+        result.materialIndex = triangleIndex;
+//      result.materialIndex = triangleIndex;
+        
+        result.isHitted = false;
+//      result.isHitted = false;
+        result.triangleIndex = triangleIndex;
+//      result.triangleIndex = triangleIndex;
+        result.minDistance = rayTravelDistanceLimit.max;
+//      result.minDistance = rayTravelDistanceLimit.max;
+        
+        int offset = triangleIndex * 9;
+//      int offset = triangleIndex * 9;
+        vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
+//      vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
+        vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
+//      vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
+        vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
+//      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
+
+        const float EPSILON = 1.0e-4;
+//      const float EPSILON = 1.0e-4;
+        vec3 e1 = v1 - v0;
+//      vec3 e1 = v1 - v0;
+        vec3 e2 = v2 - v0;
+//      vec3 e2 = v2 - v0;
+        
+        vec3 h = cross(ray.direction, e2);
+//      vec3 h = cross(ray.direction, e2);
+        float a = dot(e1, h);
+//      float a = dot(e1, h);
+        
+        if (abs(a) < EPSILON) return result;
+//      if (abs(a) < EPSILON) return result;
+        
+        float f = 1.0 / a;
+//      float f = 1.0 / a;
+        vec3 s = ray.origin - v0;
+//      vec3 s = ray.origin - v0;
+        float u = f * dot(s, h);
+//      float u = f * dot(s, h);
+        
+        if (u < 0.0 || u > 1.0) return result;
+//      if (u < 0.0 || u > 1.0) return result;
+        
+        vec3 q = cross(s, e1);
+//      vec3 q = cross(s, e1);
+        float v = f * dot(ray.direction, q);
+//      float v = f * dot(ray.direction, q);
+        
+        if (v < 0.0 || u + v > 1.0) return result;
+//      if (v < 0.0 || u + v > 1.0) return result;
+        
+        float t = f * dot(e2, q);
+//      float t = f * dot(e2, q);
+        
+        if (!intervalSurround(rayTravelDistanceLimit, t)) return result;
+//      if (!intervalSurround(rayTravelDistanceLimit, t)) return result;
+        
+        if (t > EPSILON) {
+//      if (t > EPSILON) {
+            result.isHitted = true;
+//          result.isHitted = true;
+            result.minDistance = t;
+//          result.minDistance = t;
+            result.triangleIndex = triangleIndex;
+//          result.triangleIndex = triangleIndex;
+            result.uvSurfaceCoordinate = vec2(u, v); // Barycentrics
+//          result.uvSurfaceCoordinate = vec2(u, v); // Barycentrics
+            return result;
+//          return result;
+        }
+//      }
+        
+        return result;
+//      return result;
+    }
+//  }
+
+    // traverseBVHAnyHit
+//  // traverseBVHAnyHit
+    bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
+//  bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
+        vec3 invDir = 1.0 / ray.direction;
+//      vec3 invDir = 1.0 / ray.direction;
+        int stack[32];
+//      int stack[32];
+        int stackPtr = 0;
+//      int stackPtr = 0;
+        
+        // Check Root
+//      // Check Root
+        Node rootNode = nodes[0];
+//      Node rootNode = nodes[0];
+        if (!intersectAABB_Interval(ray, invDir, rayTravelDistanceLimit, rootNode.min_left.xyz, rootNode.max_right.xyz)) {
+//      if (!intersectAABB_Interval(ray, invDir, rayTravelDistanceLimit, rootNode.min_left.xyz, rootNode.max_right.xyz)) {
+            return false;
+//          return false;
+        }
+//      }
+        
+        stack[stackPtr++] = 0;
+//      stack[stackPtr++] = 0;
+        
+        while (stackPtr > 0) {
+//      while (stackPtr > 0) {
+            int nodeIdx = stack[--stackPtr];
+//          int nodeIdx = stack[--stackPtr];
+            Node node = nodes[nodeIdx];
+//          Node node = nodes[nodeIdx];
+            
+            if (node.min_left.w < 0.0) { // Leaf
+//          if (node.min_left.w < 0.0) { // Leaf
+                int triIdx = int(node.max_right.w);
+//              int triIdx = int(node.max_right.w);
+                if (intersectTriangleAnyHit(ray, triIdx, rayTravelDistanceLimit)) {
+//              if (intersectTriangleAnyHit(ray, triIdx, rayTravelDistanceLimit)) {
+                    return true;
+//                  return true;
+                }
+//              }
+                continue;
+//              continue;
+            }
+//          }
+            
+            // Internal
+//          // Internal
+            int childIndexL = int(node.min_left.w);
+//          int childIndexL = int(node.min_left.w);
+            int childIndexR = int(node.max_right.w);
+//          int childIndexR = int(node.max_right.w);
+            
+            Node childL = nodes[childIndexL];
+//          Node childL = nodes[childIndexL];
+            Node childR = nodes[childIndexR];
+//          Node childR = nodes[childIndexR];
+            
+            float distL = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childL.min_left.xyz, childL.max_right.xyz);
+//          float distL = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childL.min_left.xyz, childL.max_right.xyz);
+            float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
+//          float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
+            
+            if (distL == 9999999.0 && distR == 9999999.0) continue;
+//          if (distL == 9999999.0 && distR == 9999999.0) continue;
+            
+            if (distL < distR) {
+//          if (distL < distR) {
+                if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
+//              if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
+                if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
+//              if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
+            } else {
+//          } else {
+                if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
+//              if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
+                if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
+//              if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
+            }
+//          }
         }
 //      }
         return false;
@@ -275,156 +533,103 @@
     }
 //  }
 
-    // Shadow Ray Traversal (Any Hit)
-    // Shadow Ray Traversal (Any Hit)
-    bool traverseBVHShadow(vec3 origin, vec3 dir, float tMax) {
-//  bool traverseBVHShadow(vec3 origin, vec3 dir, float tMax) {
-        vec3 invDir = 1.0 / dir;
-//      vec3 invDir = 1.0 / dir;
+    // traverseBVHClosestHit
+//  // traverseBVHClosestHit
+    RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
+//  RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
+        RayHitResult finalResult;
+//      RayHitResult finalResult;
+        finalResult.isHitted = false;
+//      finalResult.isHitted = false;
+        finalResult.minDistance = rayTravelDistanceLimit.max; // Initialize with max
+//      finalResult.minDistance = rayTravelDistanceLimit.max; // Initialize with max
+        float maxDist = rayTravelDistanceLimit.max;
+//      float maxDist = rayTravelDistanceLimit.max;
+        
+        vec3 invDir = 1.0 / ray.direction;
+//      vec3 invDir = 1.0 / ray.direction;
         int stack[32];
 //      int stack[32];
         int stackPtr = 0;
 //      int stackPtr = 0;
+        
         stack[stackPtr++] = 0;
 //      stack[stackPtr++] = 0;
-
+        
         while (stackPtr > 0) {
 //      while (stackPtr > 0) {
             int nodeIdx = stack[--stackPtr];
 //          int nodeIdx = stack[--stackPtr];
             Node node = nodes[nodeIdx];
 //          Node node = nodes[nodeIdx];
-
-            if (!intersectAABB(origin, invDir, node.min_left.xyz, node.max_right.xyz, tMax)) continue;
-//          if (!intersectAABB(origin, invDir, node.min_left.xyz, node.max_right.xyz, tMax)) continue;
-
+            
+            Interval currentLimit;
+//          Interval currentLimit;
+            currentLimit.min = rayTravelDistanceLimit.min;
+//          currentLimit.min = rayTravelDistanceLimit.min;
+            currentLimit.max = maxDist;
+//          currentLimit.max = maxDist;
+            
+            if (!intersectAABB_Interval(ray, invDir, currentLimit, node.min_left.xyz, node.max_right.xyz)) continue;
+//          if (!intersectAABB_Interval(ray, invDir, currentLimit, node.min_left.xyz, node.max_right.xyz)) continue;
+            
             if (node.min_left.w < 0.0) { // Leaf
 //          if (node.min_left.w < 0.0) { // Leaf
                 int triIdx = int(node.max_right.w);
 //              int triIdx = int(node.max_right.w);
-                int offset = triIdx * 9;
-//              int offset = triIdx * 9;
-                vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
-//              vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
-                vec3 v1 = vec3(triangles[offset+3], triangles[offset+4], triangles[offset+5]);
-//              vec3 v1 = vec3(triangles[offset+3], triangles[offset+4], triangles[offset+5]);
-                vec3 v2 = vec3(triangles[offset+6], triangles[offset+7], triangles[offset+8]);
-//              vec3 v2 = vec3(triangles[offset+6], triangles[offset+7], triangles[offset+8]);
-                vec3 e1 = v1 - v0;
-//              vec3 e1 = v1 - v0;
-                vec3 e2 = v2 - v0;
-//              vec3 e2 = v2 - v0;
-                vec3 h = cross(dir, e2);
-//              vec3 h = cross(dir, e2);
-                float a = dot(e1, h);
-//              float a = dot(e1, h);
-                if (abs(a) < 1e-5) continue;
-//              if (abs(a) < 1e-5) continue;
-                float f = 1.0/a;
-//              float f = 1.0/a;
-                vec3 s = origin - v0;
-//              vec3 s = origin - v0;
-                float u = f * dot(s, h);
-//              float u = f * dot(s, h);
-                if (u < 0.0 || u > 1.0) continue;
-//              if (u < 0.0 || u > 1.0) continue;
-                vec3 q = cross(s, e1);
-//              vec3 q = cross(s, e1);
-                float v = f * dot(dir, q);
-//              float v = f * dot(dir, q);
-                if (v < 0.0 || u + v > 1.0) continue;
-//              if (v < 0.0 || u + v > 1.0) continue;
-                float t = f * dot(e2, q);
-//              float t = f * dot(e2, q);
-                if (t > 0.001 && t < tMax) return true; // Occluded
-//              if (t > 0.001 && t < tMax) return true; // Occluded
-            } else { // Internal
-//          } else { // Internal
-                if (stackPtr < 32) stack[stackPtr++] = int(node.max_right.w);
-//              if (stackPtr < 32) stack[stackPtr++] = int(node.max_right.w);
-                if (stackPtr < 32) stack[stackPtr++] = int(node.min_left.w);
-//              if (stackPtr < 32) stack[stackPtr++] = int(node.min_left.w);
-            }
-//          }
-        }
-//      }
-        return false; // Not occluded
-//      return false; // Not occluded
-    }
-//  }
-
-    // Closest Hit Traversal
-    // Closest Hit Traversal
-    bool traverseBVHClosest(vec3 origin, vec3 dir, inout Hit hit) {
-//  bool traverseBVHClosest(vec3 origin, vec3 dir, inout Hit hit) {
-        vec3 invDir = 1.0 / dir;
-//      vec3 invDir = 1.0 / dir;
-        int stack[32];
-//      int stack[32];
-        int stackPtr = 0;
-//      int stackPtr = 0;
-        stack[stackPtr++] = 0;
-//      stack[stackPtr++] = 0;
-        bool hitSomething = false;
-//      bool hitSomething = false;
-
-        while (stackPtr > 0) {
-//      while (stackPtr > 0) {
-            int nodeIdx = stack[--stackPtr];
-//          int nodeIdx = stack[--stackPtr];
-            Node node = nodes[nodeIdx];
-//          Node node = nodes[nodeIdx];
-
-            if (!intersectAABB(origin, invDir, node.min_left.xyz, node.max_right.xyz, hit.t)) continue;
-//          if (!intersectAABB(origin, invDir, node.min_left.xyz, node.max_right.xyz, hit.t)) continue;
-
-            if (node.min_left.w < 0.0) { // Leaf
-//          if (node.min_left.w < 0.0) { // Leaf
-                int triIdx = int(node.max_right.w);
-//              int triIdx = int(node.max_right.w);
-                if (intersectTriangleClosest(origin, dir, triIdx, hit)) {
-//              if (intersectTriangleClosest(origin, dir, triIdx, hit)) {
-                    hitSomething = true;
-//                  hitSomething = true;
+                RayHitResult temp = intersectTriangleClosestHit(ray, triIdx, currentLimit);
+//              RayHitResult temp = intersectTriangleClosestHit(ray, triIdx, currentLimit);
+                if (temp.isHitted && temp.minDistance < maxDist) {
+//              if (temp.isHitted && temp.minDistance < maxDist) {
+                    finalResult = temp;
+//                  finalResult = temp;
+                    maxDist = temp.minDistance;
+//                  maxDist = temp.minDistance;
                 }
 //              }
+                continue;
+//              continue;
+            }
+//          }
+            
+            // Internal
+//          // Internal
+            int childIndexL = int(node.min_left.w);
+//          int childIndexL = int(node.min_left.w);
+            int childIndexR = int(node.max_right.w);
+//          int childIndexR = int(node.max_right.w);
+            Node childL = nodes[childIndexL];
+//          Node childL = nodes[childIndexL];
+            Node childR = nodes[childIndexR];
+//          Node childR = nodes[childIndexR];
+            
+            float distL = calculateDistanceToAABB3D(ray, invDir, currentLimit, childL.min_left.xyz, childL.max_right.xyz);
+//          float distL = calculateDistanceToAABB3D(ray, invDir, currentLimit, childL.min_left.xyz, childL.max_right.xyz);
+            float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
+//          float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
+            
+            if (distL == 9999999.0 && distR == 9999999.0) continue;
+//          if (distL == 9999999.0 && distR == 9999999.0) continue;
+            
+            if (distL < distR) {
+//          if (distL < distR) {
+                if (distR < maxDist) stack[stackPtr++] = childIndexR;
+//              if (distR < maxDist) stack[stackPtr++] = childIndexR;
+                if (distL < maxDist) stack[stackPtr++] = childIndexL;
+//              if (distL < maxDist) stack[stackPtr++] = childIndexL;
             } else {
 //          } else {
-                if (stackPtr < 32) stack[stackPtr++] = int(node.max_right.w);
-//              if (stackPtr < 32) stack[stackPtr++] = int(node.max_right.w);
-                if (stackPtr < 32) stack[stackPtr++] = int(node.min_left.w);
-//              if (stackPtr < 32) stack[stackPtr++] = int(node.min_left.w);
+                if (distL < maxDist) stack[stackPtr++] = childIndexL;
+//              if (distL < maxDist) stack[stackPtr++] = childIndexL;
+                if (distR < maxDist) stack[stackPtr++] = childIndexR;
+//              if (distR < maxDist) stack[stackPtr++] = childIndexR;
             }
 //          }
         }
 //      }
-        return hitSomething;
-//      return hitSomething;
-    }
-//  }
-
-    // Sampling
-    // Sampling
-    vec3 sampleHemisphere(vec3 n) {
-//  vec3 sampleHemisphere(vec3 n) {
-        float z = rand(); // cos(theta)
-//      float z = rand(); // cos(theta)
-        float r = sqrt(max(0.0, 1.0 - z * z));
-//      float r = sqrt(max(0.0, 1.0 - z * z));
-        float phi = 2.0 * PI * rand();
-//      float phi = 2.0 * PI * rand();
-        vec3 local = vec3(r * cos(phi), r * sin(phi), z);
-//      vec3 local = vec3(r * cos(phi), r * sin(phi), z);
-
-        vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-//      vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-        vec3 x = normalize(cross(up, n));
-//      vec3 x = normalize(cross(up, n));
-        vec3 y = cross(n, x);
-//      vec3 y = cross(n, x);
-
-        return x * local.x + y * local.y + n * local.z;
-//      return x * local.x + y * local.y + n * local.z;
+        
+        return finalResult;
+//      return finalResult;
     }
 //  }
 
@@ -432,221 +637,224 @@
     // Principled BSDF Helpers
     vec3 schlickFresnel(float cosine, vec3 f0) {
 //  vec3 schlickFresnel(float cosine, vec3 f0) {
-        return f0 + (1.0 - f0) * pow(1.0 - cosine, 5.0);
-//      return f0 + (1.0 - f0) * pow(1.0 - cosine, 5.0);
+        float oneMinusCos = 1.0 - cosine;
+//      float oneMinusCos = 1.0 - cosine;
+        float oneMinusCos2 = oneMinusCos * oneMinusCos;
+//      float oneMinusCos2 = oneMinusCos * oneMinusCos;
+        float oneMinusCos4 = oneMinusCos2 * oneMinusCos2;
+//      float oneMinusCos4 = oneMinusCos2 * oneMinusCos2;
+        float oneMinusCos5 = oneMinusCos4 * oneMinusCos;
+//      float oneMinusCos5 = oneMinusCos4 * oneMinusCos;
+        return f0 + (1.0 - f0) * oneMinusCos5;
+//      return f0 + (1.0 - f0) * oneMinusCos5;
     }
 //  }
 
-    vec3 sampleGGX(vec3 n, float roughness) {
-//  vec3 sampleGGX(vec3 n, float roughness) {
-        float r1 = rand();
-//      float r1 = rand();
-        float r2 = rand();
-//      float r2 = rand();
-        float a = roughness * roughness;
-//      float a = roughness * roughness;
-        float phi = 2.0 * PI * r1;
-//      float phi = 2.0 * PI * r1;
-        float cosTheta = sqrt((1.0 - r2) / (1.0 + (a * a - 1.0) * r2));
-//      float cosTheta = sqrt((1.0 - r2) / (1.0 + (a * a - 1.0) * r2));
+    vec3 sampleGGX(vec3 normal, float roughness) {
+//  vec3 sampleGGX(vec3 normal, float roughness) {
+        float random1 = rand();
+//      float random1 = rand();
+        float random2 = rand();
+//      float random2 = rand();
+
+        float term = roughness * roughness;
+//      float term = roughness * roughness;
+        float phi = 2.0 * PI * random1;
+//      float phi = 2.0 * PI * random1;
+        float cosTheta = sqrt((1.0 - random2) / (1.0 + (term * term - 1.0) * random2));
+//      float cosTheta = sqrt((1.0 - random2) / (1.0 + (term * term - 1.0) * random2));
         float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 //      float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 
-        vec3 h;
-//      vec3 h;
-        h.x = sinTheta * cos(phi);
-//      h.x = sinTheta * cos(phi);
-        h.y = sinTheta * sin(phi);
-//      h.y = sinTheta * sin(phi);
-        h.z = cosTheta;
-//      h.z = cosTheta;
+        float x = sinTheta * cos(phi);
+//      float x = sinTheta * cos(phi);
+        float y = sinTheta * sin(phi);
+//      float y = sinTheta * sin(phi);
+        float z = cosTheta;
+//      float z = cosTheta;
 
-        vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-//      vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-        vec3 tangent = normalize(cross(up, n));
-//      vec3 tangent = normalize(cross(up, n));
-        vec3 bitangent = cross(n, tangent);
-//      vec3 bitangent = cross(n, tangent);
+        // Tangent space basis construction (orthonormal basis)
+//      // Tangent space basis construction (orthonormal basis)
+        vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+//      vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        vec3 tangent = normalize(cross(up, normal));
+//      vec3 tangent = normalize(cross(up, normal));
+        vec3 bitangent = cross(normal, tangent);
+//      vec3 bitangent = cross(normal, tangent);
 
-        return normalize(tangent * h.x + bitangent * h.y + n * h.z);
-//      return normalize(tangent * h.x + bitangent * h.y + n * h.z);
+        // Transform H to world space
+//      // Transform H to world space
+        return normalize(tangent * x + bitangent * y + normal * z);
+//      return normalize(tangent * x + bitangent * y + normal * z);
     }
 //  }
 
-    vec3 reflectPrincipled(vec3 i, vec3 n) {
-//  vec3 reflectPrincipled(vec3 i, vec3 n) {
-        return i - 2.0 * dot(i, n) * n;
-//      return i - 2.0 * dot(i, n) * n;
+    vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) { 
+//  vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) { 
+        return incomingVector - 2.0 * dot(incomingVector, normal) * normal; 
+//      return incomingVector - 2.0 * dot(incomingVector, normal) * normal; 
     }
 //  }
 
-    vec3 refractPrincipled(vec3 i, vec3 n, float eta, float cosThetaI, float sinThetaT2) {
-//  vec3 refractPrincipled(vec3 i, vec3 n, float eta, float cosThetaI, float sinThetaT2) {
-        float cosThetaT = sqrt(1.0 - sinThetaT2);
-//      float cosThetaT = sqrt(1.0 - sinThetaT2);
-        return normalize(eta * i + (eta * cosThetaI - cosThetaT) * n);
-//      return normalize(eta * i + (eta * cosThetaI - cosThetaT) * n);
+    vec3 refractPrincipled(vec3 incomingVector, vec3 normal, float etaRatioOfIncidenceOverTransmission, float cosThetaIncidence, float sinThetaTransmission) {
+//  vec3 refractPrincipled(vec3 incomingVector, vec3 normal, float etaRatioOfIncidenceOverTransmission, float cosThetaIncidence, float sinThetaTransmission) {
+        float cosThetaTransmission = sqrt(1.0 - sinThetaTransmission);
+//      float cosThetaTransmission = sqrt(1.0 - sinThetaTransmission);
+        vec3 refractedDirection = normalize(etaRatioOfIncidenceOverTransmission * incomingVector + (etaRatioOfIncidenceOverTransmission * cosThetaIncidence - cosThetaTransmission) * normal);
+//      vec3 refractedDirection = normalize(etaRatioOfIncidenceOverTransmission * incomingVector + (etaRatioOfIncidenceOverTransmission * cosThetaIncidence - cosThetaTransmission) * normal);
+        return refractedDirection;
+//      return refractedDirection;
     }
 //  }
 
     // Principled BSDF Scatter Function
 //  // Principled BSDF Scatter Function
-    bool scatterPrincipled(vec3 V, vec3 N, Material mat, inout vec3 rayOrigin, inout vec3 rayDir, inout vec3 attenuation, inout bool hitSky) {
-//  bool scatterPrincipled(vec3 V, vec3 N, Material mat, inout vec3 rayOrigin, inout vec3 rayDir, inout vec3 attenuation, inout bool hitSky) {
-        vec3 albedo = mat.albedo.rgb;
-//      vec3 albedo = mat.albedo.rgb;
-        float roughness = mat.roughness;
-//      float roughness = mat.roughness;
-        float metallic = mat.metallic;
-//      float metallic = mat.metallic;
-        float transmission = mat.transmission;
-//      float transmission = mat.transmission;
-        float ior = mat.ior;
-//      float ior = mat.ior;
+    MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
+//  MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
+        MaterialLightScatteringResult materialLightScatteringResult;
+//      MaterialLightScatteringResult materialLightScatteringResult;
+        materialLightScatteringResult.isScattered = false;
+//      materialLightScatteringResult.isScattered = false;
+        materialLightScatteringResult.attenuation = vec3(1.0);
+//      materialLightScatteringResult.attenuation = vec3(1.0);
+        materialLightScatteringResult.emission = vec3(0.0);
+//      materialLightScatteringResult.emission = vec3(0.0);
+        
+        vec3 albedo = material.albedo.rgb;
+//      vec3 albedo = material.albedo.rgb;
+
+        // Principled Logic
+//      // Principled Logic
 
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
-        vec3 f0 = mix(vec3(0.04), albedo, metallic);
-//      vec3 f0 = mix(vec3(0.04), albedo, metallic);
+        vec3 f0 = mix(vec3(0.04), albedo, material.metallic);
+//      vec3 f0 = mix(vec3(0.04), albedo, material.metallic);
 
         // Schlick's fresnel approximation at incident angle
 //      // Schlick's fresnel approximation at incident angle
-        float cosTheta = min(dot(-V, N), 1.0);
-//      float cosTheta = min(dot(-V, N), 1.0);
+        float cosTheta = min(dot(-incomingRay.direction, recentRayHitResult.hittedSideNormal), 1.0);
+//      float cosTheta = min(dot(-incomingRay.direction, recentRayHitResult.hittedSideNormal), 1.0);
         vec3 fresnel = schlickFresnel(cosTheta, f0);
 //      vec3 fresnel = schlickFresnel(cosTheta, f0);
-
         // Use average fresnel for importance sampling probability
 //      // Use average fresnel for importance sampling probability
         float fresnelProb = (fresnel.r + fresnel.g + fresnel.b) / 3.0;
 //      float fresnelProb = (fresnel.r + fresnel.g + fresnel.b) / 3.0;
 
+        float randomChoice = rand();
+//      float randomChoice = rand();
+
         // --- PATH A: METALLIC REFLECTION ---
 //      // --- PATH A: METALLIC REFLECTION ---
-        // Metals always reflect. They have no diffuse and no transmission.
-//      // Metals always reflect. They have no diffuse and no transmission.
-        // We also use fresnelProbability to decide between Specular Reflection and Diffuse/Transmission for Dielectrics.
-//      // We also use fresnelProbability to decide between Specular Reflection and Diffuse/Transmission for Dielectrics.
-        // [ Probability to Reflect = Metallic + (1.0 - Metallic) * Fresnel ]
-//      // [ Probability to Reflect = Metallic + (1.0 - Metallic) * Fresnel ]
+        float specularProbability = mix(fresnelProb, 1.0, material.metallic);
+//      float specularProbability = mix(fresnelProb, 1.0, material.metallic);
 
-        float specularProb = mix(fresnelProb, 1.0, metallic);
-//      float specularProb = mix(fresnelProb, 1.0, metallic);
-        float p = rand();
-//      float p = rand();
+        if (randomChoice < specularProbability) {
+//      if (randomChoice < specularProbability) {
+             // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
+//           // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
+             vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
+//           vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
+             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+//           vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
-        if (p < specularProb) {
-//      if (p < specularProb) {
-            // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-//          // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-            vec3 microfacetN = sampleGGX(N, roughness);
-//          vec3 microfacetN = sampleGGX(N, roughness);
-            vec3 reflected = reflectPrincipled(V, microfacetN);
-//          vec3 reflected = reflectPrincipled(V, microfacetN);
-
-            if (dot(reflected, N) > 0.0) {
-//          if (dot(reflected, N) > 0.0) {
-                attenuation *= mix(vec3(1.0), albedo, metallic);
-//              attenuation *= mix(vec3(1.0), albedo, metallic);
-                rayDir = reflected;
-//              rayDir = reflected;
-                rayOrigin = rayOrigin + N * 0.001;
-//              rayOrigin = rayOrigin + N * 0.001;
-                return true;
-//              return true;
-            } else {
-//          } else {
-                // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-//              // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-                hitSky = true; // Absorb/Terminate (treat as sky hit for now to stop?) Or just false return?
-//              hitSky = true; // Absorb/Terminate (treat as sky hit for now to stop?) Or just false return?
-                // Actually returning false usually stops tracing.
-//              // Actually returning false usually stops tracing.
-                return false;
-//              return false;
-            }
-//          }
+             if (dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
+//           if (dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
+                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
+//               materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
+                 materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, material.metallic);
+//               materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, material.metallic);
+                 materialLightScatteringResult.isScattered = true;
+//               materialLightScatteringResult.isScattered = true;
+             } else {
+//           } else {
+                 // Current/Recent ray is/was absorbed (next ray is scattering into surface)
+//               // Current/Recent ray is/was absorbed (next ray is scattering into surface)
+                 materialLightScatteringResult.isScattered = false;
+//               materialLightScatteringResult.isScattered = false;
+             }
+//           }
         } else {
 //      } else {
-            // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
-//          // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
+             // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
+//           // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
 
-            // Re-normalize random variable for the next choice
-//          // Re-normalize random variable for the next choice
-            float p2 = (p - specularProb) / (1.0 - specularProb);
-//          float p2 = (p - specularProb) / (1.0 - specularProb);
+             // Re-normalize random variable for the next choice
+//           // Re-normalize random variable for the next choice
+             float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
+//           float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
 
-            if (transmission > 0.0 && p2 < transmission) {
-//          if (transmission > 0.0 && p2 < transmission) {
-                // TRANSMISSION (REFRACTION)
-//              // TRANSMISSION (REFRACTION)
-                float eta = 1.0 / ior;
-//              float eta = 1.0 / ior;
-                vec3 N_eff = N;
-//              vec3 N_eff = N;
-                bool entering = dot(V, N) < 0.0;
-//              bool entering = dot(V, N) < 0.0;
-                if (!entering) {
-//              if (!entering) {
-                    eta = ior; // Material -> Air
-//                  eta = ior; // Material -> Air
-                    N_eff = -N;
-//                  N_eff = -N;
-                }
-//              }
+             if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
+//           if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
+                 // TRANSMISSION (REFRACTION)
+//               // TRANSMISSION (REFRACTION)
+                 float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior; 
+//               float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior; 
+                 if (!recentRayHitResult.isFrontFaceHitted) {
+//               if (!recentRayHitResult.isFrontFaceHitted) {
+                     etaRatioOfIncidenceOverTransmission = material.ior; 
+//                   etaRatioOfIncidenceOverTransmission = material.ior; 
+                 }
+//               }
 
-                vec3 microfacetN = sampleGGX(N_eff, roughness);
-//              vec3 microfacetN = sampleGGX(N_eff, roughness);
-                float cosThetaIncidence = min(dot(-V, microfacetN), 1.0);
-//              float cosThetaIncidence = min(dot(-V, microfacetN), 1.0);
-                float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (eta * eta);
-//              float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (eta * eta);
+                 vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
+//               vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
 
-                // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
-//              // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
-                if (sinThetaTransmission <= 1.0) {
-//              if (sinThetaTransmission <= 1.0) {
-                     vec3 refracted = refractPrincipled(V, microfacetN, eta, cosThetaIncidence, sinThetaTransmission);
-//                   vec3 refracted = refractPrincipled(V, microfacetN, eta, cosThetaIncidence, sinThetaTransmission);
-                     attenuation *= albedo;
-//                   attenuation *= albedo;
-                     rayDir = refracted;
-//                   rayDir = refracted;
-                     rayOrigin = rayOrigin - N_eff * 0.001; // Offset INSIDE (relative to effective normal)
-//                   rayOrigin = rayOrigin - N_eff * 0.001; // Offset INSIDE (relative to effective normal)
-                     return true;
-//                   return true;
-                } else {
-//              } else {
-                    // TIR -> Reflect
-//                  // TIR -> Reflect
-                    vec3 reflected = reflectPrincipled(V, microfacetN);
-//                  vec3 reflected = reflectPrincipled(V, microfacetN);
-                    attenuation *= vec3(1.0);
-//                  attenuation *= vec3(1.0);
-                    rayDir = reflected;
-//                  rayDir = reflected;
-                    rayOrigin = rayOrigin + N_eff * 0.001;
-//                  rayOrigin = rayOrigin + N_eff * 0.001;
-                    return true;
-//                  return true;
-                }
-            } else {
-//          } else {
-                // DIFFUSE (LAMBERTIAN)
-//              // DIFFUSE (LAMBERTIAN)
-                rayDir = sampleHemisphere(N);
-//              rayDir = sampleHemisphere(N);
-                attenuation *= albedo;
-//              attenuation *= albedo;
-                rayOrigin = rayOrigin + N * 0.001;
-//              rayOrigin = rayOrigin + N * 0.001;
-                return true;
-//              return true;
-            }
-//          }
+                 float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
+//               float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
+                 float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
+//               float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
+                 
+                 vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
+//               vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
+                 vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+//               vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+
+                 // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
+//               // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
+                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                 
+                 if (sinThetaTransmission <= 1.0) {
+//               if (sinThetaTransmission <= 1.0) {
+                     materialLightScatteringResult.scatteredRay.direction = refractedDirection;
+//                   materialLightScatteringResult.scatteredRay.direction = refractedDirection;
+                     materialLightScatteringResult.attenuation = albedo;
+//                   materialLightScatteringResult.attenuation = albedo;
+                 } else {
+//               } else {
+                     materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
+//                   materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
+                     materialLightScatteringResult.attenuation = vec3(1.0);
+//                   materialLightScatteringResult.attenuation = vec3(1.0);
+                 }
+//               }
+                 materialLightScatteringResult.isScattered = true;
+//               materialLightScatteringResult.isScattered = true;
+             } else {
+//           } else {
+                 // DIFFUSE (LAMBERTIAN)
+//               // DIFFUSE (LAMBERTIAN)
+                 vec3 diffuseDirection = normalize(recentRayHitResult.hittedSideNormal + randomUnitVector());
+//               vec3 diffuseDirection = normalize(recentRayHitResult.hittedSideNormal + randomUnitVector());
+
+                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                 materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
+//               materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
+                 materialLightScatteringResult.attenuation = albedo;
+//               materialLightScatteringResult.attenuation = albedo;
+                 materialLightScatteringResult.isScattered = true;
+//               materialLightScatteringResult.isScattered = true;
+             }
+//           }
         }
 //      }
+        return materialLightScatteringResult;
+//      return materialLightScatteringResult;
     }
 //  }
 
@@ -766,8 +974,22 @@
             vec3 shadowRayOrigin = rayOrigin + N * 0.001;
 //          vec3 shadowRayOrigin = rayOrigin + N * 0.001;
 
-            if (!traverseBVHShadow(shadowRayOrigin, jitteredSunDir, jitteredDist)) {
-//          if (!traverseBVHShadow(shadowRayOrigin, jitteredSunDir, jitteredDist)) {
+            Ray shadowRay;
+//          Ray shadowRay;
+            shadowRay.origin = shadowRayOrigin;
+//          shadowRay.origin = shadowRayOrigin;
+            shadowRay.direction = jitteredSunDir;
+//          shadowRay.direction = jitteredSunDir;
+            
+            Interval shadowInterval;
+//          Interval shadowInterval;
+            shadowInterval.min = 0.001;
+//          shadowInterval.min = 0.001;
+            shadowInterval.max = jitteredDist;
+//          shadowInterval.max = jitteredDist;
+
+            if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//          if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
                 float cosTheta = max(0.0, dot(N, jitteredSunDir));
 //              float cosTheta = max(0.0, dot(N, jitteredSunDir));
                 // Inverse square falloff for point light
@@ -785,14 +1007,41 @@
 
             // --- Principled Scatter ---
 //          // --- Principled Scatter ---
-            bool scattered = scatterPrincipled(V, N, mat, rayOrigin, rayDir, attenuation, hitSky);
-//          bool scattered = scatterPrincipled(V, N, mat, rayOrigin, rayDir, attenuation, hitSky);
-            if (!scattered && hitSky) {
-//          if (!scattered && hitSky) {
-                // Absorbed? If hitSky was set to true in scatterPrincipled it means absorption/termination
-//              // Absorbed? If hitSky was set to true in scatterPrincipled it means absorption/termination
-                // accumulatedColor += vec3(0.0);
-//              // accumulatedColor += vec3(0.0);
+            Ray incomingRay;
+//          Ray incomingRay;
+            incomingRay.origin = uCameraGlobalPosition;
+//          incomingRay.origin = uCameraGlobalPosition;
+            incomingRay.direction = V;
+//          incomingRay.direction = V;
+
+            RayHitResult hitRes;
+//          RayHitResult hitRes;
+            hitRes.at = rayOrigin;
+//          hitRes.at = rayOrigin;
+            hitRes.hittedSideNormal = N;
+//          hitRes.hittedSideNormal = N;
+            hitRes.isFrontFaceHitted = dot(V, N) < 0.0;
+//          hitRes.isFrontFaceHitted = dot(V, N) < 0.0;
+            hitRes.materialIndex = triIdx;
+//          hitRes.materialIndex = triIdx;
+            hitRes.triangleIndex = triIdx; // Assuming this is correct
+//          hitRes.triangleIndex = triIdx; // Assuming this is correct
+
+            MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
+//          MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
+
+            if (res.isScattered) {
+//          if (res.isScattered) {
+                attenuation *= res.attenuation;
+//              attenuation *= res.attenuation;
+                rayOrigin = res.scatteredRay.origin;
+//              rayOrigin = res.scatteredRay.origin;
+                rayDir = res.scatteredRay.direction;
+//              rayDir = res.scatteredRay.direction;
+            } else {
+//          } else {
+                hitSky = true;
+//              hitSky = true;
             }
 //          }
         }
@@ -806,26 +1055,39 @@
 //          int maxDepth = 3;
             for (int depth = 1; depth < maxDepth; depth++) {
 //          for (int depth = 1; depth < maxDepth; depth++) {
-                Hit hit;
-//              Hit hit;
-                hit.t = INF;
-//              hit.t = INF;
-                hit.triIdx = -1;
-//              hit.triIdx = -1;
+                
+                Interval hitInterval;
+//              Interval hitInterval;
+                hitInterval.min = 0.001;
+//              hitInterval.min = 0.001;
+                hitInterval.max = INF;
+//              hitInterval.max = INF;
+                
+                Ray ray;
+//              Ray ray;
+                ray.origin = rayOrigin;
+//              ray.origin = rayOrigin;
+                ray.direction = rayDir;
+//              ray.direction = rayDir;
 
-                if (traverseBVHClosest(rayOrigin, rayDir, hit)) {
-//              if (traverseBVHClosest(rayOrigin, rayDir, hit)) {
+                RayHitResult hit = traverseBVHClosestHit(ray, hitInterval);
+//              RayHitResult hit = traverseBVHClosestHit(ray, hitInterval);
+
+                if (hit.isHitted) {
+//              if (hit.isHitted) {
                     // Hit surface
 //                  // Hit surface
                     V = rayDir; // Incoming direction for next bounce
 //                  V = rayDir; // Incoming direction for next bounce
-                    rayOrigin = rayOrigin + rayDir * hit.t;
-//                  rayOrigin = rayOrigin + rayDir * hit.t;
+                    vec3 prevOrigin = rayOrigin;
+//                  vec3 prevOrigin = rayOrigin;
+                    rayOrigin = rayOrigin + rayDir * hit.minDistance;
+//                  rayOrigin = rayOrigin + rayDir * hit.minDistance;
 
                     // Reconstruct Normal
 //                  // Reconstruct Normal
-                    int offset = hit.triIdx * 9;
-//                  int offset = hit.triIdx * 9;
+                    int offset = hit.triangleIndex * 9;
+//                  int offset = hit.triangleIndex * 9;
                     vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
 //                  vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
                     vec3 v1 = vec3(triangles[offset+3], triangles[offset+4], triangles[offset+5]);
@@ -839,8 +1101,8 @@
                     if (!frontFace) hitN = -hitN;
 //                  if (!frontFace) hitN = -hitN;
 
-                    Material mat = materials[hit.triIdx];
-//                  Material mat = materials[hit.triIdx];
+                    Material mat = materials[hit.triangleIndex];
+//                  Material mat = materials[hit.triangleIndex];
 
                     // Direct Light (NEE)
 //                  // Direct Light (NEE)
@@ -861,9 +1123,23 @@
 
                     vec3 shadowRayOrigin = rayOrigin + hitN * 0.001; // Offset outward for shadow
 //                  vec3 shadowRayOrigin = rayOrigin + hitN * 0.001; // Offset outward for shadow
+                    
+                    Ray shadowRay;
+//                  Ray shadowRay;
+                    shadowRay.origin = shadowRayOrigin;
+//                  shadowRay.origin = shadowRayOrigin;
+                    shadowRay.direction = jitteredSunDir;
+//                  shadowRay.direction = jitteredSunDir;
+                    
+                    Interval shadowInterval;
+//                  Interval shadowInterval;
+                    shadowInterval.min = 0.001;
+//                  shadowInterval.min = 0.001;
+                    shadowInterval.max = jitteredDist;
+//                  shadowInterval.max = jitteredDist;
 
-                    if (!traverseBVHShadow(shadowRayOrigin, jitteredSunDir, jitteredDist)) {
-//                  if (!traverseBVHShadow(shadowRayOrigin, jitteredSunDir, jitteredDist)) {
+                    if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
                         float cosTheta = max(0.0, dot(hitN, jitteredSunDir));
 //                      float cosTheta = max(0.0, dot(hitN, jitteredSunDir));
                         // Inverse square falloff for point light
@@ -879,12 +1155,49 @@
 
                     // --- Principled Scatter ---
 //                  // --- Principled Scatter ---
-                    // Prepare for next bounce (Indirect)
-//                  // Prepare for next bounce (Indirect)
-                    bool scattered = scatterPrincipled(V, hitN, mat, rayOrigin, rayDir, attenuation, hitSky);
-//                  bool scattered = scatterPrincipled(V, hitN, mat, rayOrigin, rayDir, attenuation, hitSky);
-                    if (!scattered) break;
-//                  if (!scattered) break;
+                    Ray incomingRay;
+//                  Ray incomingRay;
+                    incomingRay.origin = prevOrigin;
+//                  incomingRay.origin = prevOrigin;
+                    incomingRay.direction = V;
+//                  incomingRay.direction = V;
+
+                    RayHitResult hitRes;
+//                  RayHitResult hitRes;
+                    hitRes.at = rayOrigin;
+//                  hitRes.at = rayOrigin;
+                    hitRes.hittedSideNormal = hitN;
+//                  hitRes.hittedSideNormal = hitN;
+                    hitRes.isFrontFaceHitted = frontFace;
+//                  hitRes.isFrontFaceHitted = frontFace;
+                    hitRes.materialIndex = hit.triangleIndex;
+//                  hitRes.materialIndex = hit.triangleIndex;
+                    hitRes.minDistance = hit.minDistance;
+//                  hitRes.minDistance = hit.minDistance;
+                    hitRes.isHitted = true;
+//                  hitRes.isHitted = true;
+                    hitRes.triangleIndex = hit.triangleIndex;
+//                  hitRes.triangleIndex = hit.triangleIndex;
+                    hitRes.uvSurfaceCoordinate = hit.uvSurfaceCoordinate;
+//                  hitRes.uvSurfaceCoordinate = hit.uvSurfaceCoordinate;
+
+                    MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
+//                  MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
+
+                    if (res.isScattered) {
+//                  if (res.isScattered) {
+                        attenuation *= res.attenuation;
+//                      attenuation *= res.attenuation;
+                        rayOrigin = res.scatteredRay.origin;
+//                      rayOrigin = res.scatteredRay.origin;
+                        rayDir = res.scatteredRay.direction;
+//                      rayDir = res.scatteredRay.direction;
+                    } else {
+//                  } else {
+                        break;
+//                      break;
+                    }
+//                  }
 
                     // Russian Roulette
 //                  // Russian Roulette
