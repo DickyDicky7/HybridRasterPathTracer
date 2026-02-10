@@ -150,8 +150,10 @@ class HybridRenderer(mglw.WindowConfig):
 #           h, w, c = hdri_data.shape
             self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
 #           self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
-#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+            self.texture_hdri.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+#           self.texture_hdri.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+            self.texture_hdri.build_mipmaps()
+#           self.texture_hdri.build_mipmaps()
             self.texture_hdri.repeat_x = True
 #           self.texture_hdri.repeat_x = True
             self.texture_hdri.repeat_y = False
@@ -399,14 +401,14 @@ class HybridRenderer(mglw.WindowConfig):
 #               material_data = np.array([
                     color[0], color[1], color[2], 0.0, # Albedo + Padding
 #                   color[0], color[1], color[2], 0.0, # Albedo + Padding
-                    0.0,                               # Roughness
-#                   0.0,                               # Roughness
-                    1.0,                               # Metallic
-#                   1.0,                               # Metallic
+                    1.0,                               # Roughness
+#                   1.0,                               # Roughness
+                    0.0,                               # Metallic
+#                   0.0,                               # Metallic
                     0.0,                               # Transmission
 #                   0.0,                               # Transmission
-                    1.45                               # IOR
-#                   1.45                               # IOR
+                    1.5,                               # IOR
+#                   1.5,                               # IOR
                 ], dtype="f4")
 #               ], dtype="f4")
 

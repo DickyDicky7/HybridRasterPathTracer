@@ -106,6 +106,8 @@
 //      vec3 emission;
         bool isScattered;
 //      bool isScattered;
+        float sampledRoughness;
+//      float sampledRoughness;
     };
 //  };
 
@@ -190,8 +192,8 @@
 
     // Sky Color
     // Sky Color
-    vec3 getSkyColor(vec3 dir) {
-//  vec3 getSkyColor(vec3 dir) {
+    vec3 getSkyColor(vec3 dir, float roughness) {
+//  vec3 getSkyColor(vec3 dir, float roughness) {
         if (uUseHdri) {
 //      if (uUseHdri) {
             // Equirectangular mapping
@@ -204,8 +206,14 @@
 //          float u = clamp(phi / (2.0 * PI), 0.0, 1.0);
             float v = clamp(theta / PI, 0.0, 1.0);
 //          float v = clamp(theta / PI, 0.0, 1.0);
-            vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
-//          vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
+
+            float maxLod = 12.0;
+//          float maxLod = 12.0;
+            float lod = roughness * maxLod;
+//          float lod = roughness * maxLod;
+
+            vec3 hdriColor = textureLod(uHdriTexture, vec2(u, v), lod).rgb;
+//          vec3 hdriColor = textureLod(uHdriTexture, vec2(u, v), lod).rgb;
             // Radiance clamping to reduce fireflies
             // Radiance clamping to reduce fireflies
             return min(hdriColor, vec3(10.0));
@@ -769,6 +777,8 @@
 //               materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, material.metallic);
                  materialLightScatteringResult.isScattered = true;
 //               materialLightScatteringResult.isScattered = true;
+                 materialLightScatteringResult.sampledRoughness = material.roughness;
+//               materialLightScatteringResult.sampledRoughness = material.roughness;
              } else {
 //           } else {
                  // Current/Recent ray is/was absorbed (next ray is scattering into surface)
@@ -834,6 +844,8 @@
 //               }
                  materialLightScatteringResult.isScattered = true;
 //               materialLightScatteringResult.isScattered = true;
+                 materialLightScatteringResult.sampledRoughness = material.roughness;
+//               materialLightScatteringResult.sampledRoughness = material.roughness;
              } else {
 //           } else {
                  // DIFFUSE (LAMBERTIAN)
@@ -849,6 +861,8 @@
 //               materialLightScatteringResult.attenuation = albedo;
                  materialLightScatteringResult.isScattered = true;
 //               materialLightScatteringResult.isScattered = true;
+                 materialLightScatteringResult.sampledRoughness = 1.0;
+//               materialLightScatteringResult.sampledRoughness = 1.0;
              }
 //           }
         }
@@ -892,6 +906,8 @@
 //      vec3 rayOrigin;
         vec3 rayDir;
 //      vec3 rayDir;
+        float currentRayRoughness = 0.0;
+//      float currentRayRoughness = 0.0;
 
         // Incoming direction (for BSDF)
 //      // Incoming direction (for BSDF)
@@ -922,8 +938,8 @@
             rayDir = normalize(pixelSampleCenter - rayOrigin);
 //          rayDir = normalize(pixelSampleCenter - rayOrigin);
 
-            accumulatedColor = getSkyColor(rayDir);
-//          accumulatedColor = getSkyColor(rayDir);
+            accumulatedColor = getSkyColor(rayDir, 0.0);
+//          accumulatedColor = getSkyColor(rayDir, 0.0);
             hitSky = true;
 //          hitSky = true;
         } else {
@@ -1029,6 +1045,9 @@
 
             MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
 //          MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
+
+            currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
+//          currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
 
             if (res.isScattered) {
 //          if (res.isScattered) {
@@ -1184,6 +1203,9 @@
                     MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
 //                  MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
 
+                    currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
+//                  currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
+
                     if (res.isScattered) {
 //                  if (res.isScattered) {
                         attenuation *= res.attenuation;
@@ -1216,8 +1238,8 @@
 //              } else {
                     // Hit Sky
 //                  // Hit Sky
-                    vec3 sky = getSkyColor(rayDir);
-//                  vec3 sky = getSkyColor(rayDir);
+                    vec3 sky = getSkyColor(rayDir, currentRayRoughness);
+//                  vec3 sky = getSkyColor(rayDir, currentRayRoughness);
                     accumulatedColor += attenuation * sky;
 //                  accumulatedColor += attenuation * sky;
                     break;
