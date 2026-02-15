@@ -142,6 +142,11 @@ class LBVH:
         self.morton_codes: npt.NDArray[np.uint32] = morton_codes[self.sorted_indices]
 #       self.morton_codes: npt.NDArray[np.uint32] = morton_codes[self.sorted_indices]
 
+        """
+        # Scaffolding for a highly optimized implementation that was abandoned for a simpler one
+#       # Scaffolding for a highly optimized implementation that was abandoned for a simpler one
+        """
+        """
         # Reorder bounds to match sorted indices for faster tree build
 #       # Reorder bounds to match sorted indices for faster tree build
         sorted_min: npt.NDArray[np.float32] = self.min_bounds[self.sorted_indices]
@@ -237,6 +242,8 @@ class LBVH:
 #       # Internal nodes will be stored first?
         # Actually, let's just use the array we built if we can manage indices.
 #       # Actually, let's just use the array we built if we can manage indices.
+        """
+
         pass
 #       pass
 
@@ -314,6 +321,11 @@ class LBVH:
         return (start + end) // 2
 #       return (start + end) // 2
 
+    """
+    # Scaffolding for a highly optimized implementation that was abandoned for a simpler one
+#   # Scaffolding for a highly optimized implementation that was abandoned for a simpler one
+    """
+    """
     def build_recursive(self, internal_index: int, start: int, end: int) -> None:
 #   def build_recursive(self, internal_index: int, start: int, end: int) -> None:
         # This logic is strictly placeholders.
@@ -322,6 +334,7 @@ class LBVH:
 #       # Real LBVH usually generates the parent/child pointers in a bottom-up pass (Radix Tree).
         pass
 #       pass
+    """
 
     def clz32(self, x: int) -> int:
 #   def clz32(self, x: int) -> int:
@@ -402,7 +415,7 @@ class LBVH:
 #       def build(first: int, last: int) -> int:
             node_idx: int = len(self.nodes_list)
 #           node_idx: int = len(self.nodes_list)
-            
+
             # Pre-allocate placeholder
 #           # Pre-allocate placeholder
             self.nodes_list.append({ # type: ignore
