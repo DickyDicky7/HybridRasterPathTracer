@@ -8,8 +8,8 @@ import pyrr as rr
 import pyrr as rr
 from src.scene import bvh
 from src.scene import bvh
-from src.core.common_types import vec3f32
-from src.core.common_types import vec3f32
+from src.core.common_types import vec3f32, Material
+from src.core.common_types import vec3f32, Material
 
 class SceneBatch:
     def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
@@ -24,12 +24,14 @@ class SceneBatch:
 #       pass
 
 class SceneBuilder:
-    def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program) -> None:
-#   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program) -> None:
+    def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] = None) -> None:
+#   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] = None) -> None:
         self.ctx = ctx
 #       self.ctx = ctx
         self.program_geometry = program_geometry
 #       self.program_geometry = program_geometry
+        self.materials: list[Material] = materials if materials is not None else []
+#       self.materials: list[Material] = materials if materials is not None else []
         self.cube_instance_data: list[npt.NDArray[np.float32]] = []
 #       self.cube_instance_data: list[npt.NDArray[np.float32]] = []
         self.plane_instance_data: list[npt.NDArray[np.float32]] = []
@@ -60,8 +62,8 @@ class SceneBuilder:
         ], dtype="f4")
 #       ], dtype="f4")
 
-    def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
-#   def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+    def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
+#   def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
         matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
 #       matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
         matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
@@ -70,13 +72,17 @@ class SceneBuilder:
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
         matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
 #       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
-#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
+        albedo = self.materials[material_index]["albedo"]
+#       albedo = self.materials[material_index]["albedo"]
+        if len(albedo) == 4: albedo = albedo[:3]
+#       if len(albedo) == 4: albedo = albedo[:3]
+        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
+#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
         self.cube_instance_data.append(data)
 #       self.cube_instance_data.append(data)
 
-    def add_plane(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
-#   def add_plane(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, color: vec3f32) -> None:
+    def add_plane(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
+#   def add_plane(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
         matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
 #       matrix_translation: rr.Matrix44 = rr.Matrix44.from_translation(position)
         matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
@@ -85,8 +91,12 @@ class SceneBuilder:
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
         matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
 #       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
-#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), color]).astype("f4")
+        albedo = self.materials[material_index]["albedo"]
+#       albedo = self.materials[material_index]["albedo"]
+        if len(albedo) == 4: albedo = albedo[:3]
+#       if len(albedo) == 4: albedo = albedo[:3]
+        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
+#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
         self.plane_instance_data.append(data)
 #       self.plane_instance_data.append(data)
 
@@ -107,15 +117,48 @@ class SceneBuilder:
             model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
 #           model_matrix: npt.NDArray[np.float32] = model_matrix_flat.reshape((4, 4), order='F')
 
-            color: npt.NDArray[np.float32] = instance_data[16:19]
-#           color: npt.NDArray[np.float32] = instance_data[16:19]
+            # Retrieve material parameters using index
+            # Retrieve material parameters using index
+            material_index = int(instance_data[19])
+#           material_index = int(instance_data[19])
+            mat: Material = self.materials[material_index]
+#           mat: Material = self.materials[material_index]
 
+            albedo = mat["albedo"]
+#           albedo = mat["albedo"]
+            if len(albedo) == 3: albedo = (*albedo, 0.0) # Pad to vec4
+#           if len(albedo) == 3: albedo = (*albedo, 0.0) # Pad to vec4
+
+            # Material Parameters
+            # Material Parameters
+            # struct Material {
+            # struct Material {
+            #     vec4 albedo; // .w unused
+            #     vec4 albedo; // .w unused
+            #     float roughness;
+            #     float roughness;
+            #     float metallic;
+            #     float metallic;
+            #     float transmission;
+            #     float transmission;
+            #     float ior;
+            #     float ior;
+            # };
+            # };
+            # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
+#           # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
             material_data = np.array([
 #           material_data = np.array([
-                color[0], color[1], color[2], 0.0,
-#               color[0], color[1], color[2], 0.0,
-                1.0, 0.0, 0.0, 1.5,
-#               1.0, 0.0, 0.0, 1.5,
+                albedo[0], albedo[1], albedo[2], 0.0,
+#               albedo[0], albedo[1], albedo[2], 0.0,
+                mat["roughness"],
+#               mat["roughness"],
+                mat["metallic"],
+#               mat["metallic"],
+                mat["transmission"],
+#               mat["transmission"],
+                mat["ior"],
+#               mat["ior"],
             ], dtype="f4")
 #           ], dtype="f4")
 
@@ -224,8 +267,8 @@ class SceneBuilder:
 #               [
                     (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
 #                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-                    (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                    (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
                 ],
 #               ],
             )
@@ -281,8 +324,8 @@ class SceneBuilder:
 #               [
                     (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
 #                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-                    (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (vbo_instances, "16f 3f/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                    (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
                 ],
 #               ],
             )

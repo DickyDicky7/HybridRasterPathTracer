@@ -276,8 +276,8 @@
         float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
 //      float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
         
-        return finalDistanceMax > finalDistanceMin;
-//      return finalDistanceMax > finalDistanceMin;
+        return finalDistanceMax >= finalDistanceMin;
+//      return finalDistanceMax >= finalDistanceMin;
     }
 //  }
 
@@ -1014,8 +1014,8 @@
 //              float falloff = 1.0 / (jitteredDist * jitteredDist);
                 // Approximate NEE using albedo (Diffuse assumption for now)
 //              // Approximate NEE using albedo (Diffuse assumption for now)
-                vec3 directLight = mat.albedo.rgb * sunColor * cosTheta * falloff;
-//              vec3 directLight = mat.albedo.rgb * sunColor * cosTheta * falloff;
+                vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
+//              vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
                 accumulatedColor += attenuation * directLight;
 //              accumulatedColor += attenuation * directLight;
             }
@@ -1165,8 +1165,8 @@
 //                      // Inverse square falloff for point light
                         float falloff = 1.0 / (jitteredDist * jitteredDist);
 //                      float falloff = 1.0 / (jitteredDist * jitteredDist);
-                        vec3 directLight = mat.albedo.rgb * sunColor * cosTheta * falloff;
-//                      vec3 directLight = mat.albedo.rgb * sunColor * cosTheta * falloff;
+                        vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
+//                      vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
                         accumulatedColor += attenuation * directLight;
 //                      accumulatedColor += attenuation * directLight;
                     }

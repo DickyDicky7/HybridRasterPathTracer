@@ -16,10 +16,10 @@
     // Configuration
     const int KERNEL_RADIUS = 2;
 //  const int KERNEL_RADIUS = 2;
-    const float SIGMA_SPATIAL = 1.0;
-//  const float SIGMA_SPATIAL = 1.0;
-    const float SIGMA_COLOR = 0.8;
-//  const float SIGMA_COLOR = 0.8;
+    const float SIGMA_SPATIAL = 4.0;
+//  const float SIGMA_SPATIAL = 4.0;
+    const float SIGMA_COLOR = 1.0;
+//  const float SIGMA_COLOR = 1.0;
     const float SIGMA_NORMAL = 0.5;
 //  const float SIGMA_NORMAL = 0.5;
     const float SIGMA_POSITION = 0.2;

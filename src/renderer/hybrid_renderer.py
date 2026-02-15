@@ -24,8 +24,8 @@ from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.camera import Camera
 from src.scene.camera import Camera
-from src.core.common_types import vec2f32, vec3f32, vec4f32
-from src.core.common_types import vec2f32, vec3f32, vec4f32
+from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
+from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
 
 class HybridRenderer(mglw.WindowConfig):
     gl_version: tuple[int, int] = (4, 3)
@@ -48,6 +48,10 @@ class HybridRenderer(mglw.WindowConfig):
 
         self.frame_count: int = 0
 #       self.frame_count: int = 0
+        """
+        self.last_view_matrix = None
+#       self.last_view_matrix = None
+        """
 
         # -----------------------------
 #       # -----------------------------
@@ -234,18 +238,31 @@ class HybridRenderer(mglw.WindowConfig):
         # -----------------------------
 #       # -----------------------------
 
-        self.scene_builder = SceneBuilder(self.ctx, self.program_geometry)
-#       self.scene_builder = SceneBuilder(self.ctx, self.program_geometry)
+        self.materials: list[Material] = [
+#       self.materials: list[Material] = [
+            {'albedo': (1.0, 0.0, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+#           {'albedo': (1.0, 0.0, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+            {'albedo': (0.5, 1.0, 0.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+#           {'albedo': (0.5, 1.0, 0.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+            {'albedo': (0.0, 0.5, 1.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+#           {'albedo': (0.0, 0.5, 1.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+            {'albedo': (0.5, 0.5, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+#           {'albedo': (0.5, 0.5, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+        ]
+#       ]
 
-        self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(1.0, 0.2, 0.1)) # Warm Red
-#       self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(1.0, 0.2, 0.1)) # Warm Red
-        self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.4, 0.8, 0.1)) # Warm Green
-#       self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.4, 0.8, 0.1)) # Warm Green
-        self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
-#       self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), color=(0.1, 0.3, 0.9)) # Warm Blue
+        self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+#       self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 
-        self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.3, 0.3, 0.3)) # Gray Plane
-#       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), color=(0.3, 0.3, 0.3)) # Gray Plane
+        self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
+#       self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
+        self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
+#       self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
+        self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
+#       self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
+
+        self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
+#       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
 
         bvh_data, triangles_data, materials_data = self.scene_builder.build()
 #       bvh_data, triangles_data, materials_data = self.scene_builder.build()
@@ -406,6 +423,21 @@ class HybridRenderer(mglw.WindowConfig):
 
         self.camera.update(frame_time, self.key_state)
 #       self.camera.update(frame_time, self.key_state)
+
+        """
+        # Check for movement (Reset Accumulation)
+#       # Check for movement (Reset Accumulation)
+        current_view_matrix = self.camera.get_view_matrix()
+#       current_view_matrix = self.camera.get_view_matrix()
+        if self.last_view_matrix is not None:
+#       if self.last_view_matrix is not None:
+            if not np.allclose(current_view_matrix, self.last_view_matrix, atol=1e-5):
+#           if not np.allclose(current_view_matrix, self.last_view_matrix, atol=1e-5):
+                self.frame_count = 1
+#               self.frame_count = 1
+        self.last_view_matrix = current_view_matrix
+#       self.last_view_matrix = current_view_matrix
+        """
 
         # TAA Jitter
 #       # TAA Jitter
