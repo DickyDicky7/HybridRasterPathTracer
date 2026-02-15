@@ -82,10 +82,12 @@ class LBVH:
 
         # shape: (N, 3)
 #       # shape: (N, 3)
-        self.min_bounds: npt.NDArray[np.float32] = np.min(self.triangles, axis=1)
-#       self.min_bounds: npt.NDArray[np.float32] = np.min(self.triangles, axis=1)
-        self.max_bounds: npt.NDArray[np.float32] = np.max(self.triangles, axis=1)
-#       self.max_bounds: npt.NDArray[np.float32] = np.max(self.triangles, axis=1)
+        padding: float = 1.0e-4
+#       padding: float = 1.0e-4
+        self.min_bounds: npt.NDArray[np.float32] = np.min(self.triangles, axis=1) - padding
+#       self.min_bounds: npt.NDArray[np.float32] = np.min(self.triangles, axis=1) - padding
+        self.max_bounds: npt.NDArray[np.float32] = np.max(self.triangles, axis=1) + padding
+#       self.max_bounds: npt.NDArray[np.float32] = np.max(self.triangles, axis=1) + padding
 
         # 2. Normalize centroids to [0, 1] for Morton Codes
 #       # 2. Normalize centroids to [0, 1] for Morton Codes
