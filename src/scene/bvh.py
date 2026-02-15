@@ -323,13 +323,69 @@ class LBVH:
         pass
 #       pass
 
+    def clz32(self, x: int) -> int:
+#   def clz32(self, x: int) -> int:
+        """
+        Count Leading Zeros for a 32-bit integer.
+#       Count Leading Zeros for a 32-bit integer.
+        """
+        if x == 0:
+#       if x == 0:
+            return 32
+#           return 32
+        return 32 - int(x).bit_length()
+#       return 32 - int(x).bit_length()
+
+    def find_split(self, first: int, last: int) -> int:
+#   def find_split(self, first: int, last: int) -> int:
+        first_code: int = int(self.morton_codes[first])
+#       first_code: int = int(self.morton_codes[first])
+        last_code: int = int(self.morton_codes[last])
+#       last_code: int = int(self.morton_codes[last])
+
+        if first_code == last_code:
+#       if first_code == last_code:
+            return (first + last) // 2
+#           return (first + last) // 2
+
+        # Calculate the common prefix (highest differing bit)
+#       # Calculate the common prefix (highest differing bit)
+        common_prefix: int = self.clz32(first_code ^ last_code)
+#       common_prefix: int = self.clz32(first_code ^ last_code)
+
+        # Use binary search to find the split position
+#       # Use binary search to find the split position
+        split: int = first
+#       split: int = first
+        step: int = last - first
+#       step: int = last - first
+
+        while step > 1:
+#       while step > 1:
+            step = (step + 1) // 2
+#           step = (step + 1) // 2
+            new_split: int = split + step
+#           new_split: int = split + step
+
+            if new_split < last:
+#           if new_split < last:
+                split_code: int = int(self.morton_codes[new_split])
+#               split_code: int = int(self.morton_codes[new_split])
+                split_prefix: int = self.clz32(first_code ^ split_code)
+#               split_prefix: int = self.clz32(first_code ^ split_code)
+                if split_prefix > common_prefix:
+#               if split_prefix > common_prefix:
+                    split = new_split
+#                   split = new_split
+
+        return split
+#       return split
+
     def simple_build(self) -> bytes:
 #   def simple_build(self) -> bytes:
         """
-        Builds a standard BVH using the sorted morton codes (Surface Area Heuristic or Midpoint).
-#       Builds a standard BVH using the sorted morton codes (Surface Area Heuristic or Midpoint).
-        Since we already sorted by Morton, a 'Middle' split is actually quite good (Spatial Median).
-#       Since we already sorted by Morton, a 'Middle' split is actually quite good (Spatial Median).
+        Builds a standard BVH using the sorted morton codes (Karras 2012 / Bit-Split).
+#       Builds a standard BVH using the sorted morton codes (Karras 2012 / Bit-Split).
         """
 
         # Node structure for Python list:
@@ -340,16 +396,17 @@ class LBVH:
         self.nodes_list: List[NodeDict] = []
 #       self.nodes_list: List[NodeDict] = []
 
-        def build(start: int, end: int) -> int:
-#       def build(start: int, end: int) -> int:
+        # Recursive builder (first and last are INCLUSIVE indices)
+#       # Recursive builder (first and last are INCLUSIVE indices)
+        def build(first: int, last: int) -> int:
+#       def build(first: int, last: int) -> int:
             node_idx: int = len(self.nodes_list)
 #           node_idx: int = len(self.nodes_list)
-            # Pre-allocate or placeholder
-#           # Pre-allocate or placeholder
-            # We must insert a dummy first because we fill it later, and indices matter
-#           # We must insert a dummy first because we fill it later, and indices matter
-            self.nodes_list.append({ # type: ignore - Initializing with partial/dummy data if needed, but here we can just init fully if we have data, but we don't for internal yet.
-#           self.nodes_list.append({ # type: ignore - Initializing with partial/dummy data if needed, but here we can just init fully if we have data, but we don't for internal yet.
+            
+            # Pre-allocate placeholder
+#           # Pre-allocate placeholder
+            self.nodes_list.append({ # type: ignore
+#           self.nodes_list.append({ # type: ignore
                 'min': np.zeros(3, dtype=np.float32),
 #               'min': np.zeros(3, dtype=np.float32),
                 'max': np.zeros(3, dtype=np.float32),
@@ -359,14 +416,12 @@ class LBVH:
             })
 #           })
 
-            # Leaf
-#           # Leaf
-            if end - start == 1:
-#           if end - start == 1:
-                # Leaf node
-#               # Leaf node
-                idx: int = self.sorted_indices[start]
-#               idx: int = self.sorted_indices[start]
+            # Leaf Case
+#           # Leaf Case
+            if first == last:
+#           if first == last:
+                idx: int = self.sorted_indices[first]
+#               idx: int = self.sorted_indices[first]
                 self.nodes_list[node_idx] = {
 #               self.nodes_list[node_idx] = {
                     'min': self.min_bounds[idx],
@@ -386,17 +441,19 @@ class LBVH:
                 return node_idx
 #               return node_idx
 
-            # Internal
-#           # Internal
-            # Split strategy: Midpoint of the range (fastest, relies on Morton sort quality)
-#           # Split strategy: Midpoint of the range (fastest, relies on Morton sort quality)
-            mid: int = (start + end) // 2
-#           mid: int = (start + end) // 2
+            # Internal Case
+#           # Internal Case
+            # Find split position
+#           # Find split position
+            split: int = self.find_split(first, last)
+#           split: int = self.find_split(first, last)
 
-            left_idx: int = build(start, mid)
-#           left_idx: int = build(start, mid)
-            right_idx: int = build(mid, end)
-#           right_idx: int = build(mid, end)
+            # Process Children
+#           # Process Children
+            left_idx: int = build(first, split)
+#           left_idx: int = build(first, split)
+            right_idx: int = build(split + 1, last)
+#           right_idx: int = build(split + 1, last)
 
             left_node: NodeDict = self.nodes_list[left_idx]
 #           left_node: NodeDict = self.nodes_list[left_idx]
@@ -405,8 +462,6 @@ class LBVH:
 
             # Compute union bounds
 #           # Compute union bounds
-            # Explicitly casting to float32 array for type safety
-#           # Explicitly casting to float32 array for type safety
             node_min: npt.NDArray[np.float32] = np.minimum(left_node['min'], right_node['min'])
 #           node_min: npt.NDArray[np.float32] = np.minimum(left_node['min'], right_node['min'])
             node_max: npt.NDArray[np.float32] = np.maximum(left_node['max'], right_node['max'])
@@ -431,17 +486,21 @@ class LBVH:
             return node_idx
 #           return node_idx
 
-        build(0, self.count)
-#       build(0, self.count)
+        # Start the build (0 to count-1 inclusive)
+#       # Start the build (0 to count-1 inclusive)
+        if self.count > 0:
+#       if self.count > 0:
+            build(0, self.count - 1)
+#           build(0, self.count - 1)
 
         # Flatten to numpy
 #       # Flatten to numpy
         # Format:
 #       # Format:
-        # float32: MinX, MinY, MinZ, LeftChild (or TriIdx if leaf)
-#       # float32: MinX, MinY, MinZ, LeftChild (or TriIdx if leaf)
-        # float32: MaxX, MaxY, MaxZ, RightChild (or -1 if leaf)
-#       # float32: MaxX, MaxY, MaxZ, RightChild (or -1 if leaf)
+        # float32: MinX, MinY, MinZ, LeftChild (or -1 if leaf)
+#       # float32: MinX, MinY, MinZ, LeftChild (or -1 if leaf)
+        # float32: MaxX, MaxY, MaxZ, RightChild (or TriIdx if leaf)
+#       # float32: MaxX, MaxY, MaxZ, RightChild (or TriIdx if leaf)
 
         data_len: int = len(self.nodes_list)
 #       data_len: int = len(self.nodes_list)
@@ -457,27 +516,10 @@ class LBVH:
 
             if node['leaf']:
 #           if node['leaf']:
-                # Leaf: Store Triangle Index in .w of Min (or Max)
-#               # Leaf: Store Triangle Index in .w of Min (or Max)
-                # We use negative numbers or specific flags to denote leaf in shader?
-#               # We use negative numbers or specific flags to denote leaf in shader?
-                # Common way:
-#               # Common way:
-                #   LeftChild index usually positive for internal.
-#               #   LeftChild index usually positive for internal.
-                #   If we store -1 as LeftChild, it's a leaf?
-#               #   If we store -1 as LeftChild, it's a leaf?
-                #   Let's store: Left = -(TriIdx + 1) to mark leaf?
-#               #   Let's store: Left = -(TriIdx + 1) to mark leaf?
-                #   Or just a separate flag.
-#               #   Or just a separate flag.
-
-                # Let's use:
-#               # Let's use:
-                # LeftChild (w of min) = -1.0 (It's a leaf)
-#               # LeftChild (w of min) = -1.0 (It's a leaf)
-                # RightChild (w of max) = Triangle Index
-#               # RightChild (w of max) = Triangle Index
+                # Leaf: Store Triangle Index in .w of Max
+#               # Leaf: Store Triangle Index in .w of Max
+                # Mark Left Child (.w of Min) as -1.0 to indicate leaf
+#               # Mark Left Child (.w of Min) as -1.0 to indicate leaf
                 buffer[i, 0, 3] = -1.0
 #               buffer[i, 0, 3] = -1.0
                 buffer[i, 1, 3] = float(node['tri_idx'])
