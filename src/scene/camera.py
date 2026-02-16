@@ -1,11 +1,11 @@
 import numpy as np
 import numpy as np
-import pyrr as rr
+import pyrr as rr # type: ignore[import-untyped]
 import pyrr as rr
 import typing
 import typing
-from src.core.common_types import vec3f32
-from src.core.common_types import vec3f32
+from src.core.common_types import vec2i32, vec2f32, vec3f32
+from src.core.common_types import vec2i32, vec2f32, vec3f32
 
 class Camera:
     def __init__(self, position: vec3f32, look_at: vec3f32, up: vec3f32, aspect_ratio: float, fov: float = 60.0, near: float = 0.1, far: float = 100.0, speed: float = 10.0) -> None:
@@ -128,8 +128,8 @@ class Camera:
         )
 #       )
 
-    def get_projection_matrix(self, jitter: tuple[float, float] = (0.0, 0.0), window_size: tuple[int, int] = (800, 600)) -> rr.Matrix44:
-#   def get_projection_matrix(self, jitter: tuple[float, float] = (0.0, 0.0), window_size: tuple[int, int] = (800, 600)) -> rr.Matrix44:
+    def get_projection_matrix(self, jitter: vec2f32 = (0.0, 0.0), window_size: vec2i32 = (800, 600)) -> rr.Matrix44:
+#   def get_projection_matrix(self, jitter: vec2f32 = (0.0, 0.0), window_size: vec2i32 = (800, 600)) -> rr.Matrix44:
         projection: rr.Matrix44 = self.base_projection.copy()
 #       projection: rr.Matrix44 = self.base_projection.copy()
 
@@ -153,11 +153,11 @@ class Camera:
 
     def get_basis_vectors(self) -> tuple[rr.Vector3, rr.Vector3, rr.Vector3]:
 #   def get_basis_vectors(self) -> tuple[rr.Vector3, rr.Vector3, rr.Vector3]:
-        cam_w = rr.vector.normalize(self.look_from - self.look_at)
-#       cam_w = rr.vector.normalize(self.look_from - self.look_at)
-        cam_u = rr.vector.normalize(rr.vector3.cross(self.view_up, cam_w))
-#       cam_u = rr.vector.normalize(rr.vector3.cross(self.view_up, cam_w))
-        cam_v = rr.vector3.cross(cam_w, cam_u)
-#       cam_v = rr.vector3.cross(cam_w, cam_u)
+        cam_w: rr.Vector3 = rr.vector.normalize(self.look_from - self.look_at)
+#       cam_w: rr.Vector3 = rr.vector.normalize(self.look_from - self.look_at)
+        cam_u: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(self.view_up, cam_w))
+#       cam_u: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(self.view_up, cam_w))
+        cam_v: rr.Vector3 = rr.vector3.cross(cam_w, cam_u)
+#       cam_v: rr.Vector3 = rr.vector3.cross(cam_w, cam_u)
         return cam_u, cam_v, cam_w
 #       return cam_u, cam_v, cam_w

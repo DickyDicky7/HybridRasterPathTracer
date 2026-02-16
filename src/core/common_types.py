@@ -1,6 +1,45 @@
 import typing
 import typing
 
+type vec2i32 = tuple[
+    int,
+    int,
+]
+"""
+type vec2i32 = tuple[
+    int,
+    int,
+]
+"""
+
+type vec3i32 = tuple[
+    int,
+    int,
+    int,
+]
+"""
+type vec3i32 = tuple[
+    int,
+    int,
+    int,
+]
+"""
+
+type vec4i32 = tuple[
+    int,
+    int,
+    int,
+    int,
+]
+"""
+type vec4i32 = tuple[
+    int,
+    int,
+    int,
+    int,
+]
+"""
+
 type vec2f32 = tuple[
     float,
     float,

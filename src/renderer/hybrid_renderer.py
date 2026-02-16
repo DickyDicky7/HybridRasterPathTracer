@@ -6,7 +6,7 @@ import numpy as np
 import numpy as np
 import numpy.typing as npt
 import numpy.typing as npt
-import pyrr as rr
+import pyrr as rr # type: ignore[import-untyped]
 import pyrr as rr
 import pathlib as pl
 import pathlib as pl
@@ -24,16 +24,16 @@ from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.camera import Camera
 from src.scene.camera import Camera
-from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
-from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material
 
-class HybridRenderer(mglw.WindowConfig):
-    gl_version: tuple[int, int] = (4, 3)
-#   gl_version: tuple[int, int] = (4, 3)
+class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
+    gl_version: vec2i32 = (4, 3)
+#   gl_version: vec2i32 = (4, 3)
     title: str = "Hybrid Rendering: Rasterization + Path Tracing"
 #   title: str = "Hybrid Rendering: Rasterization + Path Tracing"
-    window_size: tuple[int, int] = (800, 600)
-#   window_size: tuple[int, int] = (800, 600)
+    window_size: vec2i32 = (800, 600)
+#   window_size: vec2i32 = (800, 600)
     aspect_ratio: float = window_size[0] / window_size[1]
 #   aspect_ratio: float = window_size[0] / window_size[1]
     resizable: bool = False
@@ -41,8 +41,8 @@ class HybridRenderer(mglw.WindowConfig):
     resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
 #   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
 
-    def __init__(self, **kwargs) -> None:
-#   def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: dict[str, typing.Any]) -> None:
+#   def __init__(self, **kwargs: dict[str, typing.Any]) -> None:
         super().__init__(**kwargs)
 #       super().__init__(**kwargs)
 
@@ -110,10 +110,16 @@ class HybridRenderer(mglw.WindowConfig):
 #       self.use_hdri: bool = hdri_path.exists()
         if self.use_hdri:
 #       if self.use_hdri:
-            hdri_data: npt.NDArray[np.float32] = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED).astype("f4")
-#           hdri_data: npt.NDArray[np.float32] = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED).astype("f4")
-            hdri_data = cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB)
-#           hdri_data = cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB)
+            loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
+#           loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
+            if loaded_data is None:
+#           if loaded_data is None:
+                raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
+#               raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
+            hdri_data: npt.NDArray[np.float32] = loaded_data.astype("f4")
+#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype("f4")
+            hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
+#           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
             hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
 #           hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
             h, w, c = hdri_data.shape
@@ -132,8 +138,8 @@ class HybridRenderer(mglw.WindowConfig):
 #       else:
             # Create dummy 1x1 texture
 #           # Create dummy 1x1 texture
-            self.texture_hdri: mgl.Texture = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
-#           self.texture_hdri: mgl.Texture = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
+            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
+#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
 
         # -----------------------------
 #       # -----------------------------
@@ -240,19 +246,19 @@ class HybridRenderer(mglw.WindowConfig):
 
         self.materials: list[Material] = [
 #       self.materials: list[Material] = [
-            {'albedo': (1.0, 0.0, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-#           {'albedo': (1.0, 0.0, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-            {'albedo': (0.5, 1.0, 0.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-#           {'albedo': (0.5, 1.0, 0.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-            {'albedo': (0.0, 0.5, 1.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-#           {'albedo': (0.0, 0.5, 1.0), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-            {'albedo': (0.5, 0.5, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
-#           {'albedo': (0.5, 0.5, 0.5), 'roughness': 1.0, 'metallic': 0.0, 'transmission': 0.0, 'ior': 1.5},
+            {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+#           {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
         ]
 #       ]
 
-        self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
-#       self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+        self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+#       self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 
         self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
 #       self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
@@ -266,8 +272,8 @@ class HybridRenderer(mglw.WindowConfig):
 
         bvh_data, triangles_data, materials_data = self.scene_builder.build()
 #       bvh_data, triangles_data, materials_data = self.scene_builder.build()
-        self.scene_batches = self.scene_builder.scene_batches
-#       self.scene_batches = self.scene_builder.scene_batches
+        self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
+#       self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
 
         # Upload to SSBOs
 #       # Upload to SSBOs
@@ -286,8 +292,8 @@ class HybridRenderer(mglw.WindowConfig):
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 
-        self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
-#       self.ctx.enable(mgl.DEPTH_TEST | mgl.CULL_FACE)
+        self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
+#       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 
         # Camera
 #       # Camera
@@ -338,8 +344,8 @@ class HybridRenderer(mglw.WindowConfig):
 
     def key_event(self, key: int, action: int, modifiers: int) -> None:
 #   def key_event(self, key: int, action: int, modifiers: int) -> None:
-        keys: typing.Any = self.wnd.keys
-#       keys: typing.Any = self.wnd.keys
+        keys = self.wnd.keys
+#       keys = self.wnd.keys
         if action == keys.ACTION_PRESS:
 #       if action == keys.ACTION_PRESS:
             if key == keys.W: self.key_state["W"] = True
@@ -392,8 +398,8 @@ class HybridRenderer(mglw.WindowConfig):
 
         # Poll keys (Backup for key_event)
 #       # Poll keys (Backup for key_event)
-        keys: typing.Any = self.wnd.keys
-#       keys: typing.Any = self.wnd.keys
+        keys = self.wnd.keys
+#       keys = self.wnd.keys
         try:
 #       try:
             self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
@@ -421,8 +427,8 @@ class HybridRenderer(mglw.WindowConfig):
             pass # method might not exist on all backends
 #           pass # method might not exist on all backends
 
-        self.camera.update(frame_time, self.key_state)
-#       self.camera.update(frame_time, self.key_state)
+        self.camera.update(frame_time=frame_time, key_state=self.key_state)
+#       self.camera.update(frame_time=frame_time, key_state=self.key_state)
 
         """
         # Check for movement (Reset Accumulation)
@@ -445,15 +451,15 @@ class HybridRenderer(mglw.WindowConfig):
 #       # Halton sequence for x (base 2) and y (base 3)
         # Scale to [-0.5, 0.5] pixels
 #       # Scale to [-0.5, 0.5] pixels
-        jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-#       jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-        jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
-#       jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+        jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+#       jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+        jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+#       jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 
-        transform_view = self.camera.get_view_matrix()
-#       transform_view = self.camera.get_view_matrix()
-        transform_projection = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
-#       transform_projection = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
+        transform_view: rr.Matrix44 = self.camera.get_view_matrix()
+#       transform_view: rr.Matrix44 = self.camera.get_view_matrix()
+        transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
+#       transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
 
         # 1. Rasterize to G-Buffer
 #       # 1. Rasterize to G-Buffer
@@ -462,27 +468,27 @@ class HybridRenderer(mglw.WindowConfig):
         self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 #       self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 
-        self.program_geometry["uTransformView"].write(transform_view.astype("f4").tobytes())
-#       self.program_geometry["uTransformView"].write(transform_view.astype("f4").tobytes())
-        self.program_geometry["uTransformProjection"].write(transform_projection.astype("f4").tobytes())
-#       self.program_geometry["uTransformProjection"].write(transform_projection.astype("f4").tobytes())
+        typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype("f4").tobytes())
+#       typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype("f4").tobytes())
+        typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype("f4").tobytes())
+#       typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype("f4").tobytes())
 
-        current_tri_offset = 0
-#       current_tri_offset = 0
+        current_triangle_offset: int = 0
+#       current_triangle_offset: int = 0
         for scene_batch in self.scene_batches:
 #       for scene_batch in self.scene_batches:
             if "uBaseTriangleIndexOffset" in self.program_geometry:
 #           if "uBaseTriangleIndexOffset" in self.program_geometry:
-                self.program_geometry["uBaseTriangleIndexOffset"] = current_tri_offset
-#               self.program_geometry["uBaseTriangleIndexOffset"] = current_tri_offset
+                self.program_geometry["uBaseTriangleIndexOffset"] = current_triangle_offset
+#               self.program_geometry["uBaseTriangleIndexOffset"] = current_triangle_offset
             if "uTriangleCountPerInstance" in self.program_geometry:
 #           if "uTriangleCountPerInstance" in self.program_geometry:
                 self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
 #               self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
             scene_batch.vao.render(instances=scene_batch.number_of_instances)
 #           scene_batch.vao.render(instances=scene_batch.number_of_instances)
-            current_tri_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
-#           current_tri_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
+            current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
+#           current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
 
         # 2. Compute Shade
 #       # 2. Compute Shade
@@ -515,12 +521,12 @@ class HybridRenderer(mglw.WindowConfig):
 #           self.program_shading["uTime"] = time
         if "uPointLight001GlobalPosition" in self.program_shading:
 #       if "uPointLight001GlobalPosition" in self.program_shading:
-            radius = 6.0
-#           radius = 6.0
-            x = np.cos(time) * radius
-#           x = np.cos(time) * radius
-            z = np.sin(time) * radius
-#           z = np.sin(time) * radius
+            radius: float = 6.0
+#           radius: float = 6.0
+            x: float = np.cos(time) * radius
+#           x: float = np.cos(time) * radius
+            z: float = np.sin(time) * radius
+#           z: float = np.sin(time) * radius
             self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
 #           self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
         if "uCameraGlobalPosition" in self.program_shading:
@@ -556,32 +562,32 @@ class HybridRenderer(mglw.WindowConfig):
             cam_u, cam_v, cam_w = self.camera.get_basis_vectors()
 #           cam_u, cam_v, cam_w = self.camera.get_basis_vectors()
 
-            focal_length = rr.vector.length(self.camera.look_from - self.camera.look_at)
-#           focal_length = rr.vector.length(self.camera.look_from - self.camera.look_at)
-            tan_half_fovy = np.tan(np.deg2rad(60.0) / 2.0)
-#           tan_half_fovy = np.tan(np.deg2rad(60.0) / 2.0)
-            viewport_height = 2.0 * tan_half_fovy * focal_length
-#           viewport_height = 2.0 * tan_half_fovy * focal_length
-            viewport_width = viewport_height * self.aspect_ratio
-#           viewport_width = viewport_height * self.aspect_ratio
+            focal_length: float = rr.vector.length(self.camera.look_from - self.camera.look_at)
+#           focal_length: float = rr.vector.length(self.camera.look_from - self.camera.look_at)
+            tan_half_fovy: float = np.tan(np.deg2rad(60.0) / 2.0)
+#           tan_half_fovy: float = np.tan(np.deg2rad(60.0) / 2.0)
+            viewport_height: float = 2.0 * tan_half_fovy * focal_length
+#           viewport_height: float = 2.0 * tan_half_fovy * focal_length
+            viewport_width: float = viewport_height * self.aspect_ratio
+#           viewport_width: float = viewport_height * self.aspect_ratio
 
-            viewport_u = cam_u * viewport_width
-#           viewport_u = cam_u * viewport_width
-            viewport_v = cam_v * viewport_height
-#           viewport_v = cam_v * viewport_height
+            viewport_u: rr.Vector3 = cam_u * viewport_width
+#           viewport_u: rr.Vector3 = cam_u * viewport_width
+            viewport_v: rr.Vector3 = cam_v * viewport_height
+#           viewport_v: rr.Vector3 = cam_v * viewport_height
 
-            pixel_delta_u = viewport_u / w
-#           pixel_delta_u = viewport_u / w
-            pixel_delta_v = viewport_v / h
-#           pixel_delta_v = viewport_v / h
+            pixel_delta_u: rr.Vector3 = viewport_u / w
+#           pixel_delta_u: rr.Vector3 = viewport_u / w
+            pixel_delta_v: rr.Vector3 = viewport_v / h
+#           pixel_delta_v: rr.Vector3 = viewport_v / h
 
-            viewport_upper_left = self.camera.look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
-#           viewport_upper_left = self.camera.look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
-            pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
-#           pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
+            viewport_upper_left: rr.Vector3 = self.camera.look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
+#           viewport_upper_left: rr.Vector3 = self.camera.look_from - (cam_w * focal_length) - (viewport_u / 2.0) - (viewport_v / 2.0)
+            pixel_00_coordinates: rr.Vector3 = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
+#           pixel_00_coordinates: rr.Vector3 = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
 
-            self.program_shading["uPixel00Coordinates"] = tuple(pixel00_loc)
-#           self.program_shading["uPixel00Coordinates"] = tuple(pixel00_loc)
+            self.program_shading["uPixel00Coordinates"] = tuple(pixel_00_coordinates)
+#           self.program_shading["uPixel00Coordinates"] = tuple(pixel_00_coordinates)
             self.program_shading["uPixelDeltaU"] = tuple(pixel_delta_u)
 #           self.program_shading["uPixelDeltaU"] = tuple(pixel_delta_u)
             self.program_shading["uPixelDeltaV"] = tuple(pixel_delta_v)

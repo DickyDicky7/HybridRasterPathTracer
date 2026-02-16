@@ -4,12 +4,12 @@ import numpy as np
 import numpy as np
 import numpy.typing as npt
 import numpy.typing as npt
-import pyrr as rr
+import pyrr as rr # type: ignore[import-untyped]
 import pyrr as rr
 from src.scene import bvh
 from src.scene import bvh
-from src.core.common_types import vec3f32, Material
-from src.core.common_types import vec3f32, Material
+from src.core.common_types import vec3f32, vec4f32, Material
+from src.core.common_types import vec3f32, vec4f32, Material
 
 class SceneBatch:
     def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
@@ -24,8 +24,8 @@ class SceneBatch:
 #       pass
 
 class SceneBuilder:
-    def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] = None) -> None:
-#   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] = None) -> None:
+    def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
+#   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
         self.ctx = ctx
 #       self.ctx = ctx
         self.program_geometry = program_geometry
@@ -43,22 +43,22 @@ class SceneBuilder:
         self.scene_batches: list[SceneBatch] = []
 #       self.scene_batches: list[SceneBatch] = []
 
-    def face(self, vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
-#   def face(self, vertex_a: vec3f32, vertex_b: vec3f32, vertex_c: vec3f32, vertex_d: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
+    def face(self, vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32, vertex3: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
+#   def face(self, vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32, vertex3: vec3f32, face_normal: vec3f32) -> npt.NDArray[np.float32]:
         return np.array([
 #       return np.array([
-            *vertex_a, *face_normal,
-#           *vertex_a, *face_normal,
-            *vertex_b, *face_normal,
-#           *vertex_b, *face_normal,
-            *vertex_c, *face_normal,
-#           *vertex_c, *face_normal,
-            *vertex_c, *face_normal,
-#           *vertex_c, *face_normal,
-            *vertex_d, *face_normal,
-#           *vertex_d, *face_normal,
-            *vertex_a, *face_normal,
-#           *vertex_a, *face_normal,
+            *vertex0, *face_normal,
+#           *vertex0, *face_normal,
+            *vertex1, *face_normal,
+#           *vertex1, *face_normal,
+            *vertex2, *face_normal,
+#           *vertex2, *face_normal,
+            *vertex2, *face_normal,
+#           *vertex2, *face_normal,
+            *vertex3, *face_normal,
+#           *vertex3, *face_normal,
+            *vertex0, *face_normal,
+#           *vertex0, *face_normal,
         ], dtype="f4")
 #       ], dtype="f4")
 
@@ -72,8 +72,8 @@ class SceneBuilder:
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
         matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
 #       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-        albedo = self.materials[material_index]["albedo"]
-#       albedo = self.materials[material_index]["albedo"]
+        albedo: vec3f32 = self.materials[material_index]["albedo"]
+#       albedo: vec3f32 = self.materials[material_index]["albedo"]
         if len(albedo) == 4: albedo = albedo[:3]
 #       if len(albedo) == 4: albedo = albedo[:3]
         data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
@@ -91,8 +91,8 @@ class SceneBuilder:
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
         matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
 #       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-        albedo = self.materials[material_index]["albedo"]
-#       albedo = self.materials[material_index]["albedo"]
+        albedo: vec3f32 = self.materials[material_index]["albedo"]
+#       albedo: vec3f32 = self.materials[material_index]["albedo"]
         if len(albedo) == 4: albedo = albedo[:3]
 #       if len(albedo) == 4: albedo = albedo[:3]
         data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
@@ -121,13 +121,11 @@ class SceneBuilder:
             # Retrieve material parameters using index
             material_index = int(instance_data[19])
 #           material_index = int(instance_data[19])
-            mat: Material = self.materials[material_index]
-#           mat: Material = self.materials[material_index]
+            material: Material = self.materials[material_index]
+#           material: Material = self.materials[material_index]
 
-            albedo = mat["albedo"]
-#           albedo = mat["albedo"]
-            if len(albedo) == 3: albedo = (*albedo, 0.0) # Pad to vec4
-#           if len(albedo) == 3: albedo = (*albedo, 0.0) # Pad to vec4
+            albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
+#           albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
 
             # Material Parameters
             # Material Parameters
@@ -147,191 +145,186 @@ class SceneBuilder:
             # };
             # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
 #           # Layout: [r, g, b, padding, roughness, metallic, transmission, ior]
-            material_data = np.array([
-#           material_data = np.array([
+            material_data: npt.NDArray[np.float32] = np.array([
+#           material_data: npt.NDArray[np.float32] = np.array([
                 albedo[0], albedo[1], albedo[2], 0.0,
 #               albedo[0], albedo[1], albedo[2], 0.0,
-                mat["roughness"],
-#               mat["roughness"],
-                mat["metallic"],
-#               mat["metallic"],
-                mat["transmission"],
-#               mat["transmission"],
-                mat["ior"],
-#               mat["ior"],
+                material["roughness"],
+#               material["roughness"],
+                material["metallic"],
+#               material["metallic"],
+                material["transmission"],
+#               material["transmission"],
+                material["ior"],
+#               material["ior"],
             ], dtype="f4")
 #           ], dtype="f4")
 
-            for tri_verts in base_triangles:
-#           for tri_verts in base_triangles:
+            for triangle_vertices in base_triangles:
+#           for triangle_vertices in base_triangles:
                 ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
 #               ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
-                verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
-#               verts_h: npt.NDArray[np.float32] = np.hstack([tri_verts, ones])
-                transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
-#               transformed_verts_h: npt.NDArray[np.float32] = model_matrix @ verts_h.T
-                transformed_verts_h = transformed_verts_h.T
-#               transformed_verts_h = transformed_verts_h.T
-                transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
-#               transformed_tri: npt.NDArray[np.float32] = transformed_verts_h[:, :3]
-                self.scene_triangles.append(transformed_tri.copy())
-#               self.scene_triangles.append(transformed_tri.copy())
+                vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
+#               vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
+                transformed_vertices_h: npt.NDArray[np.float32] = model_matrix @ vertices_h.T
+#               transformed_vertices_h: npt.NDArray[np.float32] = model_matrix @ vertices_h.T
+                transformed_vertices_h = transformed_vertices_h.T
+#               transformed_vertices_h = transformed_vertices_h.T
+                transformed_triangle: npt.NDArray[np.float32] = transformed_vertices_h[:, :3]
+#               transformed_triangle: npt.NDArray[np.float32] = transformed_vertices_h[:, :3]
+                self.scene_triangles.append(transformed_triangle.copy())
+#               self.scene_triangles.append(transformed_triangle.copy())
                 self.scene_materials.append(material_data)
 #               self.scene_materials.append(material_data)
 
     def build(self) -> tuple[bytes, bytes, bytes]:
 #   def build(self) -> tuple[bytes, bytes, bytes]:
+        def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
+#       def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
+            return np.array([vertex0, vertex1, vertex2], dtype="f4")
+#           return np.array([vertex0, vertex1, vertex2], dtype="f4")
+
         # Create Cube Batch
 #       # Create Cube Batch
         if self.cube_instance_data:
 #       if self.cube_instance_data:
-            point0: vec3f32 = (-0.5, -0.5, 0.5)
-#           point0: vec3f32 = (-0.5, -0.5, 0.5)
-            point1: vec3f32 = (0.5, -0.5, 0.5)
-#           point1: vec3f32 = (0.5, -0.5, 0.5)
-            point2: vec3f32 = (0.5, 0.5, 0.5)
-#           point2: vec3f32 = (0.5, 0.5, 0.5)
-            point3: vec3f32 = (-0.5, 0.5, 0.5)
-#           point3: vec3f32 = (-0.5, 0.5, 0.5)
-            point4: vec3f32 = (-0.5, -0.5, -0.5)
-#           point4: vec3f32 = (-0.5, -0.5, -0.5)
-            point5: vec3f32 = (0.5, -0.5, -0.5)
-#           point5: vec3f32 = (0.5, -0.5, -0.5)
-            point6: vec3f32 = (0.5, 0.5, -0.5)
-#           point6: vec3f32 = (0.5, 0.5, -0.5)
-            point7: vec3f32 = (-0.5, 0.5, -0.5)
-#           point7: vec3f32 = (-0.5, 0.5, -0.5)
-
-            def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
-#           def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
-                return np.array([v0, v1, v2], dtype="f4")
-#               return np.array([v0, v1, v2], dtype="f4")
+            cube_point0: vec3f32 = (-0.5, -0.5, 0.5)
+#           cube_point0: vec3f32 = (-0.5, -0.5, 0.5)
+            cube_point1: vec3f32 = (0.5, -0.5, 0.5)
+#           cube_point1: vec3f32 = (0.5, -0.5, 0.5)
+            cube_point2: vec3f32 = (0.5, 0.5, 0.5)
+#           cube_point2: vec3f32 = (0.5, 0.5, 0.5)
+            cube_point3: vec3f32 = (-0.5, 0.5, 0.5)
+#           cube_point3: vec3f32 = (-0.5, 0.5, 0.5)
+            cube_point4: vec3f32 = (-0.5, -0.5, -0.5)
+#           cube_point4: vec3f32 = (-0.5, -0.5, -0.5)
+            cube_point5: vec3f32 = (0.5, -0.5, -0.5)
+#           cube_point5: vec3f32 = (0.5, -0.5, -0.5)
+            cube_point6: vec3f32 = (0.5, 0.5, -0.5)
+#           cube_point6: vec3f32 = (0.5, 0.5, -0.5)
+            cube_point7: vec3f32 = (-0.5, 0.5, -0.5)
+#           cube_point7: vec3f32 = (-0.5, 0.5, -0.5)
 
             cube_base_triangles: list[npt.NDArray[np.float32]] = []
 #           cube_base_triangles: list[npt.NDArray[np.float32]] = []
-            cube_base_triangles.append(get_tri_verts(point0, point1, point2))
-#           cube_base_triangles.append(get_tri_verts(point0, point1, point2))
-            cube_base_triangles.append(get_tri_verts(point0, point2, point3))
-#           cube_base_triangles.append(get_tri_verts(point0, point2, point3))
-            cube_base_triangles.append(get_tri_verts(point5, point4, point7))
-#           cube_base_triangles.append(get_tri_verts(point5, point4, point7))
-            cube_base_triangles.append(get_tri_verts(point5, point7, point6))
-#           cube_base_triangles.append(get_tri_verts(point5, point7, point6))
-            cube_base_triangles.append(get_tri_verts(point4, point0, point3))
-#           cube_base_triangles.append(get_tri_verts(point4, point0, point3))
-            cube_base_triangles.append(get_tri_verts(point4, point3, point7))
-#           cube_base_triangles.append(get_tri_verts(point4, point3, point7))
-            cube_base_triangles.append(get_tri_verts(point1, point5, point6))
-#           cube_base_triangles.append(get_tri_verts(point1, point5, point6))
-            cube_base_triangles.append(get_tri_verts(point1, point6, point2))
-#           cube_base_triangles.append(get_tri_verts(point1, point6, point2))
-            cube_base_triangles.append(get_tri_verts(point3, point2, point6))
-#           cube_base_triangles.append(get_tri_verts(point3, point2, point6))
-            cube_base_triangles.append(get_tri_verts(point3, point6, point7))
-#           cube_base_triangles.append(get_tri_verts(point3, point6, point7))
-            cube_base_triangles.append(get_tri_verts(point4, point5, point1))
-#           cube_base_triangles.append(get_tri_verts(point4, point5, point1))
-            cube_base_triangles.append(get_tri_verts(point4, point1, point0))
-#           cube_base_triangles.append(get_tri_verts(point4, point1, point0))
+            cube_base_triangles.append(get_triangle_vertices(cube_point0, cube_point1, cube_point2))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point0, cube_point1, cube_point2))
+            cube_base_triangles.append(get_triangle_vertices(cube_point0, cube_point2, cube_point3))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point0, cube_point2, cube_point3))
+            cube_base_triangles.append(get_triangle_vertices(cube_point5, cube_point4, cube_point7))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point5, cube_point4, cube_point7))
+            cube_base_triangles.append(get_triangle_vertices(cube_point5, cube_point7, cube_point6))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point5, cube_point7, cube_point6))
+            cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point0, cube_point3))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point0, cube_point3))
+            cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point3, cube_point7))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point3, cube_point7))
+            cube_base_triangles.append(get_triangle_vertices(cube_point1, cube_point5, cube_point6))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point1, cube_point5, cube_point6))
+            cube_base_triangles.append(get_triangle_vertices(cube_point1, cube_point6, cube_point2))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point1, cube_point6, cube_point2))
+            cube_base_triangles.append(get_triangle_vertices(cube_point3, cube_point2, cube_point6))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point3, cube_point2, cube_point6))
+            cube_base_triangles.append(get_triangle_vertices(cube_point3, cube_point6, cube_point7))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point3, cube_point6, cube_point7))
+            cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point5, cube_point1))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point5, cube_point1))
+            cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point1, cube_point0))
+#           cube_base_triangles.append(get_triangle_vertices(cube_point4, cube_point1, cube_point0))
 
-            self.append_transformed_triangles(self.cube_instance_data, cube_base_triangles)
-#           self.append_transformed_triangles(self.cube_instance_data, cube_base_triangles)
+            self.append_transformed_triangles(instance_data_list=self.cube_instance_data, base_triangles=cube_base_triangles)
+#           self.append_transformed_triangles(instance_data_list=self.cube_instance_data, base_triangles=cube_base_triangles)
 
-            geometries: list[npt.NDArray[np.float32]] = []
-#           geometries: list[npt.NDArray[np.float32]] = []
-            geometries.append(self.face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
-#           geometries.append(self.face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 0.0, 1.0)))
-            geometries.append(self.face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=(0.0, 0.0, -1.0)))
-#           geometries.append(self.face(vertex_a=point5, vertex_b=point4, vertex_c=point7, vertex_d=point6, face_normal=(0.0, 0.0, -1.0)))
-            geometries.append(self.face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0, 0.0, 0.0)))
-#           geometries.append(self.face(vertex_a=point4, vertex_b=point0, vertex_c=point3, vertex_d=point7, face_normal=(-1.0, 0.0, 0.0)))
-            geometries.append(self.face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=(1.0, 0.0, 0.0)))
-#           geometries.append(self.face(vertex_a=point1, vertex_b=point5, vertex_c=point6, vertex_d=point2, face_normal=(1.0, 0.0, 0.0)))
-            geometries.append(self.face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=(0.0, 1.0, 0.0)))
-#           geometries.append(self.face(vertex_a=point3, vertex_b=point2, vertex_c=point6, vertex_d=point7, face_normal=(0.0, 1.0, 0.0)))
-            geometries.append(self.face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=(0.0, -1.0, 0.0)))
-#           geometries.append(self.face(vertex_a=point4, vertex_b=point5, vertex_c=point1, vertex_d=point0, face_normal=(0.0, -1.0, 0.0)))
+            cube_geometries: list[npt.NDArray[np.float32]] = []
+#           cube_geometries: list[npt.NDArray[np.float32]] = []
+            cube_geometries.append(self.face(vertex0=cube_point0, vertex1=cube_point1, vertex2=cube_point2, vertex3=cube_point3, face_normal=(0.0, 0.0, 1.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point0, vertex1=cube_point1, vertex2=cube_point2, vertex3=cube_point3, face_normal=(0.0, 0.0, 1.0)))
+            cube_geometries.append(self.face(vertex0=cube_point5, vertex1=cube_point4, vertex2=cube_point7, vertex3=cube_point6, face_normal=(0.0, 0.0, -1.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point5, vertex1=cube_point4, vertex2=cube_point7, vertex3=cube_point6, face_normal=(0.0, 0.0, -1.0)))
+            cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point0, vertex2=cube_point3, vertex3=cube_point7, face_normal=(-1.0, 0.0, 0.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point0, vertex2=cube_point3, vertex3=cube_point7, face_normal=(-1.0, 0.0, 0.0)))
+            cube_geometries.append(self.face(vertex0=cube_point1, vertex1=cube_point5, vertex2=cube_point6, vertex3=cube_point2, face_normal=(1.0, 0.0, 0.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point1, vertex1=cube_point5, vertex2=cube_point6, vertex3=cube_point2, face_normal=(1.0, 0.0, 0.0)))
+            cube_geometries.append(self.face(vertex0=cube_point3, vertex1=cube_point2, vertex2=cube_point6, vertex3=cube_point7, face_normal=(0.0, 1.0, 0.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point3, vertex1=cube_point2, vertex2=cube_point6, vertex3=cube_point7, face_normal=(0.0, 1.0, 0.0)))
+            cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point5, vertex2=cube_point1, vertex3=cube_point0, face_normal=(0.0, -1.0, 0.0)))
+#           cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point5, vertex2=cube_point1, vertex3=cube_point0, face_normal=(0.0, -1.0, 0.0)))
 
-            vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
-#           vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
-            instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
-#           instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
-            vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
-#           vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+            cube_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(cube_geometries).tobytes())
+#           cube_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(cube_geometries).tobytes())
+            cube_instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
+#           cube_instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
+            cube_vbo_instances: mgl.Buffer = self.ctx.buffer(cube_instance_bytes)
+#           cube_vbo_instances: mgl.Buffer = self.ctx.buffer(cube_instance_bytes)
 
-            vao_cube: mgl.VertexArray = self.ctx.vertex_array(
-#           vao_cube: mgl.VertexArray = self.ctx.vertex_array(
+            cube_vao: mgl.VertexArray = self.ctx.vertex_array(
+#           cube_vao: mgl.VertexArray = self.ctx.vertex_array(
                 self.program_geometry,
 #               self.program_geometry,
                 [
 #               [
-                    (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-#                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-                    (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                    (cube_vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+#                   (cube_vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+                    (cube_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (cube_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
                 ],
 #               ],
             )
 #           )
-            self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
-#           self.scene_batches.append(SceneBatch(vao=vao_cube, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
+            self.scene_batches.append(SceneBatch(vao=cube_vao, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
+#           self.scene_batches.append(SceneBatch(vao=cube_vao, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
 
         # Create Plane Batch
 #       # Create Plane Batch
         if self.plane_instance_data:
 #       if self.plane_instance_data:
-            point0: vec3f32 = (-0.5, 0.0, 0.5)
-#           point0: vec3f32 = (-0.5, 0.0, 0.5)
-            point1: vec3f32 = (0.5, 0.0, 0.5)
-#           point1: vec3f32 = (0.5, 0.0, 0.5)
-            point2: vec3f32 = (0.5, 0.0, -0.5)
-#           point2: vec3f32 = (0.5, 0.0, -0.5)
-            point3: vec3f32 = (-0.5, 0.0, -0.5)
-#           point3: vec3f32 = (-0.5, 0.0, -0.5)
-
-            def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
-#           def get_tri_verts(v0, v1, v2) -> npt.NDArray[np.float32]:
-                return np.array([v0, v1, v2], dtype="f4")
-#               return np.array([v0, v1, v2], dtype="f4")
+            plane_point0: vec3f32 = (-0.5, 0.0, 0.5)
+#           plane_point0: vec3f32 = (-0.5, 0.0, 0.5)
+            plane_point1: vec3f32 = (0.5, 0.0, 0.5)
+#           plane_point1: vec3f32 = (0.5, 0.0, 0.5)
+            plane_point2: vec3f32 = (0.5, 0.0, -0.5)
+#           plane_point2: vec3f32 = (0.5, 0.0, -0.5)
+            plane_point3: vec3f32 = (-0.5, 0.0, -0.5)
+#           plane_point3: vec3f32 = (-0.5, 0.0, -0.5)
 
             plane_base_triangles: list[npt.NDArray[np.float32]] = []
 #           plane_base_triangles: list[npt.NDArray[np.float32]] = []
-            plane_base_triangles.append(get_tri_verts(point0, point1, point2))
-#           plane_base_triangles.append(get_tri_verts(point0, point1, point2))
-            plane_base_triangles.append(get_tri_verts(point0, point2, point3))
-#           plane_base_triangles.append(get_tri_verts(point0, point2, point3))
+            plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point1, plane_point2))
+#           plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point1, plane_point2))
+            plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
+#           plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
 
-            self.append_transformed_triangles(self.plane_instance_data, plane_base_triangles)
-#           self.append_transformed_triangles(self.plane_instance_data, plane_base_triangles)
+            self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles)
+#           self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles)
 
-            geometries: list[npt.NDArray[np.float32]] = []
-#           geometries: list[npt.NDArray[np.float32]] = []
-            geometries.append(self.face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
-#           geometries.append(self.face(vertex_a=point0, vertex_b=point1, vertex_c=point2, vertex_d=point3, face_normal=(0.0, 1.0, 0.0)))
+            plane_geometries: list[npt.NDArray[np.float32]] = []
+#           plane_geometries: list[npt.NDArray[np.float32]] = []
+            plane_geometries.append(self.face(vertex0=plane_point0, vertex1=plane_point1, vertex2=plane_point2, vertex3=plane_point3, face_normal=(0.0, 1.0, 0.0)))
+#           plane_geometries.append(self.face(vertex0=plane_point0, vertex1=plane_point1, vertex2=plane_point2, vertex3=plane_point3, face_normal=(0.0, 1.0, 0.0)))
 
-            vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
-#           vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(geometries).tobytes())
-            instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
-#           instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
-            vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
-#           vbo_instances: mgl.Buffer = self.ctx.buffer(instance_bytes)
+            plane_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(plane_geometries).tobytes())
+#           plane_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(plane_geometries).tobytes())
+            plane_instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
+#           plane_instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
+            plane_vbo_instances: mgl.Buffer = self.ctx.buffer(plane_instance_bytes)
+#           plane_vbo_instances: mgl.Buffer = self.ctx.buffer(plane_instance_bytes)
 
-            vao_plane: mgl.VertexArray = self.ctx.vertex_array(
-#           vao_plane: mgl.VertexArray = self.ctx.vertex_array(
+            plane_vao: mgl.VertexArray = self.ctx.vertex_array(
+#           plane_vao: mgl.VertexArray = self.ctx.vertex_array(
                 self.program_geometry,
 #               self.program_geometry,
                 [
 #               [
-                    (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-#                   (vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
-                    (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+                    (plane_vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+#                   (plane_vbo_mesh, "3f 3f", "inVertexLocalPosition", "inVertexLocalNormal"),
+                    (plane_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
+#                   (plane_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
                 ],
 #               ],
             )
 #           )
-            self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
-#           self.scene_batches.append(SceneBatch(vao=vao_plane, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
+            self.scene_batches.append(SceneBatch(vao=plane_vao, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
+#           self.scene_batches.append(SceneBatch(vao=plane_vao, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
 
         # Build BVH
 #       # Build BVH

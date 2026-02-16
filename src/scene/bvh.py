@@ -18,14 +18,14 @@ def expand_bits(v: npt.NDArray[np.uint32]) -> npt.NDArray[np.uint32]:
     v = (v | (v <<  2)) & 0x09249249
 #   v = (v | (v <<  2)) & 0x09249249
     """
-    v = (v * 0x00010001) & 0xFF0000FF
-#   v = (v * 0x00010001) & 0xFF0000FF
-    v = (v * 0x00000101) & 0x0F00F00F
-#   v = (v * 0x00000101) & 0x0F00F00F
-    v = (v * 0x00000011) & 0xC30C30C3
-#   v = (v * 0x00000011) & 0xC30C30C3
-    v = (v * 0x00000005) & 0x49249249
-#   v = (v * 0x00000005) & 0x49249249
+    v = ((v * np.uint32(0x00010001)) & np.uint32(0xFF0000FF)).astype(np.uint32)
+#   v = ((v * np.uint32(0x00010001)) & np.uint32(0xFF0000FF)).astype(np.uint32)
+    v = ((v * np.uint32(0x00000101)) & np.uint32(0x0F00F00F)).astype(np.uint32)
+#   v = ((v * np.uint32(0x00000101)) & np.uint32(0x0F00F00F)).astype(np.uint32)
+    v = ((v * np.uint32(0x00000011)) & np.uint32(0xC30C30C3)).astype(np.uint32)
+#   v = ((v * np.uint32(0x00000011)) & np.uint32(0xC30C30C3)).astype(np.uint32)
+    v = ((v * np.uint32(0x00000005)) & np.uint32(0x49249249)).astype(np.uint32)
+#   v = ((v * np.uint32(0x00000005)) & np.uint32(0x49249249)).astype(np.uint32)
     return v
 #   return v
 
@@ -279,7 +279,7 @@ class LBVH:
 #       # Max nodes = 2 * N - 1
         num_nodes: int = 2 * self.count
 #       num_nodes: int = 2 * self.count
-        
+
         # Format: 2 vec4s per node. (Min, Max).
 #       # Format: 2 vec4s per node. (Min, Max).
         # Min: x, y, z, left_child_idx (or -1.0 if leaf)
@@ -288,7 +288,7 @@ class LBVH:
 #       # Max: x, y, z, right_child_idx (or tri_idx if leaf)
         self.gpu_nodes: npt.NDArray[np.float32] = np.zeros((num_nodes, 2, 4), dtype=np.float32)
 #       self.gpu_nodes: npt.NDArray[np.float32] = np.zeros((num_nodes, 2, 4), dtype=np.float32)
-        
+
         self.next_node_idx: int = 0
 #       self.next_node_idx: int = 0
 
@@ -307,51 +307,51 @@ class LBVH:
 #           if first == last:
                 idx: int = self.sorted_indices[first]
 #               idx: int = self.sorted_indices[first]
-                
+
                 # Min: bound_min, -1.0
 #               # Min: bound_min, -1.0
                 self.gpu_nodes[node_idx, 0, :3] = self.min_bounds[idx]
 #               self.gpu_nodes[node_idx, 0, :3] = self.min_bounds[idx]
                 self.gpu_nodes[node_idx, 0, 3] = -1.0
 #               self.gpu_nodes[node_idx, 0, 3] = -1.0
-                
+
                 # Max: bound_max, tri_idx
 #               # Max: bound_max, tri_idx
                 self.gpu_nodes[node_idx, 1, :3] = self.max_bounds[idx]
 #               self.gpu_nodes[node_idx, 1, :3] = self.max_bounds[idx]
                 self.gpu_nodes[node_idx, 1, 3] = float(idx)
 #               self.gpu_nodes[node_idx, 1, 3] = float(idx)
-                
+
                 return node_idx
 #               return node_idx
 
             # Internal Case
 #           # Internal Case
-            split: int = self.find_split(first, last)
-#           split: int = self.find_split(first, last)
+            split: int = self.find_split(first=first, last=last)
+#           split: int = self.find_split(first=first, last=last)
 
-            left_idx: int = build(first, split)
-#           left_idx: int = build(first, split)
-            right_idx: int = build(split + 1, last)
-#           right_idx: int = build(split + 1, last)
+            left_idx: int = build(first=first, last=split)
+#           left_idx: int = build(first=first, last=split)
+            right_idx: int = build(first=split + 1, last=last)
+#           right_idx: int = build(first=split + 1, last=last)
 
             # Compute union bounds
 #           # Compute union bounds
             # Access children directly from the array
 #           # Access children directly from the array
-            l_min = self.gpu_nodes[left_idx, 0, :3]
-#           l_min = self.gpu_nodes[left_idx, 0, :3]
-            l_max = self.gpu_nodes[left_idx, 1, :3]
-#           l_max = self.gpu_nodes[left_idx, 1, :3]
-            r_min = self.gpu_nodes[right_idx, 0, :3]
-#           r_min = self.gpu_nodes[right_idx, 0, :3]
-            r_max = self.gpu_nodes[right_idx, 1, :3]
-#           r_max = self.gpu_nodes[right_idx, 1, :3]
-            
-            node_min = np.minimum(l_min, r_min)
-#           node_min = np.minimum(l_min, r_min)
-            node_max = np.maximum(l_max, r_max)
-#           node_max = np.maximum(l_max, r_max)
+            l_min: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 0, :3]
+#           l_min: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 0, :3]
+            l_max: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 1, :3]
+#           l_max: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 1, :3]
+            r_min: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 0, :3]
+#           r_min: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 0, :3]
+            r_max: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 1, :3]
+#           r_max: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 1, :3]
+
+            node_min: npt.NDArray[np.float32] = np.minimum(l_min, r_min)
+#           node_min: npt.NDArray[np.float32] = np.minimum(l_min, r_min)
+            node_max: npt.NDArray[np.float32] = np.maximum(l_max, r_max)
+#           node_max: npt.NDArray[np.float32] = np.maximum(l_max, r_max)
 
             self.gpu_nodes[node_idx, 0, :3] = node_min
 #           self.gpu_nodes[node_idx, 0, :3] = node_min
@@ -366,8 +366,8 @@ class LBVH:
             return node_idx
 #           return node_idx
 
-        build(0, self.count - 1)
-#       build(0, self.count - 1)
+        build(first=0, last=self.count - 1)
+#       build(first=0, last=self.count - 1)
 
         # Truncate unused nodes if any (though max should be close)
 #       # Truncate unused nodes if any (though max should be close)

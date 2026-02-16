@@ -11,11 +11,7 @@ def resolve_includes(source: str, base_path: pl.Path) -> str:
     """
     Recursively resolves #include "filename" directives in GLSL source code.
 #   Recursively resolves #include "filename" directives in GLSL source code.
-    Recursively resolves #include "filename" directives in GLSL source code.
-#   Recursively resolves #include "filename" directives in GLSL source code.
     """
-    # Match: #include "filename" (handling optional whitespace)
-#   # Match: #include "filename" (handling optional whitespace)
     # Match: #include "filename" (handling optional whitespace)
 #   # Match: #include "filename" (handling optional whitespace)
     pattern: re.Pattern[str] = re.compile(pattern=r'^\s*#include\s+"([^"]+)"', flags=re.MULTILINE)
@@ -32,8 +28,6 @@ def resolve_includes(source: str, base_path: pl.Path) -> str:
 #       if not included_path.exists():
             # You might want to raise an error or just warn
 #           # You might want to raise an error or just warn
-            # You might want to raise an error or just warn
-#           # You might want to raise an error or just warn
             print(f"Warning: Included file not found: {included_path}")
 #           print(f"Warning: Included file not found: {included_path}")
             return f"// ERROR: Include not found {filename}"
@@ -41,8 +35,6 @@ def resolve_includes(source: str, base_path: pl.Path) -> str:
 
         included_content: str | typing.Any = included_path.read_text(encoding="utf-8")
 #       included_content: str | typing.Any = included_path.read_text(encoding="utf-8")
-        # Recursively resolve includes within the included file
-#       # Recursively resolve includes within the included file
         # Recursively resolve includes within the included file
 #       # Recursively resolve includes within the included file
         return resolve_includes(source=included_content, base_path=base_path)
