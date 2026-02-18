@@ -90,3 +90,11 @@ class Material(typing.TypedDict):
 #   transmission: float
     ior: float
 #   ior: float
+    texture_index_albedo: float
+#   texture_index_albedo: float
+    texture_index_roughness: float
+#   texture_index_roughness: float
+    texture_index_metallic: float
+#   texture_index_metallic: float
+    texture_index_normal: float
+#   texture_index_normal: float

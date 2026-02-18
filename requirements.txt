@@ -1,6 +1,8 @@
 mypy
 pyrr
 numpy
+pyassimp
 moderngl
 moderngl-window
 opencv-python
+setuptools

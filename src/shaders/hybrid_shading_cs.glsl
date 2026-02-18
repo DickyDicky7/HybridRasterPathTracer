@@ -12,8 +12,10 @@
 //  layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
     layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
 //  layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
-    layout(binding = 6, rgba32f) uniform image2D textureAccum;
-//  layout(binding = 6, rgba32f) uniform image2D textureAccum;
+    layout(binding = 4, rgba32f) uniform image2D textureGeometryGlobalTangent;
+//  layout(binding = 4, rgba32f) uniform image2D textureGeometryGlobalTangent;
+    layout(binding = 5, rgba32f) uniform image2D textureAccum;
+//  layout(binding = 5, rgba32f) uniform image2D textureAccum;
 
     // BVH Nodes Buffer
     // BVH Nodes Buffer
@@ -26,8 +28,8 @@
     };
 //  };
 
-    layout(std430, binding = 4) buffer BVHNodes {
-//  layout(std430, binding = 4) buffer BVHNodes {
+    layout(std430, binding = 6) buffer BVHNodes {
+//  layout(std430, binding = 6) buffer BVHNodes {
         Node nodes[];
 //      Node nodes[];
     };
@@ -35,8 +37,8 @@
 
     // Triangles Buffer (flat floats)
     // Triangles Buffer (flat floats)
-    layout(std430, binding = 5) buffer SceneTriangles {
-//  layout(std430, binding = 5) buffer SceneTriangles {
+    layout(std430, binding = 7) buffer SceneTriangles {
+//  layout(std430, binding = 7) buffer SceneTriangles {
         float triangles[];
 //      float triangles[];
     };
@@ -56,13 +58,48 @@
 //      float transmission;
         float ior;
 //      float ior;
+        float textureIndexAlbedo;
+//      float textureIndexAlbedo;
+        float textureIndexRoughness;
+//      float textureIndexRoughness;
+        float textureIndexMetallic;
+//      float textureIndexMetallic;
+        float textureIndexNormal;
+//      float textureIndexNormal;
     };
 //  };
 
-    layout(std430, binding = 7) buffer SceneMaterials {
-//  layout(std430, binding = 7) buffer SceneMaterials {
+    layout(std430, binding = 8) buffer SceneMaterials {
+//  layout(std430, binding = 8) buffer SceneMaterials {
         Material materials[];
 //      Material materials[];
+    };
+//  };
+
+    // UVs Buffer
+//  // UVs Buffer
+    layout(std430, binding = 9) buffer SceneUVs {
+//  layout(std430, binding = 9) buffer SceneUVs {
+        vec2 uvs[]; // 3 per triangle
+//      vec2 uvs[]; // 3 per triangle
+    };
+//  };
+
+    // Normals Buffer
+//  // Normals Buffer
+    layout(std430, binding = 10) buffer SceneNormals {
+//  layout(std430, binding = 10) buffer SceneNormals {
+        float normals[]; // 3 floats per vertex -> 9 floats per triangle
+//      float normals[]; // 3 floats per vertex -> 9 floats per triangle
+    };
+//  };
+
+    // Tangents Buffer
+//  // Tangents Buffer
+    layout(std430, binding = 11) buffer SceneTangents {
+//  layout(std430, binding = 11) buffer SceneTangents {
+        float tangents[]; // 3 floats per vertex -> 9 floats per triangle
+//      float tangents[]; // 3 floats per vertex -> 9 floats per triangle
     };
 //  };
 
@@ -81,6 +118,8 @@
 //      vec3 at;
         vec3 hittedSideNormal;
 //      vec3 hittedSideNormal;
+        vec3 hittedSideTangent;
+//      vec3 hittedSideTangent;
         vec2 uvSurfaceCoordinate;
 //      vec2 uvSurfaceCoordinate;
         float minDistance;
@@ -121,6 +160,8 @@
 //  uniform int uFrameCount;
     uniform sampler2D uHdriTexture;
 //  uniform sampler2D uHdriTexture;
+    uniform sampler2DArray uSceneTextureArray;
+//  uniform sampler2DArray uSceneTextureArray;
     uniform bool uUseHdri;
 //  uniform bool uUseHdri;
 
@@ -265,17 +306,17 @@
 //      vec3 tMin = min(t1, t2);
         vec3 tMaxVec = max(t1, t2);
 //      vec3 tMaxVec = max(t1, t2);
-        
+
         float overallDistanceMin = maxVec3(tMin);
 //      float overallDistanceMin = maxVec3(tMin);
         float overallDistanceMax = minVec3(tMaxVec);
 //      float overallDistanceMax = minVec3(tMaxVec);
-        
+
         float finalDistanceMin = max(rayTravelDistanceLimit.min, overallDistanceMin);
 //      float finalDistanceMin = max(rayTravelDistanceLimit.min, overallDistanceMin);
         float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
 //      float finalDistanceMax = min(rayTravelDistanceLimit.max, overallDistanceMax);
-        
+
         return finalDistanceMax >= finalDistanceMin;
 //      return finalDistanceMax >= finalDistanceMin;
     }
@@ -289,17 +330,17 @@
 //      vec3 t1 = (boxMin - ray.origin) * invDir;
         vec3 t2 = (boxMax - ray.origin) * invDir;
 //      vec3 t2 = (boxMax - ray.origin) * invDir;
-        
+
         vec3 distancesMin = max(min(t1, t2), vec3(rayTravelDistanceLimit.min));
 //      vec3 distancesMin = max(min(t1, t2), vec3(rayTravelDistanceLimit.min));
         vec3 distancesMax = min(max(t1, t2), vec3(rayTravelDistanceLimit.max));
 //      vec3 distancesMax = min(max(t1, t2), vec3(rayTravelDistanceLimit.max));
-        
+
         float distanceToBoxMin = maxVec3(distancesMin);
 //      float distanceToBoxMin = maxVec3(distancesMin);
         float distanceToBoxMax = minVec3(distancesMax);
 //      float distanceToBoxMax = minVec3(distancesMax);
-        
+
         if (distanceToBoxMax >= distanceToBoxMin && distanceToBoxMin < rayTravelDistanceLimit.max) {
 //      if (distanceToBoxMax >= distanceToBoxMin && distanceToBoxMin < rayTravelDistanceLimit.max) {
             return distanceToBoxMin;
@@ -326,44 +367,44 @@
 
         const float EPSILON = 1.0e-4;
 //      const float EPSILON = 1.0e-4;
-        
+
         vec3 e1 = v1 - v0;
 //      vec3 e1 = v1 - v0;
         vec3 e2 = v2 - v0;
 //      vec3 e2 = v2 - v0;
-        
+
         vec3 h = cross(ray.direction, e2);
 //      vec3 h = cross(ray.direction, e2);
         float a = dot(e1, h);
 //      float a = dot(e1, h);
-        
+
         if (abs(a) < EPSILON) return false;
 //      if (abs(a) < EPSILON) return false;
-        
+
         float f = 1.0 / a;
 //      float f = 1.0 / a;
         vec3 s = ray.origin - v0;
 //      vec3 s = ray.origin - v0;
         float u = f * dot(s, h);
 //      float u = f * dot(s, h);
-        
+
         if (u < 0.0 || u > 1.0) return false;
 //      if (u < 0.0 || u > 1.0) return false;
-        
+
         vec3 q = cross(s, e1);
 //      vec3 q = cross(s, e1);
         float v = f * dot(ray.direction, q);
 //      float v = f * dot(ray.direction, q);
-        
+
         if (v < 0.0 || u + v > 1.0) return false;
 //      if (v < 0.0 || u + v > 1.0) return false;
-        
+
         float t = f * dot(e2, q);
 //      float t = f * dot(e2, q);
-        
+
         if (!intervalSurround(rayTravelDistanceLimit, t)) return false;
 //      if (!intervalSurround(rayTravelDistanceLimit, t)) return false;
-        
+
         return true;
 //      return true;
     }
@@ -377,14 +418,14 @@
 //      RayHitResult result;
         result.materialIndex = triangleIndex;
 //      result.materialIndex = triangleIndex;
-        
+
         result.isHitted = false;
 //      result.isHitted = false;
         result.triangleIndex = triangleIndex;
 //      result.triangleIndex = triangleIndex;
         result.minDistance = rayTravelDistanceLimit.max;
 //      result.minDistance = rayTravelDistanceLimit.max;
-        
+
         int offset = triangleIndex * 9;
 //      int offset = triangleIndex * 9;
         vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
@@ -400,39 +441,39 @@
 //      vec3 e1 = v1 - v0;
         vec3 e2 = v2 - v0;
 //      vec3 e2 = v2 - v0;
-        
+
         vec3 h = cross(ray.direction, e2);
 //      vec3 h = cross(ray.direction, e2);
         float a = dot(e1, h);
 //      float a = dot(e1, h);
-        
+
         if (abs(a) < EPSILON) return result;
 //      if (abs(a) < EPSILON) return result;
-        
+
         float f = 1.0 / a;
 //      float f = 1.0 / a;
         vec3 s = ray.origin - v0;
 //      vec3 s = ray.origin - v0;
         float u = f * dot(s, h);
 //      float u = f * dot(s, h);
-        
+
         if (u < 0.0 || u > 1.0) return result;
 //      if (u < 0.0 || u > 1.0) return result;
-        
+
         vec3 q = cross(s, e1);
 //      vec3 q = cross(s, e1);
         float v = f * dot(ray.direction, q);
 //      float v = f * dot(ray.direction, q);
-        
+
         if (v < 0.0 || u + v > 1.0) return result;
 //      if (v < 0.0 || u + v > 1.0) return result;
-        
+
         float t = f * dot(e2, q);
 //      float t = f * dot(e2, q);
-        
+
         if (!intervalSurround(rayTravelDistanceLimit, t)) return result;
 //      if (!intervalSurround(rayTravelDistanceLimit, t)) return result;
-        
+
         if (t > EPSILON) {
 //      if (t > EPSILON) {
             result.isHitted = true;
@@ -441,13 +482,53 @@
 //          result.minDistance = t;
             result.triangleIndex = triangleIndex;
 //          result.triangleIndex = triangleIndex;
-            result.uvSurfaceCoordinate = vec2(u, v); // Barycentrics
-//          result.uvSurfaceCoordinate = vec2(u, v); // Barycentrics
+            // Interpolate UVs
+//          // Interpolate UVs
+            int uvOffset = triangleIndex * 3;
+//          int uvOffset = triangleIndex * 3;
+            vec2 uv0 = uvs[uvOffset + 0];
+//          vec2 uv0 = uvs[uvOffset + 0];
+            vec2 uv1 = uvs[uvOffset + 1];
+//          vec2 uv1 = uvs[uvOffset + 1];
+            vec2 uv2 = uvs[uvOffset + 2];
+//          vec2 uv2 = uvs[uvOffset + 2];
+            vec2 interpolatedUV = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
+//          vec2 interpolatedUV = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
+            result.uvSurfaceCoordinate = interpolatedUV;
+//          result.uvSurfaceCoordinate = interpolatedUV;
+            // Interpolate Normals
+//          // Interpolate Normals
+            int normalOffsetIdx = triangleIndex * 9;
+//          int normalOffsetIdx = triangleIndex * 9;
+            vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
+//          vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
+            vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
+//          vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
+            vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
+//          vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
+            vec3 interpolatedNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
+//          vec3 interpolatedNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
+            result.hittedSideNormal = interpolatedNormal;
+//          result.hittedSideNormal = interpolatedNormal;
+
+            // Interpolate Tangents
+//          // Interpolate Tangents
+            vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
+//          vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
+            vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
+//          vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
+            vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
+//          vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
+            vec3 interpolatedTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
+//          vec3 interpolatedTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
+            result.hittedSideTangent = interpolatedTangent;
+//          result.hittedSideTangent = interpolatedTangent;
+
             return result;
 //          return result;
         }
 //      }
-        
+
         return result;
 //      return result;
     }
@@ -463,7 +544,7 @@
 //      int stack[32];
         int stackPtr = 0;
 //      int stackPtr = 0;
-        
+
         // Check Root
 //      // Check Root
         Node rootNode = nodes[0];
@@ -474,17 +555,17 @@
 //          return false;
         }
 //      }
-        
+
         stack[stackPtr++] = 0;
 //      stack[stackPtr++] = 0;
-        
+
         while (stackPtr > 0) {
 //      while (stackPtr > 0) {
             int nodeIdx = stack[--stackPtr];
 //          int nodeIdx = stack[--stackPtr];
             Node node = nodes[nodeIdx];
 //          Node node = nodes[nodeIdx];
-            
+
             if (node.min_left.w < 0.0) { // Leaf
 //          if (node.min_left.w < 0.0) { // Leaf
                 int triIdx = int(node.max_right.w);
@@ -499,27 +580,27 @@
 //              continue;
             }
 //          }
-            
+
             // Internal
 //          // Internal
             int childIndexL = int(node.min_left.w);
 //          int childIndexL = int(node.min_left.w);
             int childIndexR = int(node.max_right.w);
 //          int childIndexR = int(node.max_right.w);
-            
+
             Node childL = nodes[childIndexL];
 //          Node childL = nodes[childIndexL];
             Node childR = nodes[childIndexR];
 //          Node childR = nodes[childIndexR];
-            
+
             float distL = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childL.min_left.xyz, childL.max_right.xyz);
 //          float distL = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childL.min_left.xyz, childL.max_right.xyz);
             float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
 //          float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
-            
+
             if (distL == 9999999.0 && distR == 9999999.0) continue;
 //          if (distL == 9999999.0 && distR == 9999999.0) continue;
-            
+
             if (distL < distR) {
 //          if (distL < distR) {
                 if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
@@ -553,34 +634,34 @@
 //      finalResult.minDistance = rayTravelDistanceLimit.max; // Initialize with max
         float maxDist = rayTravelDistanceLimit.max;
 //      float maxDist = rayTravelDistanceLimit.max;
-        
+
         vec3 invDir = 1.0 / ray.direction;
 //      vec3 invDir = 1.0 / ray.direction;
         int stack[32];
 //      int stack[32];
         int stackPtr = 0;
 //      int stackPtr = 0;
-        
+
         stack[stackPtr++] = 0;
 //      stack[stackPtr++] = 0;
-        
+
         while (stackPtr > 0) {
 //      while (stackPtr > 0) {
             int nodeIdx = stack[--stackPtr];
 //          int nodeIdx = stack[--stackPtr];
             Node node = nodes[nodeIdx];
 //          Node node = nodes[nodeIdx];
-            
+
             Interval currentLimit;
 //          Interval currentLimit;
             currentLimit.min = rayTravelDistanceLimit.min;
 //          currentLimit.min = rayTravelDistanceLimit.min;
             currentLimit.max = maxDist;
 //          currentLimit.max = maxDist;
-            
+
             if (!intersectAABB_Interval(ray, invDir, currentLimit, node.min_left.xyz, node.max_right.xyz)) continue;
 //          if (!intersectAABB_Interval(ray, invDir, currentLimit, node.min_left.xyz, node.max_right.xyz)) continue;
-            
+
             if (node.min_left.w < 0.0) { // Leaf
 //          if (node.min_left.w < 0.0) { // Leaf
                 int triIdx = int(node.max_right.w);
@@ -599,7 +680,7 @@
 //              continue;
             }
 //          }
-            
+
             // Internal
 //          // Internal
             int childIndexL = int(node.min_left.w);
@@ -610,15 +691,15 @@
 //          Node childL = nodes[childIndexL];
             Node childR = nodes[childIndexR];
 //          Node childR = nodes[childIndexR];
-            
+
             float distL = calculateDistanceToAABB3D(ray, invDir, currentLimit, childL.min_left.xyz, childL.max_right.xyz);
 //          float distL = calculateDistanceToAABB3D(ray, invDir, currentLimit, childL.min_left.xyz, childL.max_right.xyz);
             float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
 //          float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
-            
+
             if (distL == 9999999.0 && distR == 9999999.0) continue;
 //          if (distL == 9999999.0 && distR == 9999999.0) continue;
-            
+
             if (distL < distR) {
 //          if (distL < distR) {
                 if (distR < maxDist) stack[stackPtr++] = childIndexR;
@@ -635,7 +716,7 @@
 //          }
         }
 //      }
-        
+
         return finalResult;
 //      return finalResult;
     }
@@ -697,10 +778,10 @@
     }
 //  }
 
-    vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) { 
-//  vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) { 
-        return incomingVector - 2.0 * dot(incomingVector, normal) * normal; 
-//      return incomingVector - 2.0 * dot(incomingVector, normal) * normal; 
+    vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) {
+//  vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) {
+        return incomingVector - 2.0 * dot(incomingVector, normal) * normal;
+//      return incomingVector - 2.0 * dot(incomingVector, normal) * normal;
     }
 //  }
 
@@ -727,22 +808,83 @@
 //      materialLightScatteringResult.attenuation = vec3(1.0);
         materialLightScatteringResult.emission = vec3(0.0);
 //      materialLightScatteringResult.emission = vec3(0.0);
-        
+
+        // Check texture indices
+//      // Check texture indices
         vec3 albedo = material.albedo.rgb;
 //      vec3 albedo = material.albedo.rgb;
+        float roughness = material.roughness;
+//      float roughness = material.roughness;
+        float metallic = material.metallic;
+//      float metallic = material.metallic;
+
+        // Texture Sampling (using textureLod for Compute Shader safety)
+//      // Texture Sampling (using textureLod for Compute Shader safety)
+        if (material.textureIndexAlbedo > -0.5) {
+//      if (material.textureIndexAlbedo > -0.5) {
+            albedo = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
+//          albedo = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
+        }
+//      }
+        if (material.textureIndexRoughness > -0.5) {
+//      if (material.textureIndexRoughness > -0.5) {
+            // Assume roughness is in R channel or grayscale
+//          // Assume roughness is in R channel or grayscale
+            roughness = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexRoughness), 0.0).r;
+//          roughness = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexRoughness), 0.0).r;
+        }
+//      }
+        if (material.textureIndexMetallic > -0.5) {
+//      if (material.textureIndexMetallic > -0.5) {
+            // Assume metallic is in R channel or grayscale
+//          // Assume metallic is in R channel or grayscale
+            metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
+//          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
+        }
+//      }
 
         // Principled Logic
 //      // Principled Logic
 
+        // 1. Shading Normal Calculation (Normal Mapping)
+//      // 1. Shading Normal Calculation (Normal Mapping)
+        vec3 shadingNormal = recentRayHitResult.hittedSideNormal;
+//      vec3 shadingNormal = recentRayHitResult.hittedSideNormal;
+
+        if (material.textureIndexNormal > -0.5) {
+//      if (material.textureIndexNormal > -0.5) {
+            vec3 mapN = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexNormal), 0.0).rgb;
+//          vec3 mapN = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexNormal), 0.0).rgb;
+            mapN = mapN * 2.0 - 1.0;
+//          mapN = mapN * 2.0 - 1.0;
+
+            vec3 N = normalize(shadingNormal);
+//          vec3 N = normalize(shadingNormal);
+            vec3 T = normalize(recentRayHitResult.hittedSideTangent);
+//          vec3 T = normalize(recentRayHitResult.hittedSideTangent);
+            // Re-orthogonalize T with respect to N
+//          // Re-orthogonalize T with respect to N
+            T = normalize(T - dot(T, N) * N);
+//          T = normalize(T - dot(T, N) * N);
+            vec3 B = cross(N, T);
+//          vec3 B = cross(N, T);
+            mat3 TBN = mat3(T, B, N);
+//          mat3 TBN = mat3(T, B, N);
+
+            shadingNormal = normalize(TBN * mapN);
+//          shadingNormal = normalize(TBN * mapN);
+        }
+//      }
+
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
-        vec3 f0 = mix(vec3(0.04), albedo, material.metallic);
-//      vec3 f0 = mix(vec3(0.04), albedo, material.metallic);
+        vec3 f0 = mix(vec3(0.04), albedo, metallic);
+//      vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
         // Schlick's fresnel approximation at incident angle
 //      // Schlick's fresnel approximation at incident angle
-        float cosTheta = min(dot(-incomingRay.direction, recentRayHitResult.hittedSideNormal), 1.0);
-//      float cosTheta = min(dot(-incomingRay.direction, recentRayHitResult.hittedSideNormal), 1.0);
+        float cosTheta = min(dot(-incomingRay.direction, shadingNormal), 1.0);
+//      float cosTheta = min(dot(-incomingRay.direction, shadingNormal), 1.0);
         vec3 fresnel = schlickFresnel(cosTheta, f0);
 //      vec3 fresnel = schlickFresnel(cosTheta, f0);
         // Use average fresnel for importance sampling probability
@@ -755,38 +897,38 @@
 
         // --- PATH A: METALLIC REFLECTION ---
 //      // --- PATH A: METALLIC REFLECTION ---
-        float specularProbability = mix(fresnelProb, 1.0, material.metallic);
-//      float specularProbability = mix(fresnelProb, 1.0, material.metallic);
+        float specularProbability = mix(fresnelProb, 1.0, metallic);
+//      float specularProbability = mix(fresnelProb, 1.0, metallic);
 
         if (randomChoice < specularProbability) {
 //      if (randomChoice < specularProbability) {
-             // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-//           // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-             vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
-//           vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
-             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
-//           vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+            // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
+//          // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
+            vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
+//          vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
+            vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+//          vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
-             if (dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
-//           if (dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
-                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-//               materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                 materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, material.metallic);
-//               materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, material.metallic);
-                 materialLightScatteringResult.isScattered = true;
-//               materialLightScatteringResult.isScattered = true;
-                 materialLightScatteringResult.sampledRoughness = material.roughness;
-//               materialLightScatteringResult.sampledRoughness = material.roughness;
-             } else {
-//           } else {
-                 // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-//               // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-                 materialLightScatteringResult.isScattered = false;
-//               materialLightScatteringResult.isScattered = false;
-             }
-//           }
+            if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
+//          if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
+                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
+//              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
+                materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, metallic);
+//              materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, metallic);
+                materialLightScatteringResult.isScattered = true;
+//              materialLightScatteringResult.isScattered = true;
+                materialLightScatteringResult.sampledRoughness = roughness;
+//              materialLightScatteringResult.sampledRoughness = roughness;
+            } else {
+//          } else {
+                // Current/Recent ray is/was absorbed (next ray is scattering into surface)
+//              // Current/Recent ray is/was absorbed (next ray is scattering into surface)
+                materialLightScatteringResult.isScattered = false;
+//              materialLightScatteringResult.isScattered = false;
+            }
+//          }
         } else {
 //      } else {
              // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
@@ -801,23 +943,23 @@
 //           if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
                  // TRANSMISSION (REFRACTION)
 //               // TRANSMISSION (REFRACTION)
-                 float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior; 
-//               float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior; 
+                 float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
+//               float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
                  if (!recentRayHitResult.isFrontFaceHitted) {
 //               if (!recentRayHitResult.isFrontFaceHitted) {
-                     etaRatioOfIncidenceOverTransmission = material.ior; 
-//                   etaRatioOfIncidenceOverTransmission = material.ior; 
+                     etaRatioOfIncidenceOverTransmission = material.ior;
+//                   etaRatioOfIncidenceOverTransmission = material.ior;
                  }
 //               }
 
-                 vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
-//               vec3 microfacetNormal = sampleGGX(recentRayHitResult.hittedSideNormal, material.roughness);
+                 vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+//               vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
 
                  float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
 //               float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
                  float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
 //               float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
-                 
+
                  vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
 //               vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
                  vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
@@ -827,7 +969,7 @@
 //               // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
                  materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
 //               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-                 
+
                  if (sinThetaTransmission <= 1.0) {
 //               if (sinThetaTransmission <= 1.0) {
                      materialLightScatteringResult.scatteredRay.direction = refractedDirection;
@@ -850,8 +992,8 @@
 //           } else {
                  // DIFFUSE (LAMBERTIAN)
 //               // DIFFUSE (LAMBERTIAN)
-                 vec3 diffuseDirection = normalize(recentRayHitResult.hittedSideNormal + randomUnitVector());
-//               vec3 diffuseDirection = normalize(recentRayHitResult.hittedSideNormal + randomUnitVector());
+                 vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
+//               vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
 
                  materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
 //               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
@@ -889,365 +1031,190 @@
         initRNG(vec2(pixelCoordinates));
 //      initRNG(vec2(pixelCoordinates));
 
-        // Read First hit from G-Buffer (Depth 0)
-//      // Read First hit from G-Buffer (Depth 0)
-        vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
-//      vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
-        vec4 sampleGlobalNormal = imageLoad(textureGeometryGlobalNormal, pixelCoordinates);
-//      vec4 sampleGlobalNormal = imageLoad(textureGeometryGlobalNormal, pixelCoordinates);
-
-        // State variables
-//      // State variables
         vec3 accumulatedColor = vec3(0.0);
 //      vec3 accumulatedColor = vec3(0.0);
         vec3 attenuation = vec3(1.0);
 //      vec3 attenuation = vec3(1.0);
-        vec3 rayOrigin;
-//      vec3 rayOrigin;
-        vec3 rayDir;
-//      vec3 rayDir;
-        float currentRayRoughness = 0.0;
-//      float currentRayRoughness = 0.0;
 
-        // Incoming direction (for BSDF)
-//      // Incoming direction (for BSDF)
-        vec3 V;
-//      vec3 V;
+        // Calculate Primary Ray
+//      // Calculate Primary Ray
+        vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
+//      vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
 
-        bool hitSky = false;
-//      bool hitSky = false;
+        Ray currentRay;
+//      Ray currentRay;
+        currentRay.origin = uCameraGlobalPosition;
+//      currentRay.origin = uCameraGlobalPosition;
+        currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
+//      currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
 
-        // Depth 0: G-Buffer Data
-//      // Depth 0: G-Buffer Data
-        if (sampleGlobalPosition.w == 0.0) {
-//      if (sampleGlobalPosition.w == 0.0) {
-            // Missed geometry in raster pass -> Sky
-//          // Missed geometry in raster pass -> Sky
-            // Manual Ray Construction (Path Tracing Pinhole Camera)
-//          // Manual Ray Construction (Path Tracing Pinhole Camera)
+        int maxDepth = 4;
+//      int maxDepth = 4;
 
-            // Note: uPixel00Coordinates is the center of the top-left pixel (0,0).
-//          // Note: uPixel00Coordinates is the center of the top-left pixel (0,0).
-            // We use uJitter to apply TAA/sub-pixel jitter.
-//          // We use uJitter to apply TAA/sub-pixel jitter.
-            vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
-//          vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
+        for (int depth = 0; depth < maxDepth; depth++) {
+//      for (int depth = 0; depth < maxDepth; depth++) {
+            RayHitResult rayHitResult;
+//          RayHitResult rayHitResult;
 
-            rayOrigin = uCameraGlobalPosition;
-//          rayOrigin = uCameraGlobalPosition;
-            rayDir = normalize(pixelSampleCenter - rayOrigin);
-//          rayDir = normalize(pixelSampleCenter - rayOrigin);
+            if (depth == 0) {
+//          if (depth == 0) {
+                // Read from G-Buffer
+//              // Read from G-Buffer
+                vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
+//              vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
+                vec4 sampleGlobalNormal = imageLoad(textureGeometryGlobalNormal, pixelCoordinates);
+//              vec4 sampleGlobalNormal = imageLoad(textureGeometryGlobalNormal, pixelCoordinates);
+                vec4 sampleGlobalTangent = imageLoad(textureGeometryGlobalTangent, pixelCoordinates);
+//              vec4 sampleGlobalTangent = imageLoad(textureGeometryGlobalTangent, pixelCoordinates);
 
-            accumulatedColor = getSkyColor(rayDir, 0.0);
-//          accumulatedColor = getSkyColor(rayDir, 0.0);
-            hitSky = true;
-//          hitSky = true;
-        } else {
-//      } else {
-            // Hit geometry
-//          // Hit geometry
-            rayOrigin = sampleGlobalPosition.xyz;
-//          rayOrigin = sampleGlobalPosition.xyz;
-            vec3 N = normalize(sampleGlobalNormal.xyz);
-//          vec3 N = normalize(sampleGlobalNormal.xyz);
-
-            // Recover Triangle Index
-//          // Recover Triangle Index
-            int triIdx = int(sampleGlobalPosition.w) - 1;
-//          int triIdx = int(sampleGlobalPosition.w) - 1;
-            Material mat = materials[triIdx];
-//          Material mat = materials[triIdx];
-
-            V = normalize(rayOrigin - uCameraGlobalPosition); // Incoming ray direction
-//          V = normalize(rayOrigin - uCameraGlobalPosition); // Incoming ray direction
-
-            // Apply Emission (If any - currently none, assuming objects are not emissive)
-//          // Apply Emission (If any - currently none, assuming objects are not emissive)
-            // accumulatedColor += attenuation * emission;
-//          // accumulatedColor += attenuation * emission;
-
-            // --- Multiple Importance Sampling: Next Event Estimation (Direct Light) ---
-//          // --- Multiple Importance Sampling: Next Event Estimation (Direct Light) ---
-
-            // Soft Shadow (Area Light approximation)
-//          // Soft Shadow (Area Light approximation)
-            vec3 sunDirectionCenter = normalize(uPointLight001GlobalPosition - rayOrigin);
-//          vec3 sunDirectionCenter = normalize(uPointLight001GlobalPosition - rayOrigin);
-            vec3 sunColor = vec3(300.0);
-//          vec3 sunColor = vec3(300.0);
-            float distToLight = length(uPointLight001GlobalPosition - rayOrigin);
-//          float distToLight = length(uPointLight001GlobalPosition - rayOrigin);
-            float sunRadius = 0.05;
-//          float sunRadius = 0.05;
-
-            vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-//          vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-            vec3 jitteredSunDir = normalize(jitteredSunPos - rayOrigin);
-//          vec3 jitteredSunDir = normalize(jitteredSunPos - rayOrigin);
-            float jitteredDist = length(jitteredSunPos - rayOrigin);
-//          float jitteredDist = length(jitteredSunPos - rayOrigin);
-
-            vec3 shadowRayOrigin = rayOrigin + N * 0.001;
-//          vec3 shadowRayOrigin = rayOrigin + N * 0.001;
-
-            Ray shadowRay;
-//          Ray shadowRay;
-            shadowRay.origin = shadowRayOrigin;
-//          shadowRay.origin = shadowRayOrigin;
-            shadowRay.direction = jitteredSunDir;
-//          shadowRay.direction = jitteredSunDir;
-            
-            Interval shadowInterval;
-//          Interval shadowInterval;
-            shadowInterval.min = 0.001;
-//          shadowInterval.min = 0.001;
-            shadowInterval.max = jitteredDist;
-//          shadowInterval.max = jitteredDist;
-
-            if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-//          if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-                float cosTheta = max(0.0, dot(N, jitteredSunDir));
-//              float cosTheta = max(0.0, dot(N, jitteredSunDir));
-                // Inverse square falloff for point light
-//              // Inverse square falloff for point light
-                float falloff = 1.0 / (jitteredDist * jitteredDist);
-//              float falloff = 1.0 / (jitteredDist * jitteredDist);
-                // Approximate NEE using albedo (Diffuse assumption for now)
-//              // Approximate NEE using albedo (Diffuse assumption for now)
-                vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
-//              vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
-                accumulatedColor += attenuation * directLight;
-//              accumulatedColor += attenuation * directLight;
-            }
-//          }
-
-            // --- Principled Scatter ---
-//          // --- Principled Scatter ---
-            Ray incomingRay;
-//          Ray incomingRay;
-            incomingRay.origin = uCameraGlobalPosition;
-//          incomingRay.origin = uCameraGlobalPosition;
-            incomingRay.direction = V;
-//          incomingRay.direction = V;
-
-            RayHitResult hitRes;
-//          RayHitResult hitRes;
-            hitRes.at = rayOrigin;
-//          hitRes.at = rayOrigin;
-            hitRes.hittedSideNormal = N;
-//          hitRes.hittedSideNormal = N;
-            hitRes.isFrontFaceHitted = dot(V, N) < 0.0;
-//          hitRes.isFrontFaceHitted = dot(V, N) < 0.0;
-            hitRes.materialIndex = triIdx;
-//          hitRes.materialIndex = triIdx;
-            hitRes.triangleIndex = triIdx; // Assuming this is correct
-//          hitRes.triangleIndex = triIdx; // Assuming this is correct
-
-            MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
-//          MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
-
-            currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
-//          currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
-
-            if (res.isScattered) {
-//          if (res.isScattered) {
-                attenuation *= res.attenuation;
-//              attenuation *= res.attenuation;
-                rayOrigin = res.scatteredRay.origin;
-//              rayOrigin = res.scatteredRay.origin;
-                rayDir = res.scatteredRay.direction;
-//              rayDir = res.scatteredRay.direction;
+                if (sampleGlobalPosition.w == 0.0) {
+//              if (sampleGlobalPosition.w == 0.0) {
+                    rayHitResult.isHitted = false;
+//                  rayHitResult.isHitted = false;
+                } else {
+//              } else {
+                    rayHitResult.isHitted = true;
+//                  rayHitResult.isHitted = true;
+                    rayHitResult.at = sampleGlobalPosition.xyz;
+//                  rayHitResult.at = sampleGlobalPosition.xyz;
+                    rayHitResult.hittedSideNormal = normalize(sampleGlobalNormal.xyz);
+//                  rayHitResult.hittedSideNormal = normalize(sampleGlobalNormal.xyz);
+                    rayHitResult.hittedSideTangent = normalize(sampleGlobalTangent.xyz);
+//                  rayHitResult.hittedSideTangent = normalize(sampleGlobalTangent.xyz);
+                    rayHitResult.uvSurfaceCoordinate = vec2(sampleGlobalNormal.w, sampleGlobalTangent.w);
+//                  rayHitResult.uvSurfaceCoordinate = vec2(sampleGlobalNormal.w, sampleGlobalTangent.w);
+                    rayHitResult.isFrontFaceHitted = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
+//                  rayHitResult.isFrontFaceHitted = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
+                    rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
+//                  rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
+                    rayHitResult.triangleIndex = int(sampleGlobalPosition.w) - 1;
+//                  rayHitResult.triangleIndex = int(sampleGlobalPosition.w) - 1;
+                    rayHitResult.minDistance = length(rayHitResult.at - currentRay.origin);
+//                  rayHitResult.minDistance = length(rayHitResult.at - currentRay.origin);
+                }
+//              }
             } else {
 //          } else {
-                hitSky = true;
-//              hitSky = true;
-            }
-//          }
-        }
-//      }
-
-        if (!hitSky) {
-//      if (!hitSky) {
-            // Path Trace loop for bounces 1..Max
-//          // Path Trace loop for bounces 1..Max
-            int maxDepth = 3;
-//          int maxDepth = 3;
-            for (int depth = 1; depth < maxDepth; depth++) {
-//          for (int depth = 1; depth < maxDepth; depth++) {
-                
                 Interval hitInterval;
 //              Interval hitInterval;
                 hitInterval.min = 0.001;
 //              hitInterval.min = 0.001;
                 hitInterval.max = INF;
 //              hitInterval.max = INF;
-                
-                Ray ray;
-//              Ray ray;
-                ray.origin = rayOrigin;
-//              ray.origin = rayOrigin;
-                ray.direction = rayDir;
-//              ray.direction = rayDir;
 
-                RayHitResult hit = traverseBVHClosestHit(ray, hitInterval);
-//              RayHitResult hit = traverseBVHClosestHit(ray, hitInterval);
+                rayHitResult = traverseBVHClosestHit(currentRay, hitInterval);
+//              rayHitResult = traverseBVHClosestHit(currentRay, hitInterval);
 
-                if (hit.isHitted) {
-//              if (hit.isHitted) {
-                    // Hit surface
-//                  // Hit surface
-                    V = rayDir; // Incoming direction for next bounce
-//                  V = rayDir; // Incoming direction for next bounce
-                    vec3 prevOrigin = rayOrigin;
-//                  vec3 prevOrigin = rayOrigin;
-                    rayOrigin = rayOrigin + rayDir * hit.minDistance;
-//                  rayOrigin = rayOrigin + rayDir * hit.minDistance;
-
-                    // Reconstruct Normal
-//                  // Reconstruct Normal
-                    int offset = hit.triangleIndex * 9;
-//                  int offset = hit.triangleIndex * 9;
-                    vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
-//                  vec3 v0 = vec3(triangles[offset], triangles[offset+1], triangles[offset+2]);
-                    vec3 v1 = vec3(triangles[offset+3], triangles[offset+4], triangles[offset+5]);
-//                  vec3 v1 = vec3(triangles[offset+3], triangles[offset+4], triangles[offset+5]);
-                    vec3 v2 = vec3(triangles[offset+6], triangles[offset+7], triangles[offset+8]);
-//                  vec3 v2 = vec3(triangles[offset+6], triangles[offset+7], triangles[offset+8]);
-                    vec3 hitN = normalize(cross(v1 - v0, v2 - v0));
-//                  vec3 hitN = normalize(cross(v1 - v0, v2 - v0));
-                    bool frontFace = dot(V, hitN) < 0.0;
-//                  bool frontFace = dot(V, hitN) < 0.0;
-                    if (!frontFace) hitN = -hitN;
-//                  if (!frontFace) hitN = -hitN;
-
-                    Material mat = materials[hit.triangleIndex];
-//                  Material mat = materials[hit.triangleIndex];
-
-                    // Direct Light (NEE)
-//                  // Direct Light (NEE)
-                    // Soft Shadow (Area Light approximation)
-//                  // Soft Shadow (Area Light approximation)
-                    vec3 sunDirectionCenter = normalize(uPointLight001GlobalPosition - rayOrigin);
-//                  vec3 sunDirectionCenter = normalize(uPointLight001GlobalPosition - rayOrigin);
-                    vec3 sunColor = vec3(300.0);
-//                  vec3 sunColor = vec3(300.0);
-                    float sunRadius = 0.05;
-//                  float sunRadius = 0.05;
-                    vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-//                  vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-                    vec3 jitteredSunDir = normalize(jitteredSunPos - rayOrigin);
-//                  vec3 jitteredSunDir = normalize(jitteredSunPos - rayOrigin);
-                    float jitteredDist = length(jitteredSunPos - rayOrigin);
-//                  float jitteredDist = length(jitteredSunPos - rayOrigin);
-
-                    vec3 shadowRayOrigin = rayOrigin + hitN * 0.001; // Offset outward for shadow
-//                  vec3 shadowRayOrigin = rayOrigin + hitN * 0.001; // Offset outward for shadow
-                    
-                    Ray shadowRay;
-//                  Ray shadowRay;
-                    shadowRay.origin = shadowRayOrigin;
-//                  shadowRay.origin = shadowRayOrigin;
-                    shadowRay.direction = jitteredSunDir;
-//                  shadowRay.direction = jitteredSunDir;
-                    
-                    Interval shadowInterval;
-//                  Interval shadowInterval;
-                    shadowInterval.min = 0.001;
-//                  shadowInterval.min = 0.001;
-                    shadowInterval.max = jitteredDist;
-//                  shadowInterval.max = jitteredDist;
-
-                    if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-//                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-                        float cosTheta = max(0.0, dot(hitN, jitteredSunDir));
-//                      float cosTheta = max(0.0, dot(hitN, jitteredSunDir));
-                        // Inverse square falloff for point light
-//                      // Inverse square falloff for point light
-                        float falloff = 1.0 / (jitteredDist * jitteredDist);
-//                      float falloff = 1.0 / (jitteredDist * jitteredDist);
-                        vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
-//                      vec3 directLight = mat.albedo.rgb * (1.0 - mat.metallic) * sunColor * cosTheta * falloff;
-                        accumulatedColor += attenuation * directLight;
-//                      accumulatedColor += attenuation * directLight;
+                if (rayHitResult.isHitted) {
+//              if (rayHitResult.isHitted) {
+                    // Fix front face normal
+//                  // Fix front face normal
+                    bool frontFace = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
+//                  bool frontFace = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
+                    rayHitResult.isFrontFaceHitted = frontFace;
+//                  rayHitResult.isFrontFaceHitted = frontFace;
+                    if (!frontFace) {
+//                  if (!frontFace) {
+                        rayHitResult.hittedSideNormal = -rayHitResult.hittedSideNormal;
+//                      rayHitResult.hittedSideNormal = -rayHitResult.hittedSideNormal;
                     }
 //                  }
-
-                    // --- Principled Scatter ---
-//                  // --- Principled Scatter ---
-                    Ray incomingRay;
-//                  Ray incomingRay;
-                    incomingRay.origin = prevOrigin;
-//                  incomingRay.origin = prevOrigin;
-                    incomingRay.direction = V;
-//                  incomingRay.direction = V;
-
-                    RayHitResult hitRes;
-//                  RayHitResult hitRes;
-                    hitRes.at = rayOrigin;
-//                  hitRes.at = rayOrigin;
-                    hitRes.hittedSideNormal = hitN;
-//                  hitRes.hittedSideNormal = hitN;
-                    hitRes.isFrontFaceHitted = frontFace;
-//                  hitRes.isFrontFaceHitted = frontFace;
-                    hitRes.materialIndex = hit.triangleIndex;
-//                  hitRes.materialIndex = hit.triangleIndex;
-                    hitRes.minDistance = hit.minDistance;
-//                  hitRes.minDistance = hit.minDistance;
-                    hitRes.isHitted = true;
-//                  hitRes.isHitted = true;
-                    hitRes.triangleIndex = hit.triangleIndex;
-//                  hitRes.triangleIndex = hit.triangleIndex;
-                    hitRes.uvSurfaceCoordinate = hit.uvSurfaceCoordinate;
-//                  hitRes.uvSurfaceCoordinate = hit.uvSurfaceCoordinate;
-
-                    MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
-//                  MaterialLightScatteringResult res = scatterPrincipled(incomingRay, hitRes, mat);
-
-                    currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
-//                  currentRayRoughness = max(currentRayRoughness, res.sampledRoughness);
-
-                    if (res.isScattered) {
-//                  if (res.isScattered) {
-                        attenuation *= res.attenuation;
-//                      attenuation *= res.attenuation;
-                        rayOrigin = res.scatteredRay.origin;
-//                      rayOrigin = res.scatteredRay.origin;
-                        rayDir = res.scatteredRay.direction;
-//                      rayDir = res.scatteredRay.direction;
-                    } else {
-//                  } else {
-                        break;
-//                      break;
-                    }
-//                  }
-
-                    // Russian Roulette
-//                  // Russian Roulette
-                    if (depth >= 2) {
-//                  if (depth >= 2) {
-                        float pr = max(attenuation.r, max(attenuation.g, attenuation.b));
-//                      float pr = max(attenuation.r, max(attenuation.g, attenuation.b));
-                        if (rand() > pr) break;
-//                      if (rand() > pr) break;
-                        attenuation *= 1.0 / pr;
-//                      attenuation *= 1.0 / pr;
-                    }
-//                  }
-
-                } else {
-//              } else {
-                    // Hit Sky
-//                  // Hit Sky
-                    vec3 sky = getSkyColor(rayDir, currentRayRoughness);
-//                  vec3 sky = getSkyColor(rayDir, currentRayRoughness);
-                    accumulatedColor += attenuation * sky;
-//                  accumulatedColor += attenuation * sky;
-                    break;
-//                  break;
                 }
 //              }
             }
 //          }
+
+            if (!rayHitResult.isHitted) {
+//          if (!rayHitResult.isHitted) {
+                // Sky
+//              // Sky
+                vec3 sky = getSkyColor(currentRay.direction, 0.0);
+//              vec3 sky = getSkyColor(currentRay.direction, 0.0);
+                accumulatedColor += attenuation * sky;
+//              accumulatedColor += attenuation * sky;
+                break;
+//              break;
+            }
+//          }
+
+            Material material = materials[rayHitResult.materialIndex];
+//          Material material = materials[rayHitResult.materialIndex];
+
+            MaterialLightScatteringResult scatterResult = scatterPrincipled(currentRay, rayHitResult, material);
+//          MaterialLightScatteringResult scatterResult = scatterPrincipled(currentRay, rayHitResult, material);
+
+            accumulatedColor += attenuation * scatterResult.emission;
+//          accumulatedColor += attenuation * scatterResult.emission;
+
+            // NEE
+//          // NEE
+            vec3 sunColor = vec3(300.0);
+//          vec3 sunColor = vec3(300.0);
+            float sunRadius = 0.05;
+//          float sunRadius = 0.05;
+            vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
+//          vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
+            vec3 jitteredSunDir = normalize(jitteredSunPos - rayHitResult.at);
+//          vec3 jitteredSunDir = normalize(jitteredSunPos - rayHitResult.at);
+            float distLight = length(jitteredSunPos - rayHitResult.at);
+//          float distLight = length(jitteredSunPos - rayHitResult.at);
+
+            Ray shadowRay;
+//          Ray shadowRay;
+            shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
+//          shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
+            shadowRay.direction = jitteredSunDir;
+//          shadowRay.direction = jitteredSunDir;
+
+            Interval shadowInterval;
+//          Interval shadowInterval;
+            shadowInterval.min = 0.001;
+//          shadowInterval.min = 0.001;
+            shadowInterval.max = distLight;
+//          shadowInterval.max = distLight;
+
+            if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//          if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+                float cosTheta = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDir));
+//              float cosTheta = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDir));
+                float distSq = max(distLight * distLight, 0.1);
+//              float distSq = max(distLight * distLight, 0.1);
+                float falloff = 1.0 / distSq;
+//              float falloff = 1.0 / distSq;
+                vec3 directLight = scatterResult.attenuation * sunColor * cosTheta * falloff;
+//              vec3 directLight = scatterResult.attenuation * sunColor * cosTheta * falloff;
+                accumulatedColor += attenuation * directLight;
+//              accumulatedColor += attenuation * directLight;
+            }
+//          }
+
+            if (!scatterResult.isScattered) {
+//          if (!scatterResult.isScattered) {
+                break;
+//              break;
+            }
+//          }
+
+            attenuation *= scatterResult.attenuation;
+//          attenuation *= scatterResult.attenuation;
+
+            // RR
+//          // RR
+            uint minBouncesForRR = 4u;
+//          uint minBouncesForRR = 4u;
+            if (depth >= minBouncesForRR) {
+//          if (depth >= minBouncesForRR) {
+                float p = maxVec3(attenuation);
+//              float p = maxVec3(attenuation);
+                if (rand() > p) break;
+//              if (rand() > p) break;
+                attenuation *= 1.0 / p;
+//              attenuation *= 1.0 / p;
+            }
+//          }
+
+            currentRay = scatterResult.scatteredRay;
+//          currentRay = scatterResult.scatteredRay;
         }
 //      }
 
@@ -1255,21 +1222,12 @@
 //      // Accumulation
         vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
 //      vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
-
         vec3 history = prevAccum.rgb;
 //      vec3 history = prevAccum.rgb;
-
-        // Temporal Accumulation (Exponential Moving Average)
-//      // Temporal Accumulation (Exponential Moving Average)
-        // Alpha determines how much the current frame contributes.
-//      // Alpha determines how much the current frame contributes.
-        // Start with 1.0 (overwrite) and decay to a minimum (e.g., 0.1) for dynamic stability.
-//      // Start with 1.0 (overwrite) and decay to a minimum (e.g., 0.1) for dynamic stability.
         float alpha = 1.0 / float(uFrameCount);
 //      float alpha = 1.0 / float(uFrameCount);
         alpha = max(alpha, 0.1);
 //      alpha = max(alpha, 0.1);
-
         if (uFrameCount == 1) {
 //      if (uFrameCount == 1) {
              history = vec3(0.0);
@@ -1278,10 +1236,8 @@
 //           alpha = 1.0;
         }
 //      }
-
         vec3 newAverage = mix(history, accumulatedColor, alpha);
 //      vec3 newAverage = mix(history, accumulatedColor, alpha);
-
         imageStore(textureAccum, pixelCoordinates, vec4(newAverage, 1.0));
 //      imageStore(textureAccum, pixelCoordinates, vec4(newAverage, 1.0));
 

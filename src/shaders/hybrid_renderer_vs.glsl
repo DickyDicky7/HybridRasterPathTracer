@@ -1,10 +1,10 @@
     #version 430
 //  #version 430
 
-    in vec2 inScreenVertexPosition;
-//  in vec2 inScreenVertexPosition;
-    in vec2 inScreenVertexUV;
-//  in vec2 inScreenVertexUV;
+    layout(location = 0) in vec2 inScreenVertexPosition;
+//  layout(location = 0) in vec2 inScreenVertexPosition;
+    layout(location = 1) in vec2 inScreenVertexUV;
+//  layout(location = 1) in vec2 inScreenVertexUV;
 
     layout(location = 0) out vec2 outScreenVertexUV;
 //  layout(location = 0) out vec2 outScreenVertexUV;

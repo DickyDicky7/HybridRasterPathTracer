@@ -18,8 +18,8 @@
 //  const int KERNEL_RADIUS = 2;
     const float SIGMA_SPATIAL = 4.0;
 //  const float SIGMA_SPATIAL = 4.0;
-    const float SIGMA_COLOR = 1.0;
-//  const float SIGMA_COLOR = 1.0;
+    const float SIGMA_COLOR = 0.4; // 0.2;
+//  const float SIGMA_COLOR = 0.4; // 0.2;
     const float SIGMA_NORMAL = 0.5;
 //  const float SIGMA_NORMAL = 0.5;
     const float SIGMA_POSITION = 0.2;
@@ -138,10 +138,20 @@
 
                 // 4. Color Weight (Intensity Stopping) - Preserve texture detail
                 // 4. Color Weight (Intensity Stopping) - Preserve texture detail
+                // Relative Color Weighting
+//              // Relative Color Weighting
+                float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+//              float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+                float normFactor = max(centerLuma, 0.03 /*0.01*/);
+//              float normFactor = max(centerLuma, 0.03 /*0.01*/);
+
                 float distColor = distance(centerColor.rgb, tapColor.rgb);
 //              float distColor = distance(centerColor.rgb, tapColor.rgb);
-                float wColor = exp(-(distColor * distColor) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
-//              float wColor = exp(-(distColor * distColor) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
+                float distColorRel = distColor / normFactor;
+//              float distColorRel = distColor / normFactor;
+
+                float wColor = exp(-(distColorRel * distColorRel) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
+//              float wColor = exp(-(distColorRel * distColorRel) / (2.0 * SIGMA_COLOR * SIGMA_COLOR));
 
                 // Combined Weight
                 // Combined Weight

@@ -3,8 +3,8 @@
 
     layout(location = 0) in vec2 inScreenFragmentUV;
 //  layout(location = 0) in vec2 inScreenFragmentUV;
-    out vec4 fragmentColor;
-//  out vec4 fragmentColor;
+    layout(location = 0) out vec4 fragmentColor;
+//  layout(location = 0) out vec4 fragmentColor;
 
     uniform sampler2D uTextureOutput;
 //  uniform sampler2D uTextureOutput;

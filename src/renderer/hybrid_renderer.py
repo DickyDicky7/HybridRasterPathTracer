@@ -65,6 +65,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.texture_geometry_global_normal: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
         self.texture_geometry_albedo: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_geometry_albedo: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+        self.texture_geometry_global_tangent: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+#       self.texture_geometry_global_tangent: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
         self.texture_depth: mgl.Texture = self.ctx.depth_texture(size=self.window_size)
 #       self.texture_depth: mgl.Texture = self.ctx.depth_texture(size=self.window_size)
 
@@ -80,6 +82,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #               self.texture_geometry_global_normal,
                 self.texture_geometry_albedo,
 #               self.texture_geometry_albedo,
+                self.texture_geometry_global_tangent,
+#               self.texture_geometry_global_tangent,
             ],
 #           ],
             depth_attachment=self.texture_depth,
@@ -140,6 +144,26 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           # Create dummy 1x1 texture
             self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
 #           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
+
+        # Texture Array for Scene Materials
+#       # Texture Array for Scene Materials
+        self.texture_array_size: int = 2048
+#       self.texture_array_size: int = 2048
+        self.texture_array_layers: int = 16
+#       self.texture_array_layers: int = 16
+        self.texture_array: mgl.TextureArray = self.ctx.texture_array(
+#       self.texture_array: mgl.TextureArray = self.ctx.texture_array(
+            size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
+#           size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
+        )
+#       )
+        self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+#       self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+
+        self.texture_cache: dict[str, float] = {}
+#       self.texture_cache: dict[str, float] = {}
+        self.next_texture_layer: int = 0
+#       self.next_texture_layer: int = 0
 
         # -----------------------------
 #       # -----------------------------
@@ -246,32 +270,73 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials: list[Material] = [
 #       self.materials: list[Material] = [
-            {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-#           {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
-#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5},
+            {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+#           {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
         ]
 #       ]
 
         self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 #       self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 
-        self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
-#       self.scene_builder.add_cube(position=(-1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
-        self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
-#       self.scene_builder.add_cube(position=(0.0, 0.0, -1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
-        self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
-#       self.scene_builder.add_cube(position=(1.5, 0.0, 1.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
+        self.scene_builder.add_cube(position=(-3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
+#       self.scene_builder.add_cube(position=(-3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
+        self.scene_builder.add_cube(position=(0.0, 0.0, -3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
+#       self.scene_builder.add_cube(position=(0.0, 0.0, -3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
+        self.scene_builder.add_cube(position=(3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
+#       self.scene_builder.add_cube(position=(3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
 
         self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
 #       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
 
-        bvh_data, triangles_data, materials_data = self.scene_builder.build()
-#       bvh_data, triangles_data, materials_data = self.scene_builder.build()
+        # Load Vase
+#       # Load Vase
+        vase_albedo_idx = self.load_texture(self.resource_dir / "../assets/ChinaVase.jpg", is_srgb=True)
+#       vase_albedo_idx = self.load_texture(self.resource_dir / "../assets/ChinaVase.jpg", is_srgb=True)
+        # vase_roughness_idx = self.load_texture(self.resource_dir / "../assets/vase_base_roughness.jpg")
+#       # vase_roughness_idx = self.load_texture(self.resource_dir / "../assets/vase_base_roughness.jpg")
+        # vase_metallic_idx = self.load_texture(self.resource_dir / "../assets/vase_base_metallic.jpg")
+#       # vase_metallic_idx = self.load_texture(self.resource_dir / "../assets/vase_base_metallic.jpg")
+        # vase_normal_idx = self.load_texture(self.resource_dir / "../assets/vase_base_normal.png")
+#       # vase_normal_idx = self.load_texture(self.resource_dir / "../assets/vase_base_normal.png")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 0.5, 1.0),
+#           "albedo": (1.0, 0.5, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 0.0,
+#           "metallic": 0.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": vase_albedo_idx,
+#           "texture_index_albedo": vase_albedo_idx,
+            "texture_index_roughness": -1.0,
+#           "texture_index_roughness": -1.0,
+            "texture_index_metallic": -1.0,
+#           "texture_index_metallic": -1.0,
+            "texture_index_normal": -1.0,
+#           "texture_index_normal": -1.0,
+        })
+#       })
+        vase_material_index = len(self.materials) - 1
+#       vase_material_index = len(self.materials) - 1
+
+        vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
+#       vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
+        self.scene_builder.load_obj(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_index=vase_material_index)
+#       self.scene_builder.load_obj(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_index=vase_material_index)
+
+        bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
+#       bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
         self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
 #       self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
 
@@ -291,6 +356,21 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 3. Materials (Albedos)
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
+
+        # 4. UVs (vec2s per vertex per triangle: 6 floats per triangle)
+#       # 4. UVs (vec2s per vertex per triangle: 6 floats per triangle)
+        self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
+#       self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
+
+        # 5. Normals (vec3s per vertex per triangle: 9 floats per triangle)
+#       # 5. Normals (vec3s per vertex per triangle: 9 floats per triangle)
+        self.ssbo_normals: mgl.Buffer = self.ctx.buffer(data=normals_data)
+#       self.ssbo_normals: mgl.Buffer = self.ctx.buffer(data=normals_data)
+
+        # 6. Tangents (vec3s per vertex per triangle: 9 floats per triangle)
+#       # 6. Tangents (vec3s per vertex per triangle: 9 floats per triangle)
+        self.ssbo_tangents: mgl.Buffer = self.ctx.buffer(data=tangents_data)
+#       self.ssbo_tangents: mgl.Buffer = self.ctx.buffer(data=tangents_data)
 
         self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
@@ -341,6 +421,126 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           f /= base
         return result
 #       return result
+
+    def load_texture(self, path: pl.Path, is_srgb: bool = False) -> float:
+#   def load_texture(self, path: pl.Path, is_srgb: bool = False) -> float:
+        path_str = str(path.resolve())
+#       path_str = str(path.resolve())
+        if path_str in self.texture_cache:
+#       if path_str in self.texture_cache:
+            return self.texture_cache[path_str]
+#           return self.texture_cache[path_str]
+
+        if self.next_texture_layer >= self.texture_array_layers:
+#       if self.next_texture_layer >= self.texture_array_layers:
+            print(f"Warning: Texture array full. Cannot load {path}")
+#           print(f"Warning: Texture array full. Cannot load {path}")
+            return -1.0
+#           return -1.0
+
+        layer_index = self.next_texture_layer
+#       layer_index = self.next_texture_layer
+        self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+#       self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+        self.texture_cache[path_str] = float(layer_index)
+#       self.texture_cache[path_str] = float(layer_index)
+        self.next_texture_layer += 1
+#       self.next_texture_layer += 1
+        return float(layer_index)
+#       return float(layer_index)
+
+    def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
+#   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
+        if not path.exists():
+#       if not path.exists():
+            print(f"Warning: Texture not found: {path}")
+#           print(f"Warning: Texture not found: {path}")
+            return
+#           return
+
+        loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+#       loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if loaded_data is None:
+#       if loaded_data is None:
+            print(f"Warning: Failed to load texture: {path}")
+#           print(f"Warning: Failed to load texture: {path}")
+            return
+#           return
+
+        # Ensure RGBA
+        # Ensure RGBA
+        print(f"path: {path} loaded_data.shape: {loaded_data.shape}")
+#       print(f"path: {path} loaded_data.shape: {loaded_data.shape}")
+        if len(loaded_data.shape) == 2:
+#       if len(loaded_data.shape) == 2:
+            loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_GRAY2RGBA)
+#           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_GRAY2RGBA)
+        elif loaded_data.shape[2] == 3:
+#       elif loaded_data.shape[2] == 3:
+            loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGR2RGBA)
+#           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGR2RGBA)
+        elif loaded_data.shape[2] == 4:
+#       elif loaded_data.shape[2] == 4:
+            loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
+#           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
+
+        # Resize to 2048x2048
+        # Resize to 2048x2048
+        if loaded_data.shape[0] != self.texture_array_size or loaded_data.shape[1] != self.texture_array_size:
+#       if loaded_data.shape[0] != self.texture_array_size or loaded_data.shape[1] != self.texture_array_size:
+            loaded_data = cv2.resize(loaded_data, (self.texture_array_size, self.texture_array_size), interpolation=cv2.INTER_LINEAR)
+#           loaded_data = cv2.resize(loaded_data, (self.texture_array_size, self.texture_array_size), interpolation=cv2.INTER_LINEAR)
+
+        # Flip for OpenGL!
+        # Flip for OpenGL!
+        loaded_data = np.flipud(loaded_data)
+#       loaded_data = np.flipud(loaded_data)
+
+        # Write to texture array
+        # Write to texture array
+        data_float: npt.NDArray[np.float32]
+#       data_float: npt.NDArray[np.float32]
+
+        if loaded_data.dtype == np.uint8:
+#       if loaded_data.dtype == np.uint8:
+            data_float = (loaded_data.astype("f4") / 255.0)
+#           data_float = (loaded_data.astype("f4") / 255.0)
+        elif loaded_data.dtype == np.uint16:
+#       elif loaded_data.dtype == np.uint16:
+            data_float = (loaded_data.astype("f4") / 65535.0)
+#           data_float = (loaded_data.astype("f4") / 65535.0)
+        else:
+#       else:
+            data_float = loaded_data.astype("f4")
+#           data_float = loaded_data.astype("f4")
+
+        # Apply sRGB -> Linear conversion if requested
+#       # Apply sRGB -> Linear conversion if requested
+        if is_srgb:
+#       if is_srgb:
+            # Approximate Gamma 2.2
+#           # Approximate Gamma 2.2
+            data_float = np.power(data_float, 2.2)
+#           data_float = np.power(data_float, 2.2)
+
+        data_bytes = data_float.tobytes()
+#       data_bytes = data_float.tobytes()
+
+        # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
+        # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
+        # For ModernGL TextureArray.write: viewport=(x, y, z, width, height, depth)
+        # For ModernGL TextureArray.write: viewport=(x, y, z, width, height, depth)
+
+        # Check ModernGL docs logic. Often it's just (x, y, layer, width, height, 1).
+        # Check ModernGL docs logic. Often it's just (x, y, layer, width, height, 1).
+        self.texture_array.write(data_bytes, viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+#       self.texture_array.write(data_bytes, viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+
+        # Generate mipmaps if needed (requires creating whole array though! or per layer!)
+        # Generate mipmaps if needed (requires creating whole array though! or per layer!)
+        self.texture_array.build_mipmaps()
+#       self.texture_array.build_mipmaps()
+
 
     def key_event(self, key: int, action: int, modifiers: int) -> None:
 #   def key_event(self, key: int, action: int, modifiers: int) -> None:
@@ -500,18 +700,26 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
         self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
 #       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+        self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
+#       self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
 
         # Bind BVH buffers
 #       # Bind BVH buffers
-        self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
-#       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=4)
-        self.ssbo_triangles.bind_to_storage_buffer(binding=5)
-#       self.ssbo_triangles.bind_to_storage_buffer(binding=5)
-        self.ssbo_materials.bind_to_storage_buffer(binding=7)
-#       self.ssbo_materials.bind_to_storage_buffer(binding=7)
+        self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
+#       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
+        self.ssbo_triangles.bind_to_storage_buffer(binding=7)
+#       self.ssbo_triangles.bind_to_storage_buffer(binding=7)
+        self.ssbo_materials.bind_to_storage_buffer(binding=8)
+#       self.ssbo_materials.bind_to_storage_buffer(binding=8)
+        self.ssbo_uvs.bind_to_storage_buffer(binding=9)
+#       self.ssbo_uvs.bind_to_storage_buffer(binding=9)
+        self.ssbo_normals.bind_to_storage_buffer(binding=10)
+#       self.ssbo_normals.bind_to_storage_buffer(binding=10)
+        self.ssbo_tangents.bind_to_storage_buffer(binding=11)
+#       self.ssbo_tangents.bind_to_storage_buffer(binding=11)
 
-        self.texture_accum.bind_to_image(6, read=True, write=True)
-#       self.texture_accum.bind_to_image(6, read=True, write=True)
+        self.texture_accum.bind_to_image(5, read=True, write=True)
+#       self.texture_accum.bind_to_image(5, read=True, write=True)
 
         # Update Uniforms
 #       # Update Uniforms
@@ -546,6 +754,15 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uHdriTexture" in self.program_shading:
             self.program_shading["uHdriTexture"] = 8
 #           self.program_shading["uHdriTexture"] = 8
+        # Scene Texture Array
+#       # Scene Texture Array
+        self.texture_array.use(location=9)
+#       self.texture_array.use(location=9)
+        if "uSceneTextureArray" in self.program_shading:
+#       if "uSceneTextureArray" in self.program_shading:
+            self.program_shading["uSceneTextureArray"] = 9
+#           self.program_shading["uSceneTextureArray"] = 9
+
         if "uUseHdri" in self.program_shading:
 #       if "uUseHdri" in self.program_shading:
             self.program_shading["uUseHdri"] = self.use_hdri
