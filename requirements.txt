@@ -1,6 +1,8 @@
 mypy
 pyrr
+oidn
 numpy
+pyoidn
 pyassimp
 moderngl
 moderngl-window
