@@ -1226,8 +1226,8 @@
 //      vec3 history = prevAccum.rgb;
         float alpha = 1.0 / float(uFrameCount);
 //      float alpha = 1.0 / float(uFrameCount);
-        alpha = max(alpha, 0.1);
-//      alpha = max(alpha, 0.1);
+        alpha = max(alpha, 0.1 /* 0.01 */);
+//      alpha = max(alpha, 0.1 /* 0.01 */);
         if (uFrameCount == 1) {
 //      if (uFrameCount == 1) {
              history = vec3(0.0);

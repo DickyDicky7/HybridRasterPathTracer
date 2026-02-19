@@ -18,6 +18,8 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import cv2
+import pyoidn
+import pyoidn
 from src.renderer.shader_compiler import resolve_includes
 from src.renderer.shader_compiler import resolve_includes
 from src.scene.scene_builder import SceneBuilder, SceneBatch
@@ -48,10 +50,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.frame_count: int = 0
 #       self.frame_count: int = 0
-        """
         self.last_view_matrix = None
 #       self.last_view_matrix = None
-        """
 
         # -----------------------------
 #       # -----------------------------
@@ -106,6 +106,13 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
 #       self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
 
+        # OIDN Setup
+#       # OIDN Setup
+        self.oidn_device: pyoidn.Device = pyoidn.Device(device_type=pyoidn.OIDN_DEVICE_TYPE_CPU)
+#       self.oidn_device: pyoidn.Device = pyoidn.Device(device_type=pyoidn.OIDN_DEVICE_TYPE_CPU)
+        self.oidn_device.commit()
+#       self.oidn_device.commit()
+
         # HDRI Texture Loading
 #       # HDRI Texture Loading
         hdri_path: pl.Path = self.resource_dir / "../assets/rostock_laage_airport_4k.exr"
@@ -120,8 +127,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if loaded_data is None:
                 raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
 #               raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
-            hdri_data: npt.NDArray[np.float32] = loaded_data.astype("f4")
-#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype("f4")
+            hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
+#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
             hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
 #           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
             hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
@@ -142,8 +149,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       else:
             # Create dummy 1x1 texture
 #           # Create dummy 1x1 texture
-            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
-#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype="f4").tobytes())
+            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype=np.float32, data=np.zeros(3, dtype=np.float32).tobytes())
+#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype=np.float32, data=np.zeros(3, dtype=np.float32).tobytes())
 
         # Texture Array for Scene Materials
 #       # Texture Array for Scene Materials
@@ -244,8 +251,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           -1.0,  1.0,  0.0,  1.0,
              1.0,  1.0,  1.0,  1.0,
 #            1.0,  1.0,  1.0,  1.0,
-        ], dtype="f4")
-#       ], dtype="f4")
+        ], dtype=np.float32)
+#       ], dtype=np.float32)
         self.vbo_screen: mgl.Buffer = self.ctx.buffer(data=screen_data.tobytes())
 #       self.vbo_screen: mgl.Buffer = self.ctx.buffer(data=screen_data.tobytes())
         self.vao_screen: mgl.VertexArray = self.ctx.vertex_array(
@@ -503,16 +510,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         if loaded_data.dtype == np.uint8:
 #       if loaded_data.dtype == np.uint8:
-            data_float = (loaded_data.astype("f4") / 255.0)
-#           data_float = (loaded_data.astype("f4") / 255.0)
+            data_float = (loaded_data.astype(dtype=np.float32) / 255.0)
+#           data_float = (loaded_data.astype(dtype=np.float32) / 255.0)
         elif loaded_data.dtype == np.uint16:
 #       elif loaded_data.dtype == np.uint16:
-            data_float = (loaded_data.astype("f4") / 65535.0)
-#           data_float = (loaded_data.astype("f4") / 65535.0)
+            data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
+#           data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
         else:
 #       else:
-            data_float = loaded_data.astype("f4")
-#           data_float = loaded_data.astype("f4")
+            data_float = loaded_data.astype(dtype=np.float32)
+#           data_float = loaded_data.astype(dtype=np.float32)
 
         # Apply sRGB -> Linear conversion if requested
 #       # Apply sRGB -> Linear conversion if requested
@@ -542,6 +549,7 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.texture_array.build_mipmaps()
 
 
+    """
     def key_event(self, key: int, action: int, modifiers: int) -> None:
 #   def key_event(self, key: int, action: int, modifiers: int) -> None:
         keys = self.wnd.keys
@@ -590,6 +598,114 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           elif key == keys.LEFT: self.key_state["LEFT"] = False
             elif key == keys.RIGHT: self.key_state["RIGHT"] = False
 #           elif key == keys.RIGHT: self.key_state["RIGHT"] = False
+    """
+
+    def denoise_and_show(self) -> None:
+#   def denoise_and_show(self) -> None:
+        print("Denoising with OIDN...")
+#       print("Denoising with OIDN...")
+
+        w, h = self.window_size
+#       w, h = self.window_size
+
+        # Read textures (Read 4 components to be safe, then slice)
+#       # Read textures (Read 4 components to be safe, then slice)
+        # Accumulator (Color)
+#       # Accumulator (Color)
+        color_data: bytes = self.texture_accum.read()
+#       color_data: bytes = self.texture_accum.read()
+        color_arr: npt.NDArray[np.float32] = np.frombuffer(color_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+#       color_arr: npt.NDArray[np.float32] = np.frombuffer(color_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+        color_arr = np.ascontiguousarray(color_arr)
+#       color_arr = np.ascontiguousarray(color_arr)
+
+        # Check inputs
+#       # Check inputs
+        # print(f"OIDN Input Color Range: {np.min(color_arr)} - {np.max(color_arr)}")
+#       # print(f"OIDN Input Color Range: {np.min(color_arr)} - {np.max(color_arr)}")
+
+        # Albedo
+#       # Albedo
+        albedo_data: bytes = self.texture_geometry_albedo.read()
+#       albedo_data: bytes = self.texture_geometry_albedo.read()
+        albedo_arr: npt.NDArray[np.float32] = np.frombuffer(albedo_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+#       albedo_arr: npt.NDArray[np.float32] = np.frombuffer(albedo_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+        albedo_arr = np.ascontiguousarray(albedo_arr)
+#       albedo_arr = np.ascontiguousarray(albedo_arr)
+
+        # Normal
+#       # Normal
+        normal_data: bytes = self.texture_geometry_global_normal.read()
+#       normal_data: bytes = self.texture_geometry_global_normal.read()
+        normal_arr: npt.NDArray[np.float32] = np.frombuffer(normal_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+#       normal_arr: npt.NDArray[np.float32] = np.frombuffer(normal_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+        normal_arr = np.ascontiguousarray(normal_arr)
+#       normal_arr = np.ascontiguousarray(normal_arr)
+
+        # Output
+#       # Output
+        output_arr = np.zeros((h, w, 3), dtype=np.float32)
+#       output_arr = np.zeros((h, w, 3), dtype=np.float32)
+
+        # OIDN Filter
+#       # OIDN Filter
+        filter: pyoidn.Filter = pyoidn.Filter(device=self.oidn_device, filter_type=pyoidn.OIDN_FILTER_TYPE_RT)
+#       filter: pyoidn.Filter = pyoidn.Filter(device=self.oidn_device, filter_type=pyoidn.OIDN_FILTER_TYPE_RT)
+
+        # We rely on default strides (0) which OIDN interprets as packed
+#       # We rely on default strides (0) which OIDN interprets as packed
+        filter.set_image(name=pyoidn.OIDN_IMAGE_COLOR, data=color_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+#       filter.set_image(name=pyoidn.OIDN_IMAGE_COLOR, data=color_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+        filter.set_image(name=pyoidn.OIDN_IMAGE_ALBEDO, data=albedo_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+#       filter.set_image(name=pyoidn.OIDN_IMAGE_ALBEDO, data=albedo_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+        filter.set_image(name=pyoidn.OIDN_IMAGE_NORMAL, data=normal_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+#       filter.set_image(name=pyoidn.OIDN_IMAGE_NORMAL, data=normal_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+        filter.set_image(name=pyoidn.OIDN_IMAGE_OUTPUT, data=output_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+#       filter.set_image(name=pyoidn.OIDN_IMAGE_OUTPUT, data=output_arr, data_format=pyoidn.OIDN_FORMAT_FLOAT3, width=w, height=h)
+
+        filter.set_quality(quality=pyoidn.OIDN_QUALITY_HIGH)
+#       filter.set_quality(quality=pyoidn.OIDN_QUALITY_HIGH)
+
+        filter.commit()
+#       filter.commit()
+        filter.execute()
+#       filter.execute()
+
+        # Check errors
+#       # Check errors
+        error_msg = self.oidn_device.get_error()
+#       error_msg = self.oidn_device.get_error()
+        if error_msg:
+#       if error_msg:
+            print(f"OIDN Error: {error_msg}")
+#           print(f"OIDN Error: {error_msg}")
+
+        # print(f"OIDN Output Range: {np.min(output_arr)} - {np.max(output_arr)}")
+#       # print(f"OIDN Output Range: {np.min(output_arr)} - {np.max(output_arr)}")
+
+        # if np.allclose(output_arr, 0.5):
+#       # if np.allclose(output_arr, 0.5):
+        #     print("ERROR: OIDN did not write to output array!")
+#       #     print("ERROR: OIDN did not write to output array!")
+
+        # Show result
+#       # Show result
+        # Convert RGB to BGR for OpenCV and Flip for correct orientation
+#       # Convert RGB to BGR for OpenCV and Flip for correct orientation
+        display_img = cv2.cvtColor(output_arr, cv2.COLOR_RGB2BGR)
+#       display_img = cv2.cvtColor(output_arr, cv2.COLOR_RGB2BGR)
+        display_img = cv2.flip(display_img, 0)
+#       display_img = cv2.flip(display_img, 0)
+        cv2.imshow("OIDN Denoised Result", display_img)
+#       cv2.imshow("OIDN Denoised Result", display_img)
+        cv2.waitKey(1)
+#       cv2.waitKey(1)
+
+        filter.release()
+#       filter.release()
+
+        print("Denoise complete. Check the window.")
+#       print("Denoise complete. Check the window.")
 
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
@@ -630,7 +746,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.camera.update(frame_time=frame_time, key_state=self.key_state)
 #       self.camera.update(frame_time=frame_time, key_state=self.key_state)
 
-        """
         # Check for movement (Reset Accumulation)
 #       # Check for movement (Reset Accumulation)
         current_view_matrix = self.camera.get_view_matrix()
@@ -643,7 +758,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #               self.frame_count = 1
         self.last_view_matrix = current_view_matrix
 #       self.last_view_matrix = current_view_matrix
-        """
 
         # TAA Jitter
 #       # TAA Jitter
@@ -668,10 +782,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 #       self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
 
-        typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype("f4").tobytes())
-#       typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype("f4").tobytes())
-        typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype("f4").tobytes())
-#       typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype("f4").tobytes())
+        typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype(dtype=np.float32).tobytes())
+#       typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype(dtype=np.float32).tobytes())
+        typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
+#       typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
 
         current_triangle_offset: int = 0
 #       current_triangle_offset: int = 0
@@ -832,6 +946,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
         self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
 #       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
+        self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+#       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
 
         self.program_denoise["uStepSize"] = 1
 #       self.program_denoise["uStepSize"] = 1
@@ -901,5 +1017,27 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.texture_output.use()
         self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
 #       self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
+        pass
+#       pass
+
+    def on_key_event(self, key, action, modifiers) -> None:
+#   def on_key_event(self, key, action, modifiers) -> None:
+        if action == self.wnd.keys.ACTION_PRESS:
+#       if action == self.wnd.keys.ACTION_PRESS:
+            if key == self.wnd.keys.I:
+#           if key == self.wnd.keys.I:
+                self.denoise_and_show()
+#               self.denoise_and_show()
+            pass
+#           pass
+        pass
+#       pass
+
+    def on_close(self) -> None:
+#   def on_close(self) -> None:
+        print(f"[CLOSE]")
+#       print(f"[CLOSE]")
+        self.oidn_device.release()
+#       self.oidn_device.release()
         pass
 #       pass

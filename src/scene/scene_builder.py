@@ -10,8 +10,8 @@ import pyassimp   # type: ignore[import-untyped]
 import pyassimp
 from src.scene import bvh
 from src.scene import bvh
-from src.core.common_types import vec3f32, vec4f32, Material
-from src.core.common_types import vec3f32, vec4f32, Material
+from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
+from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
 
 class SceneBatch:
     def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
@@ -73,8 +73,8 @@ class SceneBuilder:
 #           f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1]),
             f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2])
 #           f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2])
-        ], dtype="f4")
-#       ], dtype="f4")
+        ], dtype=np.float32)
+#       ], dtype=np.float32)
 
         norm = np.linalg.norm(tangent)
 #       norm = np.linalg.norm(tangent)
@@ -101,8 +101,8 @@ class SceneBuilder:
 #           *vertex3, *face_normal, *face_tangent, *uv3,
             *vertex0, *face_normal, *face_tangent, *uv0,
 #           *vertex0, *face_normal, *face_tangent, *uv0,
-        ], dtype="f4")
-#       ], dtype="f4")
+        ], dtype=np.float32)
+#       ], dtype=np.float32)
 
     def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
 #   def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
@@ -112,14 +112,14 @@ class SceneBuilder:
 #       matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
         matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
-        matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-#       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+        matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
+#       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
         albedo: vec3f32 = self.materials[material_index]["albedo"]
 #       albedo: vec3f32 = self.materials[material_index]["albedo"]
         if len(albedo) == 4: albedo = albedo[:3]
 #       if len(albedo) == 4: albedo = albedo[:3]
-        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
-#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
+        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype(dtype=np.float32)
+#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype(dtype=np.float32)
         self.cube_instance_data.append(data)
 #       self.cube_instance_data.append(data)
 
@@ -131,14 +131,14 @@ class SceneBuilder:
 #       matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
         matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
-        matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-#       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+        matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
+#       matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
         albedo: vec3f32 = self.materials[material_index]["albedo"]
 #       albedo: vec3f32 = self.materials[material_index]["albedo"]
         if len(albedo) == 4: albedo = albedo[:3]
 #       if len(albedo) == 4: albedo = albedo[:3]
-        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
-#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype("f4")
+        data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype(dtype=np.float32)
+#       data: npt.NDArray[np.float32] = np.concatenate([matrix.flatten(), albedo, [float(material_index)]]).astype(dtype=np.float32)
         self.plane_instance_data.append(data)
 #       self.plane_instance_data.append(data)
 
@@ -152,8 +152,8 @@ class SceneBuilder:
 #       matrix_rotation: rr.Matrix44 = rr.Matrix44.from_eulers(rotation)
         matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
 #       matrix_scale: rr.Matrix44 = rr.Matrix44.from_scale(scale)
-        model_matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
-#       model_matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype("f4")
+        model_matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
+#       model_matrix: npt.NDArray[np.float32] = (matrix_translation * matrix_rotation * matrix_scale).astype(dtype=np.float32)
 
         # Calculate Normal Matrix (Transpose of Inverse of upper 3x3)
 #       # Calculate Normal Matrix (Transpose of Inverse of upper 3x3)
@@ -167,8 +167,8 @@ class SceneBuilder:
 #           normal_matrix = m33_inv.T
         except np.linalg.LinAlgError:
 #       except np.linalg.LinAlgError:
-            normal_matrix = np.eye(3, dtype="f4")
-#           normal_matrix = np.eye(3, dtype="f4")
+            normal_matrix = np.eye(3, dtype=np.float32)
+#           normal_matrix = np.eye(3, dtype=np.float32)
 
         # Prepare material data
 #       # Prepare material data
@@ -196,8 +196,8 @@ class SceneBuilder:
 #           material["texture_index_metallic"],
             material["texture_index_normal"],
 #           material["texture_index_normal"],
-        ], dtype="f4")
-#       ], dtype="f4")
+        ], dtype=np.float32)
+#       ], dtype=np.float32)
 
         try:
 #       try:
@@ -278,16 +278,16 @@ class SceneBuilder:
 #                       uvs = uvs_raw[:, :2] # (N, 2)
                     else:
 #                   else:
-                        uvs = np.zeros((len(vertices), 2), dtype="f4")
-#                       uvs = np.zeros((len(vertices), 2), dtype="f4")
+                        uvs = np.zeros((len(vertices), 2), dtype=np.float32)
+#                       uvs = np.zeros((len(vertices), 2), dtype=np.float32)
 
                     # Transform and Append
 #                   # Transform and Append
 
                     # Transform Vertices
 #                   # Transform Vertices
-                    ones = np.ones((len(vertices), 1), dtype="f4")
-#                   ones = np.ones((len(vertices), 1), dtype="f4")
+                    ones = np.ones((len(vertices), 1), dtype=np.float32)
+#                   ones = np.ones((len(vertices), 1), dtype=np.float32)
                     vertices_h = np.hstack([vertices, ones])
 #                   vertices_h = np.hstack([vertices, ones])
                     transformed_vertices_h = vertices_h @ model_matrix.T # (N, 4)
@@ -349,14 +349,14 @@ class SceneBuilder:
 
                     for i in range(n_triangles):
 #                   for i in range(n_triangles):
-                        self.scene_triangles.append(tri_vertices[i].astype("f4"))
-#                       self.scene_triangles.append(tri_vertices[i].astype("f4"))
-                        self.scene_normals.append(tri_normals[i].astype("f4"))
-#                       self.scene_normals.append(tri_normals[i].astype("f4"))
-                        self.scene_tangents.append(tri_tangents[i].astype("f4"))
-#                       self.scene_tangents.append(tri_tangents[i].astype("f4"))
-                        self.scene_uvs.append(tri_uvs[i].astype("f4"))
-#                       self.scene_uvs.append(tri_uvs[i].astype("f4"))
+                        self.scene_triangles.append(tri_vertices[i].astype(dtype=np.float32))
+#                       self.scene_triangles.append(tri_vertices[i].astype(dtype=np.float32))
+                        self.scene_normals.append(tri_normals[i].astype(dtype=np.float32))
+#                       self.scene_normals.append(tri_normals[i].astype(dtype=np.float32))
+                        self.scene_tangents.append(tri_tangents[i].astype(dtype=np.float32))
+#                       self.scene_tangents.append(tri_tangents[i].astype(dtype=np.float32))
+                        self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
+#                       self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
                         self.scene_materials.append(material_data)
 #                       self.scene_materials.append(material_data)
 
@@ -394,17 +394,17 @@ class SceneBuilder:
                     # Use transformed vertices! So vertex shader uses Identity model matrix.
 #                   # Use transformed vertices! So vertex shader uses Identity model matrix.
 
-                    mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype("f4")
-#                   mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype("f4")
+                    mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype(dtype=np.float32)
+#                   mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype(dtype=np.float32)
                     vbo_mesh = self.ctx.buffer(mesh_data.tobytes())
 #                   vbo_mesh = self.ctx.buffer(mesh_data.tobytes())
 
                     # Instance Data: Identity Matrix + Material Index
 #                   # Instance Data: Identity Matrix + Material Index
-                    identity = np.eye(4, dtype="f4").flatten()
-#                   identity = np.eye(4, dtype="f4").flatten()
-                    inst_data = np.concatenate([identity, albedo[:3], [float(material_index)]]).astype("f4")
-#                   inst_data = np.concatenate([identity, albedo[:3], [float(material_index)]]).astype("f4")
+                    identity = np.eye(4, dtype=np.float32).flatten()
+#                   identity = np.eye(4, dtype=np.float32).flatten()
+                    inst_data = np.concatenate([identity, albedo[:3], [float(material_index)]]).astype(dtype=np.float32)
+#                   inst_data = np.concatenate([identity, albedo[:3], [float(material_index)]]).astype(dtype=np.float32)
                     vbo_instance = self.ctx.buffer(inst_data.tobytes())
 #                   vbo_instance = self.ctx.buffer(inst_data.tobytes())
 
@@ -503,13 +503,13 @@ class SceneBuilder:
 #               float(material["texture_index_metallic"]),
                 float(material["texture_index_normal"]),
 #               float(material["texture_index_normal"]),
-            ], dtype="f4")
-#           ], dtype="f4")
+            ], dtype=np.float32)
+#           ], dtype=np.float32)
 
             for i, triangle_vertices in enumerate(base_triangles):
 #           for i, triangle_vertices in enumerate(base_triangles):
-                ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
-#               ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype="f4")
+                ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype=np.float32)
+#               ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype=np.float32)
                 vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
 #               vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
                 transformed_vertices_h: npt.NDArray[np.float32] = model_matrix @ vertices_h.T
@@ -538,8 +538,8 @@ class SceneBuilder:
 #                   normal_matrix = m33_inv.T
                 except np.linalg.LinAlgError:
 #               except np.linalg.LinAlgError:
-                    normal_matrix = np.eye(3, dtype="f4")
-#                   normal_matrix = np.eye(3, dtype="f4")
+                    normal_matrix = np.eye(3, dtype=np.float32)
+#                   normal_matrix = np.eye(3, dtype=np.float32)
                 triangle_normals = base_normals[i]
 #               triangle_normals = base_normals[i]
                 transformed_normals = []
@@ -558,8 +558,8 @@ class SceneBuilder:
 #                       Tn = Tn / norm
                     transformed_normals.append(Tn)
 #                   transformed_normals.append(Tn)
-                self.scene_normals.append(np.array(transformed_normals, dtype="f4"))
-#               self.scene_normals.append(np.array(transformed_normals, dtype="f4"))
+                self.scene_normals.append(np.array(transformed_normals, dtype=np.float32))
+#               self.scene_normals.append(np.array(transformed_normals, dtype=np.float32))
 
                 # Tangents (Transform with model rotation)
 #               # Tangents (Transform with model rotation)
@@ -581,30 +581,30 @@ class SceneBuilder:
 #                       Tt = Tt / norm
                     transformed_tangents.append(Tt)
 #                   transformed_tangents.append(Tt)
-                self.scene_tangents.append(np.array(transformed_tangents, dtype="f4"))
-#               self.scene_tangents.append(np.array(transformed_tangents, dtype="f4"))
+                self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
+#               self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
 
-    def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes]:
-#   def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes]:
+    def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes]:
+#   def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes]:
         def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
-            return np.array([vertex0, vertex1, vertex2], dtype="f4")
-#           return np.array([vertex0, vertex1, vertex2], dtype="f4")
+            return np.array([vertex0, vertex1, vertex2], dtype=np.float32)
+#           return np.array([vertex0, vertex1, vertex2], dtype=np.float32)
 
         def get_triangle_normals(normal0: vec3f32, normal1: vec3f32, normal2: vec3f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_normals(normal0: vec3f32, normal1: vec3f32, normal2: vec3f32) -> npt.NDArray[np.float32]:
-            return np.array([normal0, normal1, normal2], dtype="f4")
-#           return np.array([normal0, normal1, normal2], dtype="f4")
+            return np.array([normal0, normal1, normal2], dtype=np.float32)
+#           return np.array([normal0, normal1, normal2], dtype=np.float32)
 
         def get_triangle_uvs(uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_uvs(uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> npt.NDArray[np.float32]:
-            return np.array([uv0, uv1, uv2], dtype="f4")
-#           return np.array([uv0, uv1, uv2], dtype="f4")
+            return np.array([uv0, uv1, uv2], dtype=np.float32)
+#           return np.array([uv0, uv1, uv2], dtype=np.float32)
 
         def get_triangle_tangents(t0: vec3f32, t1: vec3f32, t2: vec3f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_tangents(t0: vec3f32, t1: vec3f32, t2: vec3f32) -> npt.NDArray[np.float32]:
-            return np.array([t0, t1, t2], dtype="f4")
-#           return np.array([t0, t1, t2], dtype="f4")
+            return np.array([t0, t1, t2], dtype=np.float32)
+#           return np.array([t0, t1, t2], dtype=np.float32)
 
         # Create Cube Batch
 #       # Create Cube Batch
@@ -937,24 +937,24 @@ class SceneBuilder:
 
         # Build BVH
 #       # Build BVH
-        world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype="f4")
-#       world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype="f4")
+        world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype=np.float32)
+#       world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype=np.float32)
         lbvh: bvh.LBVH = bvh.LBVH(world_triangles)
 #       lbvh: bvh.LBVH = bvh.LBVH(world_triangles)
         bvh_data: bytes = lbvh.simple_build()
 #       bvh_data: bytes = lbvh.simple_build()
 
-        world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype="f4")
-#       world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype="f4")
+        world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
+#       world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
 
-        world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype="f4")
-#       world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype="f4")
+        world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
+#       world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
 
-        world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype="f4")
-#       world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype="f4")
+        world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype=np.float32)
+#       world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype=np.float32)
 
-        world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype="f4")
-#       world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype="f4")
+        world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
+#       world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
 
         return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
 #       return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()

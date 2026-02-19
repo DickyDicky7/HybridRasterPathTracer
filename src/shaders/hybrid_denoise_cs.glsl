@@ -9,6 +9,8 @@
 //  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
     layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
 //  layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
+    layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
+//  layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
     layout(binding = 5, rgba32f) uniform image2D textureInput;
 //  layout(binding = 5, rgba32f) uniform image2D textureInput;
 
@@ -16,14 +18,17 @@
     // Configuration
     const int KERNEL_RADIUS = 2;
 //  const int KERNEL_RADIUS = 2;
-    const float SIGMA_SPATIAL = 4.0;
-//  const float SIGMA_SPATIAL = 4.0;
-    const float SIGMA_COLOR = 0.4; // 0.2;
-//  const float SIGMA_COLOR = 0.4; // 0.2;
-    const float SIGMA_NORMAL = 0.5;
-//  const float SIGMA_NORMAL = 0.5;
-    const float SIGMA_POSITION = 0.2;
-//  const float SIGMA_POSITION = 0.2;
+    // B3-Spline weights for À-Trous (1/16, 1/4, 3/8, 1/4, 1/16)
+//  // B3-Spline weights for À-Trous (1/16, 1/4, 3/8, 1/4, 1/16)
+    const float KERNEL_WEIGHTS[5] = float[](0.0625, 0.25, 0.375, 0.25, 0.0625);
+//  const float KERNEL_WEIGHTS[5] = float[](0.0625, 0.25, 0.375, 0.25, 0.0625);
+
+    const float SIGMA_COLOR = 0.2;
+//  const float SIGMA_COLOR = 0.2;
+    const float SIGMA_NORMAL = 0.1;
+//  const float SIGMA_NORMAL = 0.1;
+    const float SIGMA_POSITION = 0.5;
+//  const float SIGMA_POSITION = 0.5;
 
     uniform int uStepSize;
 //  uniform int uStepSize;
@@ -54,6 +59,9 @@
 //      vec4 centerNorm = imageLoad(textureGeometryGlobalNormal, centerCoord);
         vec4 centerColor = imageLoad(textureInput, centerCoord);
 //      vec4 centerColor = imageLoad(textureInput, centerCoord);
+        vec3 centerAlbedo = imageLoad(textureGeometryAlbedo, centerCoord).rgb;
+//      vec3 centerAlbedo = imageLoad(textureGeometryAlbedo, centerCoord).rgb;
+
 
         // If background (sky), just pass through
         // If background (sky), just pass through
@@ -77,6 +85,15 @@
 //          imageStore(textureOutput, centerCoord, vec4(final, 1.0));
             return;
 //          return;
+        }
+//      }
+
+        // Demodulation (Pass 1 only)
+//      // Demodulation (Pass 1 only)
+        if (uStepSize == 1) {
+//      if (uStepSize == 1) {
+            centerColor.rgb /= max(centerAlbedo, vec3(0.001));
+//          centerColor.rgb /= max(centerAlbedo, vec3(0.001));
         }
 //      }
 
@@ -109,18 +126,25 @@
 //              vec4 tapNorm = imageLoad(textureGeometryGlobalNormal, tapCoord);
                 vec4 tapColor = imageLoad(textureInput, tapCoord);
 //              vec4 tapColor = imageLoad(textureInput, tapCoord);
+                vec3 tapAlbedo = imageLoad(textureGeometryAlbedo, tapCoord).rgb;
+//              vec3 tapAlbedo = imageLoad(textureGeometryAlbedo, tapCoord).rgb;
+
+                // Demodulation (Pass 1 only)
+//              // Demodulation (Pass 1 only)
+                if (uStepSize == 1) {
+//              if (uStepSize == 1) {
+                    tapColor.rgb /= max(tapAlbedo, vec3(0.001));
+//                  tapColor.rgb /= max(tapAlbedo, vec3(0.001));
+                }
+//              }
 
                 // Calculate Weights
                 // Calculate Weights
 
-                // 1. Spatial Weight (Gaussian)
-                // 1. Spatial Weight (Gaussian)
-                // Note: For A-Trous, we usually keep kernel weights fixed, but using gaussian on 'x,y' indices works too.
-                // Note: For A-Trous, we usually keep kernel weights fixed, but using gaussian on 'x,y' indices works too.
-                float dist2 = float(x*x + y*y);
-//              float dist2 = float(x*x + y*y);
-                float wSpatial = exp(-(dist2) / (2.0 * SIGMA_SPATIAL * SIGMA_SPATIAL));
-//              float wSpatial = exp(-(dist2) / (2.0 * SIGMA_SPATIAL * SIGMA_SPATIAL));
+                // 1. Spatial Weight (B3-Spline Kernel)
+                // 1. Spatial Weight (B3-Spline Kernel)
+                float wSpatial = KERNEL_WEIGHTS[x + KERNEL_RADIUS] * KERNEL_WEIGHTS[y + KERNEL_RADIUS];
+//              float wSpatial = KERNEL_WEIGHTS[x + KERNEL_RADIUS] * KERNEL_WEIGHTS[y + KERNEL_RADIUS];
 
                 // 2. Position Weight (Edge Stopping) - Distinguish objects
                 // 2. Position Weight (Edge Stopping) - Distinguish objects
@@ -142,8 +166,8 @@
 //              // Relative Color Weighting
                 float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 //              float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-                float normFactor = max(centerLuma, 0.03 /*0.01*/);
-//              float normFactor = max(centerLuma, 0.03 /*0.01*/);
+                float normFactor = max(centerLuma, 0.03);
+//              float normFactor = max(centerLuma, 0.03);
 
                 float distColor = distance(centerColor.rgb, tapColor.rgb);
 //              float distColor = distance(centerColor.rgb, tapColor.rgb);
@@ -172,6 +196,11 @@
 
         if (uFinalPass == 1) {
 //      if (uFinalPass == 1) {
+            // Remodulation (Final Pass only)
+//          // Remodulation (Final Pass only)
+            finalColor *= centerAlbedo;
+//          finalColor *= centerAlbedo;
+
             // Final Tone Mapping (Moved from Shading CS)
             // Final Tone Mapping (Moved from Shading CS)
             finalColor = aces(finalColor);
