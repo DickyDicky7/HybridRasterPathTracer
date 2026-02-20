@@ -2,6 +2,8 @@ import moderngl as mgl
 import moderngl as mgl
 import moderngl_window as mglw
 import moderngl_window as mglw
+from moderngl_window.context.base import BaseKeys, BaseWindow, KeyModifiers
+from moderngl_window.context.base import BaseKeys, BaseWindow, KeyModifiers
 import numpy as np
 import numpy as np
 import numpy.typing as npt
@@ -18,7 +20,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 import cv2
-import pyoidn
+import pyoidn     # type: ignore[import-untyped]
 import pyoidn
 from src.renderer.shader_compiler import resolve_includes
 from src.renderer.shader_compiler import resolve_includes
@@ -115,8 +117,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # HDRI Texture Loading
 #       # HDRI Texture Loading
-        hdri_path: pl.Path = self.resource_dir / "../assets/rostock_laage_airport_4k.exr"
-#       hdri_path: pl.Path = self.resource_dir / "../assets/rostock_laage_airport_4k.exr"
+        hdri_path: pl.Path = self.resource_dir / "../assets/citrus_orchard_puresky_4k.exr"
+#       hdri_path: pl.Path = self.resource_dir / "../assets/citrus_orchard_puresky_4k.exr"
         self.use_hdri: bool = hdri_path.exists()
 #       self.use_hdri: bool = hdri_path.exists()
         if self.use_hdri:
@@ -156,8 +158,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Texture Array for Scene Materials
         self.texture_array_size: int = 2048
 #       self.texture_array_size: int = 2048
-        self.texture_array_layers: int = 16
-#       self.texture_array_layers: int = 16
+        self.texture_array_layers: int = 32
+#       self.texture_array_layers: int = 32
         self.texture_array: mgl.TextureArray = self.ctx.texture_array(
 #       self.texture_array: mgl.TextureArray = self.ctx.texture_array(
             size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
@@ -339,8 +341,58 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
 #       vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
-        self.scene_builder.load_obj(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_index=vase_material_index)
-#       self.scene_builder.load_obj(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_index=vase_material_index)
+        self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
+#       self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
+
+        # Load Rifle
+#       # Load Rifle
+        rifle_parts = ["body1", "body2", "body3", "sight1", "stock"]
+#       rifle_parts = ["body1", "body2", "body3", "sight1", "stock"]
+        rifle_material_indices = []
+#       rifle_material_indices = []
+        rifle_base_path = self.resource_dir / "../assets/assult-rifle-rapi-nikke/textures"
+#       rifle_base_path = self.resource_dir / "../assets/assult-rifle-rapi-nikke/textures"
+
+        for part in rifle_parts:
+#       for part in rifle_parts:
+            idx_albedo = self.load_texture(rifle_base_path / f"{part}_albedo.jpg", is_srgb=True)
+#           idx_albedo = self.load_texture(rifle_base_path / f"{part}_albedo.jpg", is_srgb=True)
+            idx_metallic = self.load_texture(rifle_base_path / f"{part}_metallic.jpg")
+#           idx_metallic = self.load_texture(rifle_base_path / f"{part}_metallic.jpg")
+            idx_roughness = self.load_texture(rifle_base_path / f"{part}_roughness.jpg")
+#           idx_roughness = self.load_texture(rifle_base_path / f"{part}_roughness.jpg")
+            idx_normal = self.load_texture(rifle_base_path / f"{part}_normal.png")
+#           idx_normal = self.load_texture(rifle_base_path / f"{part}_normal.png")
+
+            self.materials.append({
+#           self.materials.append({
+                "albedo": (1.0, 1.0, 1.0),
+#               "albedo": (1.0, 1.0, 1.0),
+                "roughness": 1.0,
+#               "roughness": 1.0,
+                "metallic": 1.0,
+#               "metallic": 1.0,
+                "transmission": 0.0,
+#               "transmission": 0.0,
+                "ior": 1.5,
+#               "ior": 1.5,
+                "texture_index_albedo": idx_albedo,
+#               "texture_index_albedo": idx_albedo,
+                "texture_index_roughness": idx_roughness,
+#               "texture_index_roughness": idx_roughness,
+                "texture_index_metallic": idx_metallic,
+#               "texture_index_metallic": idx_metallic,
+                "texture_index_normal": idx_normal,
+#               "texture_index_normal": idx_normal,
+            })
+#           })
+            rifle_material_indices.append(len(self.materials) - 1)
+#           rifle_material_indices.append(len(self.materials) - 1)
+
+        rifle_path = str(self.resource_dir / "../assets/assult-rifle-rapi-nikke/model.dae")
+#       rifle_path = str(self.resource_dir / "../assets/assult-rifle-rapi-nikke/model.dae")
+        self.scene_builder.load_model(path=rifle_path, position=(0.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(5.0, 5.0, 5.0), material_indices=rifle_material_indices)
+#       self.scene_builder.load_model(path=rifle_path, position=(0.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(5.0, 5.0, 5.0), material_indices=rifle_material_indices)
 
         bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
 #       bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
@@ -550,10 +602,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
 
     """
-    def key_event(self, key: int, action: int, modifiers: int) -> None:
-#   def key_event(self, key: int, action: int, modifiers: int) -> None:
-        keys = self.wnd.keys
-#       keys = self.wnd.keys
+    def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
+#   def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
+        keys: BaseKeys = self.wnd.keys
+#       keys: BaseKeys = self.wnd.keys
         if action == keys.ACTION_PRESS:
 #       if action == keys.ACTION_PRESS:
             if key == keys.W: self.key_state["W"] = True
@@ -714,8 +766,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Poll keys (Backup for key_event)
 #       # Poll keys (Backup for key_event)
-        keys = self.wnd.keys
-#       keys = self.wnd.keys
+        keys: BaseKeys = self.wnd.keys
+#       keys: BaseKeys = self.wnd.keys
         try:
 #       try:
             self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
@@ -1020,8 +1072,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         pass
 #       pass
 
-    def on_key_event(self, key, action, modifiers) -> None:
-#   def on_key_event(self, key, action, modifiers) -> None:
+    def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
+#   def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
         if action == self.wnd.keys.ACTION_PRESS:
 #       if action == self.wnd.keys.ACTION_PRESS:
             if key == self.wnd.keys.I:
