@@ -147,6 +147,14 @@
 //      bool isScattered;
         float sampledRoughness;
 //      float sampledRoughness;
+        vec3 albedo;
+//      vec3 albedo;
+        float roughness;
+//      float roughness;
+        float metallic;
+//      float metallic;
+        vec3 shadingNormal;
+//      vec3 shadingNormal;
     };
 //  };
 
@@ -796,6 +804,73 @@
     }
 //  }
 
+    // Evaluates the Principled BSDF for a given pair of directions
+//  // Evaluates the Principled BSDF for a given pair of directions
+    vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+//  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+        vec3 N = normal;
+//      vec3 N = normal;
+        vec3 V = -incomingDir;
+//      vec3 V = -incomingDir;
+        vec3 L = outgoingDir;
+//      vec3 L = outgoingDir;
+        vec3 H = normalize(V + L);
+//      vec3 H = normalize(V + L);
+
+        float NdotL = max(dot(N, L), 0.0);
+//      float NdotL = max(dot(N, L), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+//      float NdotV = max(dot(N, V), 0.0);
+
+        if (NdotL <= 0.0 || NdotV <= 0.0) return vec3(0.0);
+//      if (NdotL <= 0.0 || NdotV <= 0.0) return vec3(0.0);
+
+        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+//      vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        float HdotV = max(dot(H, V), 0.0);
+//      float HdotV = max(dot(H, V), 0.0);
+        vec3 F = schlickFresnel(HdotV, F0);
+//      vec3 F = schlickFresnel(HdotV, F0);
+
+        // Diffuse
+//      // Diffuse
+        vec3 kS = F;
+//      vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+//      vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        vec3 diffuse = kD * albedo / PI;
+//      vec3 diffuse = kD * albedo / PI;
+
+        // Specular
+//      // Specular
+        float alpha = roughness * roughness;
+//      float alpha = roughness * roughness;
+        float alpha2 = alpha * alpha;
+//      float alpha2 = alpha * alpha;
+        float NdotH = max(dot(N, H), 0.0);
+//      float NdotH = max(dot(N, H), 0.0);
+        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+        float D = alpha2 / (PI * denom * denom);
+//      float D = alpha2 / (PI * denom * denom);
+
+        float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+//      float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+        float G1 = NdotV / (NdotV * (1.0 - k) + k);
+//      float G1 = NdotV / (NdotV * (1.0 - k) + k);
+        float G2 = NdotL / (NdotL * (1.0 - k) + k);
+//      float G2 = NdotL / (NdotL * (1.0 - k) + k);
+        float G = G1 * G2;
+//      float G = G1 * G2;
+
+        vec3 specular = (D * F * G) / (4.0 * NdotV * NdotL + 0.001);
+//      vec3 specular = (D * F * G) / (4.0 * NdotV * NdotL + 0.001);
+
+        return diffuse + specular;
+//      return diffuse + specular;
+    }
+//  }
+
     // Principled BSDF Scatter Function
 //  // Principled BSDF Scatter Function
     MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
@@ -875,6 +950,17 @@
 //          shadingNormal = normalize(TBN * mapN);
         }
 //      }
+
+        // Store material properties for NEE
+//      // Store material properties for NEE
+        materialLightScatteringResult.albedo = albedo;
+//      materialLightScatteringResult.albedo = albedo;
+        materialLightScatteringResult.roughness = roughness;
+//      materialLightScatteringResult.roughness = roughness;
+        materialLightScatteringResult.metallic = metallic;
+//      materialLightScatteringResult.metallic = metallic;
+        materialLightScatteringResult.shadingNormal = shadingNormal;
+//      materialLightScatteringResult.shadingNormal = shadingNormal;
 
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
@@ -1175,14 +1261,20 @@
 
             if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
 //          if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-                float cosTheta = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDir));
-//              float cosTheta = max(0.0, dot(rayHitResult.hittedSideNormal, jitteredSunDir));
+                vec3 N = scatterResult.shadingNormal;
+//              vec3 N = scatterResult.shadingNormal;
+                float cosTheta = max(0.0, dot(N, jitteredSunDir));
+//              float cosTheta = max(0.0, dot(N, jitteredSunDir));
+
+                vec3 bsdf = evalPrincipledBSDF(currentRay.direction, jitteredSunDir, N, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+//              vec3 bsdf = evalPrincipledBSDF(currentRay.direction, jitteredSunDir, N, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+
                 float distSq = max(distLight * distLight, 0.1);
 //              float distSq = max(distLight * distLight, 0.1);
                 float falloff = 1.0 / distSq;
 //              float falloff = 1.0 / distSq;
-                vec3 directLight = scatterResult.attenuation * sunColor * cosTheta * falloff;
-//              vec3 directLight = scatterResult.attenuation * sunColor * cosTheta * falloff;
+                vec3 directLight = bsdf * sunColor * cosTheta * falloff;
+//              vec3 directLight = bsdf * sunColor * cosTheta * falloff;
                 accumulatedColor += attenuation * directLight;
 //              accumulatedColor += attenuation * directLight;
             }
