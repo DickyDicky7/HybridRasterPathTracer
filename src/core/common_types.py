@@ -80,6 +80,12 @@ type vec4f32 = tuple[
 """
 
 class Material(typing.TypedDict):
+    # Defines the CPU-side structure for a Material.
+#   # Defines the CPU-side structure for a Material.
+    # IMPORTANT: This must strictly match the packing layout used when uploading to the SSBO
+#   # IMPORTANT: This must strictly match the packing layout used when uploading to the SSBO
+    # (see SceneBuilder.append_transformed_triangles) and the struct definition in the Shader.
+#   # (see SceneBuilder.append_transformed_triangles) and the struct definition in the Shader.
     albedo: vec3f32
 #   albedo: vec3f32
     roughness: float
@@ -98,3 +104,7 @@ class Material(typing.TypedDict):
 #   texture_index_metallic: float
     texture_index_normal: float
 #   texture_index_normal: float
+    emissive: float
+#   emissive: float
+    texture_index_emissive: float
+#   texture_index_emissive: float

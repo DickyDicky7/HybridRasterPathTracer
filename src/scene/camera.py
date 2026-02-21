@@ -8,6 +8,12 @@ from src.core.common_types import vec2i32, vec2f32, vec3f32
 from src.core.common_types import vec2i32, vec2f32, vec3f32
 
 class Camera:
+    # A First-Person Camera system that maintains state for both Rasterization (View/Projection Matrices)
+#   # A First-Person Camera system that maintains state for both Rasterization (View/Projection Matrices)
+    # and Ray Tracing (Basis Vectors for Ray Generation).
+#   # and Ray Tracing (Basis Vectors for Ray Generation).
+    # Uses a Right-Handed Coordinate System (Y-Up, -Z Forward) typical for OpenGL.
+#   # Uses a Right-Handed Coordinate System (Y-Up, -Z Forward) typical for OpenGL.
     def __init__(self, position: vec3f32, look_at: vec3f32, up: vec3f32, aspect_ratio: float, fov: float = 60.0, near: float = 0.1, far: float = 100.0, speed: float = 10.0) -> None:
 #   def __init__(self, position: vec3f32, look_at: vec3f32, up: vec3f32, aspect_ratio: float, fov: float = 60.0, near: float = 0.1, far: float = 100.0, speed: float = 10.0) -> None:
         self.look_from: rr.Vector3 = rr.Vector3(position)
@@ -34,6 +40,10 @@ class Camera:
 
         # Initialize yaw/pitch from look_at - look_from
 #       # Initialize yaw/pitch from look_at - look_from
+        # Convert the initial Cartesian direction vector into Spherical Coordinates (Yaw, Pitch).
+#       # Convert the initial Cartesian direction vector into Spherical Coordinates (Yaw, Pitch).
+        # This allows smooth rotation updates using Euler angles in the update loop.
+#       # This allows smooth rotation updates using Euler angles in the update loop.
         direction: rr.Vector3 = rr.vector.normalize(self.look_at - self.look_from)
 #       direction: rr.Vector3 = rr.vector.normalize(self.look_at - self.look_from)
         self.yaw = np.arctan2(direction[2], direction[0])
@@ -70,11 +80,17 @@ class Camera:
 #       if key_state["UP"]: self.pitch += rotation_speed
         if key_state["DOWN"]: self.pitch -= rotation_speed
 #       if key_state["DOWN"]: self.pitch -= rotation_speed
+        # Clamp pitch to avoid Gimbal Lock (flipping upside down) when looking straight up/down.
+#       # Clamp pitch to avoid Gimbal Lock (flipping upside down) when looking straight up/down.
         self.pitch = max(-np.pi/2 + 0.1, min(np.pi/2 - 0.1, self.pitch))
 #       self.pitch = max(-np.pi/2 + 0.1, min(np.pi/2 - 0.1, self.pitch))
 
         # Direction from Yaw/Pitch
 #       # Direction from Yaw/Pitch
+        # Convert Spherical Coordinates (Yaw, Pitch) back to a normalized Cartesian Direction Vector.
+#       # Convert Spherical Coordinates (Yaw, Pitch) back to a normalized Cartesian Direction Vector.
+        # This standard formula assumes Y is Up, Z is Forward/Depth.
+#       # This standard formula assumes Y is Up, Z is Forward/Depth.
         direction: rr.Vector3 = rr.Vector3([
 #       direction: rr.Vector3 = rr.Vector3([
             np.cos(self.yaw) * np.cos(self.pitch),
@@ -130,6 +146,12 @@ class Camera:
 
     def get_projection_matrix(self, jitter: vec2f32 = (0.0, 0.0), window_size: vec2i32 = (800, 600)) -> rr.Matrix44:
 #   def get_projection_matrix(self, jitter: vec2f32 = (0.0, 0.0), window_size: vec2i32 = (800, 600)) -> rr.Matrix44:
+        # Returns the perspective projection matrix, optionally modified with sub-pixel jitter.
+#       # Returns the perspective projection matrix, optionally modified with sub-pixel jitter.
+        # This jitter (typically Halton sequence) is essential for Temporal Anti-Aliasing (TAA).
+#       # This jitter (typically Halton sequence) is essential for Temporal Anti-Aliasing (TAA).
+        # It shifts the sampling point slightly each frame to resolve sub-pixel detail over time.
+#       # It shifts the sampling point slightly each frame to resolve sub-pixel detail over time.
         projection: rr.Matrix44 = self.base_projection.copy()
 #       projection: rr.Matrix44 = self.base_projection.copy()
 
@@ -153,6 +175,18 @@ class Camera:
 
     def get_basis_vectors(self) -> tuple[rr.Vector3, rr.Vector3, rr.Vector3]:
 #   def get_basis_vectors(self) -> tuple[rr.Vector3, rr.Vector3, rr.Vector3]:
+        # Calculate the Orthonormal Basis Vectors (U, V, W) for the camera view.
+#       # Calculate the Orthonormal Basis Vectors (U, V, W) for the camera view.
+        # These are used in the Ray Tracing Compute Shader to generate Primary Rays
+#       # These are used in the Ray Tracing Compute Shader to generate Primary Rays
+        # that shoot from the camera origin through each pixel on the screen plane.
+#       # that shoot from the camera origin through each pixel on the screen plane.
+        # W: Camera Backward Vector (Reverse Look direction)
+#       # W: Camera Backward Vector (Reverse Look direction)
+        # U: Camera Right Vector
+#       # U: Camera Right Vector
+        # V: Camera Up Vector
+#       # V: Camera Up Vector
         cam_w: rr.Vector3 = rr.vector.normalize(self.look_from - self.look_at)
 #       cam_w: rr.Vector3 = rr.vector.normalize(self.look_from - self.look_at)
         cam_u: rr.Vector3 = rr.vector.normalize(rr.vector3.cross(self.view_up, cam_w))

@@ -66,6 +66,14 @@
 //      float textureIndexMetallic;
         float textureIndexNormal;
 //      float textureIndexNormal;
+        float emissive;
+//      float emissive;
+        float textureIndexEmissive;
+//      float textureIndexEmissive;
+        float padding001;
+//      float padding001;
+        float padding002;
+//      float padding002;
     };
 //  };
 
@@ -877,12 +885,26 @@
 //  MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
         MaterialLightScatteringResult materialLightScatteringResult;
 //      MaterialLightScatteringResult materialLightScatteringResult;
-        materialLightScatteringResult.isScattered = false;
-//      materialLightScatteringResult.isScattered = false;
-        materialLightScatteringResult.attenuation = vec3(1.0);
-//      materialLightScatteringResult.attenuation = vec3(1.0);
+        materialLightScatteringResult.scatteredRay.origin = vec3(0.0);
+//      materialLightScatteringResult.scatteredRay.origin = vec3(0.0);
+        materialLightScatteringResult.scatteredRay.direction = vec3(0.0);
+//      materialLightScatteringResult.scatteredRay.direction = vec3(0.0);
+        materialLightScatteringResult.attenuation = vec3(0.0);
+//      materialLightScatteringResult.attenuation = vec3(0.0);
         materialLightScatteringResult.emission = vec3(0.0);
 //      materialLightScatteringResult.emission = vec3(0.0);
+        materialLightScatteringResult.isScattered = false;
+//      materialLightScatteringResult.isScattered = false;
+        materialLightScatteringResult.sampledRoughness = 0.0;
+//      materialLightScatteringResult.sampledRoughness = 0.0;
+        materialLightScatteringResult.albedo = vec3(0.0);
+//      materialLightScatteringResult.albedo = vec3(0.0);
+        materialLightScatteringResult.roughness = 0.0;
+//      materialLightScatteringResult.roughness = 0.0;
+        materialLightScatteringResult.metallic = 0.0;
+//      materialLightScatteringResult.metallic = 0.0;
+        materialLightScatteringResult.shadingNormal = vec3(0.0);
+//      materialLightScatteringResult.shadingNormal = vec3(0.0);
 
         // Check texture indices
 //      // Check texture indices
@@ -915,6 +937,23 @@
 //          // Assume metallic is in R channel or grayscale
             metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
 //          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
+        }
+//      }
+
+        float emissive = material.emissive;
+//      float emissive = material.emissive;
+        if (material.textureIndexEmissive > -0.5) {
+//      if (material.textureIndexEmissive > -0.5) {
+            emissive = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).r;
+//          emissive = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).r;
+        }
+//      }
+        if (emissive > 0.0) {
+//      if (emissive > 0.0) {
+            materialLightScatteringResult.emission = albedo * emissive;
+//          materialLightScatteringResult.emission = albedo * emissive;
+            return materialLightScatteringResult;
+//          return materialLightScatteringResult;
         }
 //      }
 
@@ -1017,82 +1056,82 @@
 //          }
         } else {
 //      } else {
-             // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
-//           // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
+            // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
+//          // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
 
-             // Re-normalize random variable for the next choice
-//           // Re-normalize random variable for the next choice
-             float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
-//           float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
+            // Re-normalize random variable for the next choice
+//          // Re-normalize random variable for the next choice
+            float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
+//          float randomNextChoice = (randomChoice - specularProbability) / (1.0 - specularProbability);
 
-             if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
-//           if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
-                 // TRANSMISSION (REFRACTION)
-//               // TRANSMISSION (REFRACTION)
-                 float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
-//               float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
-                 if (!recentRayHitResult.isFrontFaceHitted) {
-//               if (!recentRayHitResult.isFrontFaceHitted) {
-                     etaRatioOfIncidenceOverTransmission = material.ior;
-//                   etaRatioOfIncidenceOverTransmission = material.ior;
-                 }
-//               }
+            if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
+//          if (material.transmission > 0.0 && randomNextChoice < material.transmission) {
+                // TRANSMISSION (REFRACTION)
+//              // TRANSMISSION (REFRACTION)
+                float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
+//              float etaRatioOfIncidenceOverTransmission = 1.0 / material.ior;
+                if (!recentRayHitResult.isFrontFaceHitted) {
+//              if (!recentRayHitResult.isFrontFaceHitted) {
+                    etaRatioOfIncidenceOverTransmission = material.ior;
+//                  etaRatioOfIncidenceOverTransmission = material.ior;
+                }
+//              }
 
-                 vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
-//               vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+                vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+//              vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
 
-                 float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
-//               float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
-                 float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
-//               float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
+                float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
+//              float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
+                float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
+//              float sinThetaTransmission = (1.0 - cosThetaIncidence * cosThetaIncidence) * (etaRatioOfIncidenceOverTransmission * etaRatioOfIncidenceOverTransmission);
 
-                 vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
-//               vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
-                 vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
-//               vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+                vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
+//              vec3 refractedDirection = refractPrincipled(incomingRay.direction, microfacetNormal, etaRatioOfIncidenceOverTransmission, cosThetaIncidence, sinThetaTransmission);
+                vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
+//              vec3 reflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
-                 // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
-//               // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
-                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
+//              // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
+                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
 
-                 if (sinThetaTransmission <= 1.0) {
-//               if (sinThetaTransmission <= 1.0) {
-                     materialLightScatteringResult.scatteredRay.direction = refractedDirection;
-//                   materialLightScatteringResult.scatteredRay.direction = refractedDirection;
-                     materialLightScatteringResult.attenuation = albedo;
-//                   materialLightScatteringResult.attenuation = albedo;
-                 } else {
-//               } else {
-                     materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
-//                   materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
-                     materialLightScatteringResult.attenuation = vec3(1.0);
-//                   materialLightScatteringResult.attenuation = vec3(1.0);
-                 }
-//               }
-                 materialLightScatteringResult.isScattered = true;
-//               materialLightScatteringResult.isScattered = true;
-                 materialLightScatteringResult.sampledRoughness = material.roughness;
-//               materialLightScatteringResult.sampledRoughness = material.roughness;
-             } else {
-//           } else {
-                 // DIFFUSE (LAMBERTIAN)
-//               // DIFFUSE (LAMBERTIAN)
-                 vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
-//               vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
+                if (sinThetaTransmission <= 1.0) {
+//              if (sinThetaTransmission <= 1.0) {
+                    materialLightScatteringResult.scatteredRay.direction = refractedDirection;
+//                  materialLightScatteringResult.scatteredRay.direction = refractedDirection;
+                    materialLightScatteringResult.attenuation = albedo;
+//                  materialLightScatteringResult.attenuation = albedo;
+                } else {
+//              } else {
+                    materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
+//                  materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
+                    materialLightScatteringResult.attenuation = vec3(1.0);
+//                  materialLightScatteringResult.attenuation = vec3(1.0);
+                }
+//              }
+                materialLightScatteringResult.isScattered = true;
+//              materialLightScatteringResult.isScattered = true;
+                materialLightScatteringResult.sampledRoughness = material.roughness;
+//              materialLightScatteringResult.sampledRoughness = material.roughness;
+            } else {
+//          } else {
+                // DIFFUSE (LAMBERTIAN)
+//              // DIFFUSE (LAMBERTIAN)
+                vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
+//              vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
 
-                 materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//               materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-                 materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-//               materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-                 materialLightScatteringResult.attenuation = albedo;
-//               materialLightScatteringResult.attenuation = albedo;
-                 materialLightScatteringResult.isScattered = true;
-//               materialLightScatteringResult.isScattered = true;
-                 materialLightScatteringResult.sampledRoughness = 1.0;
-//               materialLightScatteringResult.sampledRoughness = 1.0;
-             }
-//           }
+                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
+                materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
+//              materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
+                materialLightScatteringResult.attenuation = albedo;
+//              materialLightScatteringResult.attenuation = albedo;
+                materialLightScatteringResult.isScattered = true;
+//              materialLightScatteringResult.isScattered = true;
+                materialLightScatteringResult.sampledRoughness = 1.0;
+//              materialLightScatteringResult.sampledRoughness = 1.0;
+            }
+//          }
         }
 //      }
         return materialLightScatteringResult;

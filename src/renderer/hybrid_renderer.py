@@ -32,6 +32,16 @@ from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, v
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material
 
 class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
+    # Main Renderer Class implementing a Hybrid Pipeline:
+#   # Main Renderer Class implementing a Hybrid Pipeline:
+    # 1. Rasterization Pass: Renders scene geometry to G-Buffer (Position, Normal, Albedo, etc.).
+#   # 1. Rasterization Pass: Renders scene geometry to G-Buffer (Position, Normal, Albedo, etc.).
+    # 2. Compute Pass (Ray Tracing): Uses G-Buffer + Ray Tracing (BVH) to calculate lighting/reflections.
+#   # 2. Compute Pass (Ray Tracing): Uses G-Buffer + Ray Tracing (BVH) to calculate lighting/reflections.
+    # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
+#   # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
+    # 4. Composite Pass: Displays the final result to the screen.
+#   # 4. Composite Pass: Displays the final result to the screen.
     gl_version: vec2i32 = (4, 3)
 #   gl_version: vec2i32 = (4, 3)
     title: str = "Hybrid Rendering: Rasterization + Path Tracing"
@@ -61,6 +71,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 1. G-Buffer Setup
         # -----------------------------
 #       # -----------------------------
+        # Create textures for the Geometric Buffer (G-Buffer).
+#       # Create textures for the Geometric Buffer (G-Buffer).
+        # These store the geometric properties of the visible surface at each pixel.
+#       # These store the geometric properties of the visible surface at each pixel.
         self.texture_geometry_global_position: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_geometry_global_position: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
         self.texture_geometry_global_normal: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
@@ -279,14 +293,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials: list[Material] = [
 #       self.materials: list[Material] = [
-            {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-#           {"albedo": (1.0, 0.0, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
-#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1},
+            {"albedo": (1.0, 1.0, 1.0), "roughness": 0.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.0, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 5.0, "texture_index_emissive": -1},
+#           {"albedo": (1.0, 1.0, 1.0), "roughness": 0.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.0, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 5.0, "texture_index_emissive": -1},
+            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
+#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
+            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
+#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
+            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
+#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
         ]
 #       ]
 
@@ -334,6 +348,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_metallic": -1.0,
             "texture_index_normal": -1.0,
 #           "texture_index_normal": -1.0,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
         })
 #       })
         vase_material_index = len(self.materials) - 1
@@ -384,6 +402,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #               "texture_index_metallic": idx_metallic,
                 "texture_index_normal": idx_normal,
 #               "texture_index_normal": idx_normal,
+                "emissive": 0.0,
+#               "emissive": 0.0,
+                "texture_index_emissive": -1.0,
+#               "texture_index_emissive": -1.0,
             })
 #           })
             rifle_material_indices.append(len(self.materials) - 1)
@@ -510,6 +532,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
     def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
 #   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
+        # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
+#       # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
+        # Texture Arrays allow the shader to access many different textures using a single sampler + index.
+#       # Texture Arrays allow the shader to access many different textures using a single sampler + index.
         if not path.exists():
 #       if not path.exists():
             print(f"Warning: Texture not found: {path}")
@@ -761,6 +787,18 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
+        # Main Render Loop
+#       # Main Render Loop
+        # 1. Update Game State (Camera, Input)
+#       # 1. Update Game State (Camera, Input)
+        # 2. Rasterize Geometry to G-Buffer (Position, Normal, etc.)
+#       # 2. Rasterize Geometry to G-Buffer (Position, Normal, etc.)
+        # 3. Ray Trace Lighting using Compute Shader (reads G-Buffer & BVH)
+#       # 3. Ray Trace Lighting using Compute Shader (reads G-Buffer & BVH)
+        # 4. Denoise the output
+#       # 4. Denoise the output
+        # 5. Display to Screen
+#       # 5. Display to Screen
         self.frame_count += 1
 #       self.frame_count += 1
 

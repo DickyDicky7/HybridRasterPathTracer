@@ -11,9 +11,13 @@ def resolve_includes(source: str, base_path: pl.Path) -> str:
     """
     Recursively resolves #include "filename" directives in GLSL source code.
 #   Recursively resolves #include "filename" directives in GLSL source code.
+    Standard GLSL does not support #include, so this pre-processor manually inserts the code.
+#   Standard GLSL does not support #include, so this pre-processor manually inserts the code.
     """
     # Match: #include "filename" (handling optional whitespace)
 #   # Match: #include "filename" (handling optional whitespace)
+    # Captures the filename inside double quotes. Handles leading spaces.
+#   # Captures the filename inside double quotes. Handles leading spaces.
     pattern: re.Pattern[str] = re.compile(pattern=r'^\s*#include\s+"([^"]+)"', flags=re.MULTILINE)
 #   pattern: re.Pattern[str] = re.compile(pattern=r'^\s*#include\s+"([^"]+)"', flags=re.MULTILINE)
 
@@ -37,6 +41,10 @@ def resolve_includes(source: str, base_path: pl.Path) -> str:
 #       included_content: str | typing.Any = included_path.read_text(encoding="utf-8")
         # Recursively resolve includes within the included file
 #       # Recursively resolve includes within the included file
+        # This allows for nested includes (e.g., A includes B, B includes C).
+#       # This allows for nested includes (e.g., A includes B, B includes C).
+        # Note: Does not handle circular dependencies (stack overflow risk).
+#       # Note: Does not handle circular dependencies (stack overflow risk).
         return resolve_includes(source=included_content, base_path=base_path)
 #       return resolve_includes(source=included_content, base_path=base_path)
 

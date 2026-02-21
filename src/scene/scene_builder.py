@@ -26,6 +26,14 @@ class SceneBatch:
 #       pass
 
 class SceneBuilder:
+    # The SceneBuilder is the central coordinator for preparing geometry for the Hybrid Renderer.
+#   # The SceneBuilder is the central coordinator for preparing geometry for the Hybrid Renderer.
+    # It has two main outputs:
+#   # It has two main outputs:
+    # 1. Rasterization Resources: VAOs/VBOs for the primary G-Buffer pass (OpenGL state).
+#   # 1. Rasterization Resources: VAOs/VBOs for the primary G-Buffer pass (OpenGL state).
+    # 2. Ray Tracing Resources: Compact packed float arrays (triangles, normals, BVH nodes) for Compute Shaders.
+#   # 2. Ray Tracing Resources: Compact packed float arrays (triangles, normals, BVH nodes) for Compute Shaders.
     def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
 #   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
         self.ctx = ctx
@@ -53,6 +61,11 @@ class SceneBuilder:
 
     def calculate_triangle_tangent(self, v0: vec3f32, v1: vec3f32, v2: vec3f32, uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> vec3f32:
 #   def calculate_triangle_tangent(self, v0: vec3f32, v1: vec3f32, v2: vec3f32, uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> vec3f32:
+        # We need to find a vector 'T' (Tangent) such that T aligns with the U-axis of the texture map.
+#       # We need to find a vector 'T' (Tangent) such that T aligns with the U-axis of the texture map.
+        # This allows us to construct a TBN matrix (Tangent-Bitangent-Normal) per pixel for Normal Mapping.
+#       # This allows us to construct a TBN matrix (Tangent-Bitangent-Normal) per pixel for Normal Mapping.
+
         # Calculate the edges of the triangle in position space (E1, E2)
 #       # Calculate the edges of the triangle in position space (E1, E2)
         edge1 = np.array(v1) - np.array(v0)
@@ -172,8 +185,12 @@ class SceneBuilder:
 
         # Calculate Normal Matrix to correctly transform normals (handles non-uniform scaling)
 #       # Calculate Normal Matrix to correctly transform normals (handles non-uniform scaling)
+        # If we scale a sphere by (1, 0.5, 1), normals pointing "up" would flatten if multiplied by the Model Matrix directly.
+#       # If we scale a sphere by (1, 0.5, 1), normals pointing "up" would flatten if multiplied by the Model Matrix directly.
         # The Normal Matrix is the Transpose of the Inverse of the upper 3x3 model matrix
 #       # The Normal Matrix is the Transpose of the Inverse of the upper 3x3 model matrix
+        # This restores their perpendicularity to the surface ("Covariant" vs "Contravariant" vector transformation).
+#       # This restores their perpendicularity to the surface ("Covariant" vs "Contravariant" vector transformation).
         m33 = model_matrix[:3, :3]
 #       m33 = model_matrix[:3, :3]
         try:
@@ -199,6 +216,8 @@ class SceneBuilder:
 #           # - aiProcess_GenSmoothNormals: generate vertex normals if missing.
             # - aiProcess_PreTransformVertices: bake the scene graph hierarchy into the vertices (simplifies rendering).
 #           # - aiProcess_PreTransformVertices: bake the scene graph hierarchy into the vertices (simplifies rendering).
+            #   This creates a static World Space mesh, which is essential for our simplified LBVH builder (no TLAS/BLAS yet).
+#           #   This creates a static World Space mesh, which is essential for our simplified LBVH builder (no TLAS/BLAS yet).
             with pyassimp.load(filename=path, processing=
 #           with pyassimp.load(filename=path, processing=
                 pyassimp.postprocess.aiProcess_Triangulate |
@@ -279,6 +298,14 @@ class SceneBuilder:
 #                       material["texture_index_metallic"],
                         material["texture_index_normal"],
 #                       material["texture_index_normal"],
+                        material["emissive"],
+#                       material["emissive"],
+                        material["texture_index_emissive"],
+#                       material["texture_index_emissive"],
+                        0.0,
+#                       0.0,
+                        0.0,
+#                       0.0,
                     ], dtype=np.float32)
 #                   ], dtype=np.float32)
 
@@ -412,6 +439,11 @@ class SceneBuilder:
 
                     # Create VBOs for the rasterization pass to support hybrid rendering.
 #                   # Create VBOs for the rasterization pass to support hybrid rendering.
+                    # 1. Rasterization: Uses these VBOs for fast primary visibility (G-Buffer).
+#                   # 1. Rasterization: Uses these VBOs for fast primary visibility (G-Buffer).
+                    # 2. Ray Tracing: Uses the SSBOs (built later from self.scene_*) for reflections/GI.
+#                   # 2. Ray Tracing: Uses the SSBOs (built later from self.scene_*) for reflections/GI.
+
                     # Since SceneBatch is designed for instancing, we treat this merged model as a single-instance batch.
 #                   # Since SceneBatch is designed for instancing, we treat this merged model as a single-instance batch.
                     # While rasterization typically uses local geometry + instance transforms, we have already baked
@@ -484,8 +516,12 @@ class SceneBuilder:
 #       base_tangents: list[npt.NDArray[np.float32]]
     ) -> None:
 #   ) -> None:
-        # Iterate over all instances of this geometry to bake them into world space for the BVH
-#       # Iterate over all instances of this geometry to bake them into world space for the BVH
+        # Iterate over all instances of this geometry to bake them into world space for the BVH.
+#       # Iterate over all instances of this geometry to bake them into world space for the BVH.
+        # Unlike Rasterization which uses a small VBO + Instance Transform Buffer,
+#       # Unlike Rasterization which uses a small VBO + Instance Transform Buffer,
+        # Ray Tracing (currently) needs all geometry explicitly in World Space for the LBVH construction.
+#       # Ray Tracing (currently) needs all geometry explicitly in World Space for the LBVH construction.
         for instance_data in instance_data_list:
 #       for instance_data in instance_data_list:
             # Reconstruct the 4x4 Model Matrix from the flattened instance data (stored in column-major order)
@@ -521,10 +557,26 @@ class SceneBuilder:
 #           #     float transmission;
             #     float ior;
 #           #     float ior;
+            #     float texture_index_albedo;
+#           #     float texture_index_albedo;
+            #     float texture_index_roughness;
+#           #     float texture_index_roughness;
+            #     float texture_index_metallic;
+#           #     float texture_index_metallic;
+            #     float texture_index_normal;
+#           #     float texture_index_normal;
+            #     float emissive;
+#           #     float emissive;
+            #     float texture_index_emissive;
+#           #     float texture_index_emissive;
+            #     float padding001;
+#           #     float padding001;
+            #     float padding002;
+#           #     float padding002;
             # };
 #           # };
-            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, tex_alb, tex_rgh, tex_met, tex_nrm]
-#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, tex_alb, tex_rgh, tex_met, tex_nrm]
+            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
+#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
             material_data: npt.NDArray[np.float32] = np.array([
 #           material_data: npt.NDArray[np.float32] = np.array([
                 albedo[0], albedo[1], albedo[2], 0.0,
@@ -537,14 +589,22 @@ class SceneBuilder:
 #               material["transmission"],
                 material["ior"],
 #               material["ior"],
-                float(material["texture_index_albedo"]),
-#               float(material["texture_index_albedo"]),
-                float(material["texture_index_roughness"]),
-#               float(material["texture_index_roughness"]),
-                float(material["texture_index_metallic"]),
-#               float(material["texture_index_metallic"]),
-                float(material["texture_index_normal"]),
-#               float(material["texture_index_normal"]),
+                material["texture_index_albedo"],
+#               material["texture_index_albedo"],
+                material["texture_index_roughness"],
+#               material["texture_index_roughness"],
+                material["texture_index_metallic"],
+#               material["texture_index_metallic"],
+                material["texture_index_normal"],
+#               material["texture_index_normal"],
+                material["emissive"],
+#               material["emissive"],
+                material["texture_index_emissive"],
+#               material["texture_index_emissive"],
+                0.0,
+#               0.0,
+                0.0,
+#               0.0,
             ], dtype=np.float32)
 #           ], dtype=np.float32)
 
@@ -997,6 +1057,10 @@ class SceneBuilder:
 
         # Flatten and pack all scene data (materials, UVs, normals, tangents) into byte arrays for GPU upload
 #       # Flatten and pack all scene data (materials, UVs, normals, tangents) into byte arrays for GPU upload
+        # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
+#       # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
+        # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
+#       # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
         world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
 #       world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
 

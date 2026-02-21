@@ -9,6 +9,10 @@ def expand_bits(v: npt.NDArray[np.uint32]) -> npt.NDArray[np.uint32]:
     """
     Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
 #   Expands a 10-bit integer into 30 bits by inserting 2 zeros after each bit.
+    This "spreads" the bits out so they can be interleaved with the other two axes.
+#   This "spreads" the bits out so they can be interleaved with the other two axes.
+    Pattern: x..x..x.. -> ..x..x..x (where . is 0)
+#   Pattern: x..x..x.. -> ..x..x..x (where . is 0)
     v = (v | (v << 16)) & 0x030000FF
 #   v = (v | (v << 16)) & 0x030000FF
     v = (v | (v <<  8)) & 0x0300F00F
@@ -33,6 +37,10 @@ def morton3D(x: npt.NDArray[np.float32], y: npt.NDArray[np.float32], z: npt.NDAr
     """
     Calculates a 30-bit Morton code for a 3D point (x, y, z) in [0, 1].
 #   Calculates a 30-bit Morton code for a 3D point (x, y, z) in [0, 1].
+    The result interleaves the bits of x, y, z: ...z1y1x1z0y0x0.
+#   The result interleaves the bits of x, y, z: ...z1y1x1z0y0x0.
+    This orders points along a Space-Filling Curve (Z-Order Curve), preserving spatial locality.
+#   This orders points along a Space-Filling Curve (Z-Order Curve), preserving spatial locality.
     x, y, z must be in the range [0, 1) and multiplied by 1024 (10 bits).
 #   x, y, z must be in the range [0, 1) and multiplied by 1024 (10 bits).
     """
@@ -52,6 +60,14 @@ def morton3D(x: npt.NDArray[np.float32], y: npt.NDArray[np.float32], z: npt.NDAr
 #   return xx * 4 + yy * 2 + zz
 
 class LBVH:
+    # Linear Bounding Volume Hierarchy (LBVH) Builder.
+#   # Linear Bounding Volume Hierarchy (LBVH) Builder.
+    # Unlike SAH-based builders (Top-Down, Slow, High Quality), LBVH sorts primitives along a Space-Filling Curve
+#   # Unlike SAH-based builders (Top-Down, Slow, High Quality), LBVH sorts primitives along a Space-Filling Curve
+    # (Morton Codes) and splits them linearly. This is very fast and suitable for real-time refits,
+#   # (Morton Codes) and splits them linearly. This is very fast and suitable for real-time refits,
+    # though the tree quality is slightly lower.
+#   # though the tree quality is slightly lower.
     def __init__(self, positions: npt.NDArray[np.float32]) -> None:
 #   def __init__(self, positions: npt.NDArray[np.float32]) -> None:
         """
@@ -66,10 +82,10 @@ class LBVH:
 #       self.count: int = len(positions)
         if self.count == 0:
 #       if self.count == 0:
-            self.nodes: npt.NDArray[np.float32] = np.zeros(0, dtype='f4')
-#           self.nodes: npt.NDArray[np.float32] = np.zeros(0, dtype='f4')
-            self.indices: npt.NDArray[np.int32] = np.zeros(0, dtype='i4')
-#           self.indices: npt.NDArray[np.int32] = np.zeros(0, dtype='i4')
+            self.nodes: npt.NDArray[np.float32] = np.zeros(0, dtype=np.float32)
+#           self.nodes: npt.NDArray[np.float32] = np.zeros(0, dtype=np.float32)
+            self.indices: npt.NDArray[np.int32] = np.zeros(0, dtype=np.int32)
+#           self.indices: npt.NDArray[np.int32] = np.zeros(0, dtype=np.int32)
             return
 #           return
 
@@ -136,6 +152,10 @@ class LBVH:
 #       # Find the split position that divides the range [start, end]
         # based on the highest differing bit in Morton codes.
 #       # based on the highest differing bit in Morton codes.
+        # This effectively splits the primitives based on their largest spatial separation
+#       # This effectively splits the primitives based on their largest spatial separation
+        # (e.g., Left vs Right half of the scene at the highest level).
+#       # (e.g., Left vs Right half of the scene at the highest level).
 
         if start == end:
 #       if start == end:
@@ -269,6 +289,8 @@ class LBVH:
 #       Builds a standard BVH using the sorted morton codes (Karras 2012 / Bit-Split).
         Optimization: Uses pre-allocated numpy arrays instead of list of dicts.
 #       Optimization: Uses pre-allocated numpy arrays instead of list of dicts.
+        The resulting layout is a flat array of nodes, optimized for GPU cache.
+#       The resulting layout is a flat array of nodes, optimized for GPU cache.
         """
         if self.count == 0:
 #       if self.count == 0:
