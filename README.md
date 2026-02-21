@@ -10,3 +10,9 @@
 
 [![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t001.png?raw=true)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
 [![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t001.png?raw=true)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
+
+[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/hwP4Qbc7ths)
+[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/hwP4Qbc7ths)
+
+[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/NZQR-cDmdLo)
+[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/NZQR-cDmdLo)
