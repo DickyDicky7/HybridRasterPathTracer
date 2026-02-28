@@ -17,8 +17,8 @@
     layout(binding = 5, rgba32f) uniform image2D textureAccum;
 //  layout(binding = 5, rgba32f) uniform image2D textureAccum;
 
-    // BVH Nodes Buffer
-    // BVH Nodes Buffer
+    // BVH acceleration structure: Nodes store AABB bounds and hierarchy pointers (child index or face index)
+    // BVH acceleration structure: Nodes store AABB bounds and hierarchy pointers (child index or face index)
     struct Node {
 //  struct Node {
         vec4 min_left; // min.xyz, left_child_index (or -1.0 if leaf)
@@ -35,8 +35,8 @@
     };
 //  };
 
-    // Triangles Buffer (flat floats)
-    // Triangles Buffer (flat floats)
+    // Global Geometry Buffer: Flat array of vertex positions (3 floats per vertex, 9 floats per triangle)
+    // Global Geometry Buffer: Flat array of vertex positions (3 floats per vertex, 9 floats per triangle)
     layout(std430, binding = 7) buffer SceneTriangles {
 //  layout(std430, binding = 7) buffer SceneTriangles {
         float triangles[];
@@ -44,8 +44,8 @@
     };
 //  };
 
-    // Materials Buffer
-    // Materials Buffer
+    // Material Properties: Stores PBR parameters like Albedo, Roughness, Metallic, and Texture indices
+    // Material Properties: Stores PBR parameters like Albedo, Roughness, Metallic, and Texture indices
     struct Material {
 //  struct Material {
         vec4 albedo;       // r, g, b, padding
@@ -153,8 +153,6 @@
 //      vec3 emission;
         bool isScattered;
 //      bool isScattered;
-        float sampledRoughness;
-//      float sampledRoughness;
         vec3 albedo;
 //      vec3 albedo;
         float roughness;
@@ -163,13 +161,35 @@
 //      float metallic;
         vec3 shadingNormal;
 //      vec3 shadingNormal;
+        float pdf;
+//      float pdf;
+        bool isDelta;
+//      bool isDelta;
     };
 //  };
 
     uniform float uTime;
 //  uniform float uTime;
-    uniform vec3 uPointLight001GlobalPosition;
-//  uniform vec3 uPointLight001GlobalPosition;
+    struct PointLight {
+//  struct PointLight {
+        vec3 position;
+//      vec3 position;
+        float radius;
+//      float radius;
+        vec3 color;
+//      vec3 color;
+        float cdf;
+//      float cdf;
+        float pdf;
+//      float pdf;
+        float padding;
+//      float padding;
+    };
+//  };
+    uniform int uPointLightCount;
+//  uniform int uPointLightCount;
+    uniform PointLight uPointLights[10];
+//  uniform PointLight uPointLights[10];
     uniform vec3 uCameraGlobalPosition;
 //  uniform vec3 uCameraGlobalPosition;
     uniform int uFrameCount;
@@ -195,8 +215,8 @@
     const float INF = 1e30;
 //  const float INF = 1e30;
 
-    // Random Number Generator
-    // Random Number Generator
+    // Xorshift/Wang Hash based Pseudo-Random Number Generator for Monte Carlo integration
+    // Xorshift/Wang Hash based Pseudo-Random Number Generator for Monte Carlo integration
     uint seed;
 //  uint seed;
     uint wang_hash(uint seed) {
@@ -247,10 +267,10 @@
     }
 //  }
 
-    // Sky Color
-    // Sky Color
-    vec3 getSkyColor(vec3 dir, float roughness) {
-//  vec3 getSkyColor(vec3 dir, float roughness) {
+    // Environment Lighting: Samples the HDRI map using equirectangular projection or uses a procedural sky
+    // Environment Lighting: Samples the HDRI map using equirectangular projection or uses a procedural sky
+    vec3 getSkyColor(vec3 dir) {
+//  vec3 getSkyColor(vec3 dir) {
         if (uUseHdri) {
 //      if (uUseHdri) {
             // Equirectangular mapping
@@ -263,16 +283,8 @@
 //          float u = clamp(phi / (2.0 * PI), 0.0, 1.0);
             float v = clamp(theta / PI, 0.0, 1.0);
 //          float v = clamp(theta / PI, 0.0, 1.0);
-
-            float maxLod = 12.0;
-//          float maxLod = 12.0;
-            float lod = roughness * maxLod;
-//          float lod = roughness * maxLod;
-
-            vec3 hdriColor = textureLod(uHdriTexture, vec2(u, v), lod).rgb;
-//          vec3 hdriColor = textureLod(uHdriTexture, vec2(u, v), lod).rgb;
-            // Radiance clamping to reduce fireflies
-            // Radiance clamping to reduce fireflies
+            vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
+//          vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
             return min(hdriColor, vec3(10.0));
 //          return min(hdriColor, vec3(10.0));
         }
@@ -303,15 +315,15 @@
     bool intervalSurround(Interval interval, float value) { return interval.min < value && value < interval.max; }
 //  bool intervalSurround(Interval interval, float value) { return interval.min < value && value < interval.max; }
 
-    // Helper to get component
-//  // Helper to get component
+    // Vector Utilities: Helper functions for component-wise min/max operations
+//  // Vector Utilities: Helper functions for component-wise min/max operations
     float maxVec3(vec3 v) { return max(v.x, max(v.y, v.z)); }
 //  float maxVec3(vec3 v) { return max(v.x, max(v.y, v.z)); }
     float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
 //  float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
 
-    // Intersect AABB
-//  // Intersect AABB
+    // Ray-AABB Intersection: Slab method implementation for axis-aligned bounding box testing
+//  // Ray-AABB Intersection: Slab method implementation for axis-aligned bounding box testing
     bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
 //  bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
         vec3 t1 = (boxMin - ray.origin) * invDir;
@@ -338,8 +350,8 @@
     }
 //  }
 
-    // Calculate Distance to AABB (for sorting)
-//  // Calculate Distance to AABB (for sorting)
+    // Distance estimation to AABB: Used for front-to-back sorting during BVH traversal
+//  // Distance estimation to AABB: Used for front-to-back sorting during BVH traversal
     float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
 //  float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
         vec3 t1 = (boxMin - ray.origin) * invDir;
@@ -368,8 +380,8 @@
     }
 //  }
 
-    // intersectTriangleAnyHit
-//  // intersectTriangleAnyHit
+    // Ray-Triangle Fast Intersection (Any-Hit): Optimized for shadow rays and occlusion testing
+//  // Ray-Triangle Fast Intersection (Any-Hit): Optimized for shadow rays and occlusion testing
     bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
 //  bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
         int offset = triangleIndex * 9;
@@ -426,8 +438,8 @@
     }
 //  }
 
-    // intersectTriangleClosestHit
-//  // intersectTriangleClosestHit
+    // Ray-Triangle Detailed Intersection (Closest-Hit): Calculates barycentrics and interpolates attributes (UV, Normal, Tangent)
+//  // Ray-Triangle Detailed Intersection (Closest-Hit): Calculates barycentrics and interpolates attributes (UV, Normal, Tangent)
     RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
 //  RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
         RayHitResult result;
@@ -550,8 +562,8 @@
     }
 //  }
 
-    // traverseBVHAnyHit
-//  // traverseBVHAnyHit
+    // BVH Occlusion Query: Rapidly determined if any geometry exists between two points
+//  // BVH Occlusion Query: Rapidly determined if any geometry exists between two points
     bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
 //  bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
         vec3 invDir = 1.0 / ray.direction;
@@ -638,8 +650,8 @@
     }
 //  }
 
-    // traverseBVHClosestHit
-//  // traverseBVHClosestHit
+    // BVH Nearest Hit Query: Traverses the hierarchy to find the closest intersection point
+//  // BVH Nearest Hit Query: Traverses the hierarchy to find the closest intersection point
     RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
 //  RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
         RayHitResult finalResult;
@@ -738,8 +750,8 @@
     }
 //  }
 
-    // Principled BSDF Helpers
-    // Principled BSDF Helpers
+    // Disney Principled BSDF component functions (Fresnel, GGX Microfacet Distribution, etc.)
+    // Disney Principled BSDF component functions (Fresnel, GGX Microfacet Distribution, etc.)
     vec3 schlickFresnel(float cosine, vec3 f0) {
 //  vec3 schlickFresnel(float cosine, vec3 f0) {
         float oneMinusCos = 1.0 - cosine;
@@ -812,8 +824,8 @@
     }
 //  }
 
-    // Evaluates the Principled BSDF for a given pair of directions
-//  // Evaluates the Principled BSDF for a given pair of directions
+    // BRDF Evaluation: Calculates the combined specular and diffuse response for the shading point
+//  // BRDF Evaluation: Calculates the combined specular and diffuse response for the shading point
     vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
 //  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
         vec3 N = normal;
@@ -879,8 +891,58 @@
     }
 //  }
 
-    // Principled BSDF Scatter Function
-//  // Principled BSDF Scatter Function
+    float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+//  float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+        vec3 N = normal;
+//      vec3 N = normal;
+        vec3 V = -incomingDir;
+//      vec3 V = -incomingDir;
+        vec3 L = outgoingDir;
+//      vec3 L = outgoingDir;
+        vec3 H = normalize(V + L);
+//      vec3 H = normalize(V + L);
+
+        float NdotL = max(dot(N, L), 0.0);
+//      float NdotL = max(dot(N, L), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+//      float NdotV = max(dot(N, V), 0.0);
+        if (NdotL <= 0.0 || NdotV <= 0.0) return 0.0;
+//      if (NdotL <= 0.0 || NdotV <= 0.0) return 0.0;
+
+        float pdfDiffuse = NdotL / PI;
+//      float pdfDiffuse = NdotL / PI;
+
+        float alpha = roughness * roughness;
+//      float alpha = roughness * roughness;
+        float alpha2 = max(alpha * alpha, 0.00001);
+//      float alpha2 = max(alpha * alpha, 0.00001);
+        float NdotH = max(dot(N, H), 0.0);
+//      float NdotH = max(dot(N, H), 0.0);
+        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
+        float D = alpha2 / (PI * denom * denom);
+//      float D = alpha2 / (PI * denom * denom);
+        float VdotH = max(dot(V, H), 0.0);
+//      float VdotH = max(dot(V, H), 0.0);
+        float pdfSpecular = (D * NdotH) / (4.0 * VdotH + 0.001);
+//      float pdfSpecular = (D * NdotH) / (4.0 * VdotH + 0.001);
+
+        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+//      vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F = schlickFresnel(VdotH, F0);
+//      vec3 F = schlickFresnel(VdotH, F0);
+        float fresnelProb = (F.r + F.g + F.b) / 3.0;
+//      float fresnelProb = (F.r + F.g + F.b) / 3.0;
+        float specularProbability = mix(fresnelProb, 1.0, metallic);
+//      float specularProbability = mix(fresnelProb, 1.0, metallic);
+
+        return mix(pdfDiffuse, pdfSpecular, specularProbability);
+//      return mix(pdfDiffuse, pdfSpecular, specularProbability);
+    }
+//  }
+
+    // Importance Sampling: Scatters ray based on material properties using GGX distribution for specular and Cosine for diffuse
+//  // Importance Sampling: Scatters ray based on material properties using GGX distribution for specular and Cosine for diffuse
     MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
 //  MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
         MaterialLightScatteringResult materialLightScatteringResult;
@@ -895,8 +957,6 @@
 //      materialLightScatteringResult.emission = vec3(0.0);
         materialLightScatteringResult.isScattered = false;
 //      materialLightScatteringResult.isScattered = false;
-        materialLightScatteringResult.sampledRoughness = 0.0;
-//      materialLightScatteringResult.sampledRoughness = 0.0;
         materialLightScatteringResult.albedo = vec3(0.0);
 //      materialLightScatteringResult.albedo = vec3(0.0);
         materialLightScatteringResult.roughness = 0.0;
@@ -905,6 +965,10 @@
 //      materialLightScatteringResult.metallic = 0.0;
         materialLightScatteringResult.shadingNormal = vec3(0.0);
 //      materialLightScatteringResult.shadingNormal = vec3(0.0);
+        materialLightScatteringResult.pdf = 0.0;
+//      materialLightScatteringResult.pdf = 0.0;
+        materialLightScatteringResult.isDelta = false;
+//      materialLightScatteringResult.isDelta = false;
 
         // Check texture indices
 //      // Check texture indices
@@ -940,18 +1004,19 @@
         }
 //      }
 
-        float emissive = material.emissive;
-//      float emissive = material.emissive;
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
-            emissive = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).r;
-//          emissive = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).r;
+            materialLightScatteringResult.emission = material.emissive * textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).rgb;
+//          materialLightScatteringResult.emission = material.emissive * textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), 0.0).rgb;
+        } else {
+//      } else {
+            materialLightScatteringResult.emission = material.emissive * albedo;
+//          materialLightScatteringResult.emission = material.emissive * albedo;
         }
 //      }
-        if (emissive > 0.0) {
-//      if (emissive > 0.0) {
-            materialLightScatteringResult.emission = albedo * emissive;
-//          materialLightScatteringResult.emission = albedo * emissive;
+
+        if (materialLightScatteringResult.emission.r > 0.0 || materialLightScatteringResult.emission.g > 0.0 || materialLightScatteringResult.emission.b > 0.0) {
+//      if (materialLightScatteringResult.emission.r > 0.0 || materialLightScatteringResult.emission.g > 0.0 || materialLightScatteringResult.emission.b > 0.0) {
             return materialLightScatteringResult;
 //          return materialLightScatteringResult;
         }
@@ -1040,12 +1105,32 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
 //              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, metallic);
-//              materialLightScatteringResult.attenuation = mix(vec3(1.0), albedo, metallic);
+                float NdotV = max(dot(shadingNormal, -incomingRay.direction), 0.001);
+//              float NdotV = max(dot(shadingNormal, -incomingRay.direction), 0.001);
+                float NdotH = max(dot(shadingNormal, microfacetNormal), 0.001);
+//              float NdotH = max(dot(shadingNormal, microfacetNormal), 0.001);
+                float VdotH = max(dot(-incomingRay.direction, microfacetNormal), 0.001);
+//              float VdotH = max(dot(-incomingRay.direction, microfacetNormal), 0.001);
+                float NdotL = max(dot(shadingNormal, specularReflectedDirection), 0.001);
+//              float NdotL = max(dot(shadingNormal, specularReflectedDirection), 0.001);
+                vec3 F = schlickFresnel(VdotH, f0);
+//              vec3 F = schlickFresnel(VdotH, f0);
+                float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+//              float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+                float G1 = NdotV / (NdotV * (1.0 - k) + k);
+//              float G1 = NdotV / (NdotV * (1.0 - k) + k);
+                float G2 = NdotL / (NdotL * (1.0 - k) + k);
+//              float G2 = NdotL / (NdotL * (1.0 - k) + k);
+                float G = G1 * G2;
+//              float G = G1 * G2;
+                materialLightScatteringResult.attenuation = (F * G * VdotH) / ((NdotV * NdotH + 0.001) * specularProbability);
+//              materialLightScatteringResult.attenuation = (F * G * VdotH) / ((NdotV * NdotH + 0.001) * specularProbability);
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
-                materialLightScatteringResult.sampledRoughness = roughness;
-//              materialLightScatteringResult.sampledRoughness = roughness;
+                materialLightScatteringResult.isDelta = roughness < 0.05;
+//              materialLightScatteringResult.isDelta = roughness < 0.05;
+                materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+//              materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
             } else {
 //          } else {
                 // Current/Recent ray is/was absorbed (next ray is scattering into surface)
@@ -1111,8 +1196,10 @@
 //              }
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
-                materialLightScatteringResult.sampledRoughness = material.roughness;
-//              materialLightScatteringResult.sampledRoughness = material.roughness;
+                materialLightScatteringResult.isDelta = true; // No NEE for transmission
+//              materialLightScatteringResult.isDelta = true; // No NEE for transmission
+                materialLightScatteringResult.pdf = 1.0;
+//              materialLightScatteringResult.pdf = 1.0;
             } else {
 //          } else {
                 // DIFFUSE (LAMBERTIAN)
@@ -1128,14 +1215,75 @@
 //              materialLightScatteringResult.attenuation = albedo;
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
-                materialLightScatteringResult.sampledRoughness = 1.0;
-//              materialLightScatteringResult.sampledRoughness = 1.0;
+                materialLightScatteringResult.isDelta = false;
+//              materialLightScatteringResult.isDelta = false;
+                materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+//              materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
             }
 //          }
         }
 //      }
         return materialLightScatteringResult;
 //      return materialLightScatteringResult;
+    }
+//  }
+
+    struct SphereLightHit {
+//  struct SphereLightHit {
+        bool isHitted;
+//      bool isHitted;
+        float dist;
+//      float dist;
+        int lightIndex;
+//      int lightIndex;
+        vec3 normal;
+//      vec3 normal;
+    };
+//  };
+
+    SphereLightHit intersectSphereLights(Ray ray) {
+//  SphereLightHit intersectSphereLights(Ray ray) {
+        SphereLightHit hit;
+//      SphereLightHit hit;
+        hit.isHitted = false;
+//      hit.isHitted = false;
+        hit.dist = INF;
+//      hit.dist = INF;
+        hit.lightIndex = -1;
+//      hit.lightIndex = -1;
+        
+        for (int i = 0; i < uPointLightCount; i++) {
+//      for (int i = 0; i < uPointLightCount; i++) {
+            vec3 oc = ray.origin - uPointLights[i].position;
+//          vec3 oc = ray.origin - uPointLights[i].position;
+            float b = dot(oc, ray.direction);
+//          float b = dot(oc, ray.direction);
+            float c = dot(oc, oc) - uPointLights[i].radius * uPointLights[i].radius;
+//          float c = dot(oc, oc) - uPointLights[i].radius * uPointLights[i].radius;
+            float h = b * b - c;
+//          float h = b * b - c;
+            if (h > 0.0) {
+//          if (h > 0.0) {
+                float d = -b - sqrt(h);
+//              float d = -b - sqrt(h);
+                if (d > 0.001 && d < hit.dist) {
+//              if (d > 0.001 && d < hit.dist) {
+                    hit.isHitted = true;
+//                  hit.isHitted = true;
+                    hit.dist = d;
+//                  hit.dist = d;
+                    hit.lightIndex = i;
+//                  hit.lightIndex = i;
+                    hit.normal = normalize((ray.origin + ray.direction * d) - uPointLights[i].position);
+//                  hit.normal = normalize((ray.origin + ray.direction * d) - uPointLights[i].position);
+                }
+//              }
+            }
+//          }
+        }
+//      }
+        return hit;
+//      return hit;
     }
 //  }
 
@@ -1161,8 +1309,8 @@
         vec3 attenuation = vec3(1.0);
 //      vec3 attenuation = vec3(1.0);
 
-        // Calculate Primary Ray
-//      // Calculate Primary Ray
+        // Primary Ray Initialization: Calculates direction from camera to jittered pixel samples
+//      // Primary Ray Initialization: Calculates direction from camera to jittered pixel samples
         vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
 //      vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
 
@@ -1173,8 +1321,13 @@
         currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
 //      currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
 
-        int maxDepth = 4;
-//      int maxDepth = 4;
+        int maxDepth = 32;
+//      int maxDepth = 32;
+
+        float lastPdfW = 1.0;
+//      float lastPdfW = 1.0;
+        bool lastWasDelta = true;
+//      bool lastWasDelta = true;
 
         for (int depth = 0; depth < maxDepth; depth++) {
 //      for (int depth = 0; depth < maxDepth; depth++) {
@@ -1183,8 +1336,8 @@
 
             if (depth == 0) {
 //          if (depth == 0) {
-                // Read from G-Buffer
-//              // Read from G-Buffer
+                // Hybrid Start: Fetch base surface properties from G-Buffer to avoid first-hit traversal overhead
+//              // Hybrid Start: Fetch base surface properties from G-Buffer to avoid first-hit traversal overhead
                 vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
 //              vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
                 vec4 sampleGlobalNormal = imageLoad(textureGeometryGlobalNormal, pixelCoordinates);
@@ -1249,12 +1402,77 @@
             }
 //          }
 
+            SphereLightHit lightHit = intersectSphereLights(currentRay);
+//          SphereLightHit lightHit = intersectSphereLights(currentRay);
+            
+            bool hitLight = false;
+//          bool hitLight = false;
+            if (lightHit.isHitted) {
+//          if (lightHit.isHitted) {
+                if (!rayHitResult.isHitted || lightHit.dist < rayHitResult.minDistance) {
+//              if (!rayHitResult.isHitted || lightHit.dist < rayHitResult.minDistance) {
+                    hitLight = true;
+//                  hitLight = true;
+                }
+//              }
+            }
+//          }
+
+            if (hitLight) {
+//          if (hitLight) {
+                vec3 Le = uPointLights[lightHit.lightIndex].color;
+//              vec3 Le = uPointLights[lightHit.lightIndex].color;
+                
+                if (depth == 0 || lastWasDelta) {
+//              if (depth == 0 || lastWasDelta) {
+                    accumulatedColor += attenuation * Le;
+//                  accumulatedColor += attenuation * Le;
+                } else {
+//              } else {
+                    float cosThetaLight = max(0.0, dot(lightHit.normal, -currentRay.direction));
+//                  float cosThetaLight = max(0.0, dot(lightHit.normal, -currentRay.direction));
+                    float r = uPointLights[lightHit.lightIndex].radius;
+//                  float r = uPointLights[lightHit.lightIndex].radius;
+                    float lightPdf = uPointLights[lightHit.lightIndex].pdf;
+//                  float lightPdf = uPointLights[lightHit.lightIndex].pdf;
+                    float area = 4.0 * PI * r * r;
+//                  float area = 4.0 * PI * r * r;
+                    float pdfLightArea = lightPdf / area;
+//                  float pdfLightArea = lightPdf / area;
+                    
+                    float pdfLightW = 0.0;
+//                  float pdfLightW = 0.0;
+                    if (cosThetaLight > 0.0) {
+//                  if (cosThetaLight > 0.0) {
+                        pdfLightW = (pdfLightArea * lightHit.dist * lightHit.dist) / cosThetaLight;
+//                      pdfLightW = (pdfLightArea * lightHit.dist * lightHit.dist) / cosThetaLight;
+                    }
+//                  }
+                    
+                    float weightBrdf = 1.0;
+//                  float weightBrdf = 1.0;
+                    if (pdfLightW > 0.0) {
+//                  if (pdfLightW > 0.0) {
+                        weightBrdf = lastPdfW / (lastPdfW + pdfLightW);
+//                      weightBrdf = lastPdfW / (lastPdfW + pdfLightW);
+                    }
+//                  }
+                    
+                    accumulatedColor += attenuation * Le * weightBrdf;
+//                  accumulatedColor += attenuation * Le * weightBrdf;
+                }
+//              }
+                break;
+//              break;
+            }
+//          }
+
             if (!rayHitResult.isHitted) {
 //          if (!rayHitResult.isHitted) {
                 // Sky
 //              // Sky
-                vec3 sky = getSkyColor(currentRay.direction, 0.0);
-//              vec3 sky = getSkyColor(currentRay.direction, 0.0);
+                vec3 sky = getSkyColor(currentRay.direction);
+//              vec3 sky = getSkyColor(currentRay.direction);
                 accumulatedColor += attenuation * sky;
 //              accumulatedColor += attenuation * sky;
                 break;
@@ -1271,51 +1489,94 @@
             accumulatedColor += attenuation * scatterResult.emission;
 //          accumulatedColor += attenuation * scatterResult.emission;
 
-            // NEE
-//          // NEE
-            vec3 sunColor = vec3(300.0);
-//          vec3 sunColor = vec3(300.0);
-            float sunRadius = 0.05;
-//          float sunRadius = 0.05;
-            vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-//          vec3 jitteredSunPos = uPointLight001GlobalPosition + randomUnitVector() * sunRadius;
-            vec3 jitteredSunDir = normalize(jitteredSunPos - rayHitResult.at);
-//          vec3 jitteredSunDir = normalize(jitteredSunPos - rayHitResult.at);
-            float distLight = length(jitteredSunPos - rayHitResult.at);
-//          float distLight = length(jitteredSunPos - rayHitResult.at);
-
-            Ray shadowRay;
-//          Ray shadowRay;
-            shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
-//          shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
-            shadowRay.direction = jitteredSunDir;
-//          shadowRay.direction = jitteredSunDir;
-
-            Interval shadowInterval;
-//          Interval shadowInterval;
-            shadowInterval.min = 0.001;
-//          shadowInterval.min = 0.001;
-            shadowInterval.max = distLight;
-//          shadowInterval.max = distLight;
-
-            if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-//          if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-                vec3 N = scatterResult.shadingNormal;
-//              vec3 N = scatterResult.shadingNormal;
-                float cosTheta = max(0.0, dot(N, jitteredSunDir));
-//              float cosTheta = max(0.0, dot(N, jitteredSunDir));
-
-                vec3 bsdf = evalPrincipledBSDF(currentRay.direction, jitteredSunDir, N, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-//              vec3 bsdf = evalPrincipledBSDF(currentRay.direction, jitteredSunDir, N, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-
-                float distSq = max(distLight * distLight, 0.1);
-//              float distSq = max(distLight * distLight, 0.1);
-                float falloff = 1.0 / distSq;
-//              float falloff = 1.0 / distSq;
-                vec3 directLight = bsdf * sunColor * cosTheta * falloff;
-//              vec3 directLight = bsdf * sunColor * cosTheta * falloff;
-                accumulatedColor += attenuation * directLight;
-//              accumulatedColor += attenuation * directLight;
+            // Direct Illumination (Next Event Estimation) with MIS
+//          // Direct Illumination (Next Event Estimation) with MIS
+            if (uPointLightCount > 0 && !scatterResult.isDelta) {
+//          if (uPointLightCount > 0 && !scatterResult.isDelta) {
+                float rnd = rand();
+//              float rnd = rand();
+                int lightIdx = 0;
+//              int lightIdx = 0;
+                for (int i = 0; i < uPointLightCount; i++) {
+//              for (int i = 0; i < uPointLightCount; i++) {
+                    if (rnd <= uPointLights[i].cdf) {
+//                  if (rnd <= uPointLights[i].cdf) {
+                        lightIdx = i;
+//                      lightIdx = i;
+                        break;
+//                      break;
+                    }
+//                  }
+                }
+//              }
+                
+                vec3 lightPos = uPointLights[lightIdx].position;
+//              vec3 lightPos = uPointLights[lightIdx].position;
+                float r = uPointLights[lightIdx].radius;
+//              float r = uPointLights[lightIdx].radius;
+                float lightPdf = uPointLights[lightIdx].pdf;
+//              float lightPdf = uPointLights[lightIdx].pdf;
+                vec3 sampledPoint = lightPos + randomUnitVector() * r;
+//              vec3 sampledPoint = lightPos + randomUnitVector() * r;
+                
+                vec3 shadowDir = sampledPoint - rayHitResult.at;
+//              vec3 shadowDir = sampledPoint - rayHitResult.at;
+                float distLight = length(shadowDir);
+//              float distLight = length(shadowDir);
+                shadowDir = normalize(shadowDir);
+//              shadowDir = normalize(shadowDir);
+                
+                float cosTheta = max(0.0, dot(scatterResult.shadingNormal, shadowDir));
+//              float cosTheta = max(0.0, dot(scatterResult.shadingNormal, shadowDir));
+                vec3 lightNormal = normalize(sampledPoint - lightPos);
+//              vec3 lightNormal = normalize(sampledPoint - lightPos);
+                float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
+//              float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
+                
+                if (cosTheta > 0.0 && cosThetaLight > 0.0) {
+//              if (cosTheta > 0.0 && cosThetaLight > 0.0) {
+                    Ray shadowRay;
+//                  Ray shadowRay;
+                    shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
+//                  shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
+                    shadowRay.direction = shadowDir;
+//                  shadowRay.direction = shadowDir;
+                    
+                    Interval shadowInterval;
+//                  Interval shadowInterval;
+                    shadowInterval.min = 0.001;
+//                  shadowInterval.min = 0.001;
+                    shadowInterval.max = distLight - 0.001;
+//                  shadowInterval.max = distLight - 0.001;
+                    
+                    if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+                        float area = 4.0 * PI * r * r;
+//                      float area = 4.0 * PI * r * r;
+                        float pdfLightArea = lightPdf / area;
+//                      float pdfLightArea = lightPdf / area;
+                        float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
+//                      float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
+                        
+                        float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+//                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+                        
+                        float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
+//                      float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
+                        
+                        vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+//                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+                        
+                        // Radiance emitted by the point light's surface
+//                      // Radiance emitted by the point light's surface
+                        vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / pdfLightW;
+//                      vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / pdfLightW;
+                        accumulatedColor += attenuation * directLight * weightNee;
+//                      accumulatedColor += attenuation * directLight * weightNee;
+                    }
+//                  }
+                }
+//              }
             }
 //          }
 
@@ -1329,8 +1590,8 @@
             attenuation *= scatterResult.attenuation;
 //          attenuation *= scatterResult.attenuation;
 
-            // RR
-//          // RR
+            // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
+//          // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
             uint minBouncesForRR = 4u;
 //          uint minBouncesForRR = 4u;
             if (depth >= minBouncesForRR) {
@@ -1346,19 +1607,23 @@
 
             currentRay = scatterResult.scatteredRay;
 //          currentRay = scatterResult.scatteredRay;
+            lastPdfW = scatterResult.pdf;
+//          lastPdfW = scatterResult.pdf;
+            lastWasDelta = scatterResult.isDelta;
+//          lastWasDelta = scatterResult.isDelta;
         }
 //      }
 
-        // Accumulation
-//      // Accumulation
+        // Temporal Accumulation: Blends current frame with history for progressive refinement
+//      // Temporal Accumulation: Blends current frame with history for progressive refinement
         vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
 //      vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
         vec3 history = prevAccum.rgb;
 //      vec3 history = prevAccum.rgb;
         float alpha = 1.0 / float(uFrameCount);
 //      float alpha = 1.0 / float(uFrameCount);
-        alpha = max(alpha, 0.1 /* 0.01 */);
-//      alpha = max(alpha, 0.1 /* 0.01 */);
+        alpha = max(alpha, 0.01 /* 0.01 */);
+//      alpha = max(alpha, 0.01 /* 0.01 */);
         if (uFrameCount == 1) {
 //      if (uFrameCount == 1) {
              history = vec3(0.0);

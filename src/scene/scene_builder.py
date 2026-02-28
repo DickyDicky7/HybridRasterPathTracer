@@ -86,8 +86,10 @@ class SceneBuilder:
 #       # This factor accounts for the area distortion between texture space and object space.
         # f = 1.0 / (du1 * dv2 - du2 * dv1)
 #       # f = 1.0 / (du1 * dv2 - du2 * dv1)
-        f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1])
-#       f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1])
+        det = deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1]
+#       det = deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1]
+        f = 1.0 / det if abs(det) > 1e-6 else 0.0
+#       f = 1.0 / det if abs(det) > 1e-6 else 0.0
 
         # Solve for the tangent vector (T)
 #       # Solve for the tangent vector (T)

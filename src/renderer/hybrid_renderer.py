@@ -40,8 +40,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #   # 2. Compute Pass (Ray Tracing): Uses G-Buffer + Ray Tracing (BVH) to calculate lighting/reflections.
     # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
 #   # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
-    # 4. Composite Pass: Displays the final result to the screen.
-#   # 4. Composite Pass: Displays the final result to the screen.
+    # 4. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
+#   # 4. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
+    # 5. Composite Pass: Displays the final result to the screen.
+#   # 5. Composite Pass: Displays the final result to the screen.
     gl_version: vec2i32 = (4, 3)
 #   gl_version: vec2i32 = (4, 3)
     title: str = "Hybrid Rendering: Rasterization + Path Tracing"
@@ -62,8 +64,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.frame_count: int = 0
 #       self.frame_count: int = 0
-        self.last_view_matrix = None
-#       self.last_view_matrix = None
+        self.last_view_matrix: rr.Matrix44 = None
+#       self.last_view_matrix: rr.Matrix44 = None
 
         # -----------------------------
 #       # -----------------------------
@@ -131,8 +133,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # HDRI Texture Loading
 #       # HDRI Texture Loading
-        hdri_path: pl.Path = self.resource_dir / "../assets/citrus_orchard_puresky_4k.exr"
-#       hdri_path: pl.Path = self.resource_dir / "../assets/citrus_orchard_puresky_4k.exr"
+        hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
+#       hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
         self.use_hdri: bool = hdri_path.exists()
 #       self.use_hdri: bool = hdri_path.exists()
         if self.use_hdri:
@@ -153,10 +155,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           h, w, c = hdri_data.shape
             self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
 #           self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-            self.texture_hdri.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
-#           self.texture_hdri.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
-            self.texture_hdri.build_mipmaps()
-#           self.texture_hdri.build_mipmaps()
+            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
             self.texture_hdri.repeat_x = True
 #           self.texture_hdri.repeat_x = True
             self.texture_hdri.repeat_y = False
@@ -165,8 +165,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       else:
             # Create dummy 1x1 texture
 #           # Create dummy 1x1 texture
-            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype=np.float32, data=np.zeros(3, dtype=np.float32).tobytes())
-#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype=np.float32, data=np.zeros(3, dtype=np.float32).tobytes())
+            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
+#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
 
         # Texture Array for Scene Materials
 #       # Texture Array for Scene Materials
@@ -293,8 +293,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials: list[Material] = [
 #       self.materials: list[Material] = [
-            {"albedo": (1.0, 1.0, 1.0), "roughness": 0.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.0, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 5.0, "texture_index_emissive": -1},
-#           {"albedo": (1.0, 1.0, 1.0), "roughness": 0.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.0, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 5.0, "texture_index_emissive": -1},
+            {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1},
+#           {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1},
             {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
 #           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
             {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1},
@@ -307,15 +307,17 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 #       self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
 
-        self.scene_builder.add_cube(position=(-3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
-#       self.scene_builder.add_cube(position=(-3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0) # Warm Red
-        self.scene_builder.add_cube(position=(0.0, 0.0, -3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
-#       self.scene_builder.add_cube(position=(0.0, 0.0, -3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=1) # Warm Green
-        self.scene_builder.add_cube(position=(3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
-#       self.scene_builder.add_cube(position=(3.5, 0.0, 3.2), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=2) # Warm Blue
+        self.scene_builder.add_cube(position=(-5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+#       self.scene_builder.add_cube(position=(-5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+        self.scene_builder.add_cube(position=(5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+#       self.scene_builder.add_cube(position=(5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+        self.scene_builder.add_cube(position=(5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+#       self.scene_builder.add_cube(position=(5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+        self.scene_builder.add_cube(position=(-5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
+#       self.scene_builder.add_cube(position=(-5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
 
-        self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
-#       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3) # Gray Plane
+        self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3)
+#       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3)
 
         # Load Vase
 #       # Load Vase
@@ -362,59 +364,392 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
 #       self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
 
-        # Load Rifle
-#       # Load Rifle
-        rifle_parts = ["body1", "body2", "body3", "sight1", "stock"]
-#       rifle_parts = ["body1", "body2", "body3", "sight1", "stock"]
+        # Load AK-12
+#       # Load AK-12
+        ak12_base_path = self.resource_dir / "../assets/ak-12"
+#       ak12_base_path = self.resource_dir / "../assets/ak-12"
+        ak12_material_indices = []
+#       ak12_material_indices = []
+
+        # Material 0: uv
+#       # Material 0: uv
+        idx_albedo_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_BaseColor.png", is_srgb=True)
+#       idx_albedo_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_BaseColor.png", is_srgb=True)
+        idx_normal_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Normal.png")
+#       idx_normal_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Normal.png")
+        idx_roughness_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Roughness.png")
+#       idx_roughness_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Roughness.png")
+        idx_metallic_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Metallic.png")
+#       idx_metallic_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Metallic.png")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_ak12,
+#           "texture_index_albedo": idx_albedo_ak12,
+            "texture_index_roughness": idx_roughness_ak12,
+#           "texture_index_roughness": idx_roughness_ak12,
+            "texture_index_metallic": idx_metallic_ak12,
+#           "texture_index_metallic": idx_metallic_ak12,
+            "texture_index_normal": idx_normal_ak12,
+#           "texture_index_normal": idx_normal_ak12,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        ak12_material_indices.append(len(self.materials) - 1)
+#       ak12_material_indices.append(len(self.materials) - 1)
+
+        ak12_path = str(self.resource_dir / "../assets/ak-12/ak.fbx")
+#       ak12_path = str(self.resource_dir / "../assets/ak-12/ak.fbx")
+        self.scene_builder.load_model(path=ak12_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.02, 0.02, 0.02), material_indices=ak12_material_indices)
+#       self.scene_builder.load_model(path=ak12_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.02, 0.02, 0.02), material_indices=ak12_material_indices)
+
+        # Load Rifle (SLR AR-15)
+#       # Load Rifle (SLR AR-15)
+        rifle_base_path = self.resource_dir / "../assets/slr-ar-15"
+#       rifle_base_path = self.resource_dir / "../assets/slr-ar-15"
         rifle_material_indices = []
 #       rifle_material_indices = []
-        rifle_base_path = self.resource_dir / "../assets/assult-rifle-rapi-nikke/textures"
-#       rifle_base_path = self.resource_dir / "../assets/assult-rifle-rapi-nikke/textures"
 
-        for part in rifle_parts:
-#       for part in rifle_parts:
-            idx_albedo = self.load_texture(rifle_base_path / f"{part}_albedo.jpg", is_srgb=True)
-#           idx_albedo = self.load_texture(rifle_base_path / f"{part}_albedo.jpg", is_srgb=True)
-            idx_metallic = self.load_texture(rifle_base_path / f"{part}_metallic.jpg")
-#           idx_metallic = self.load_texture(rifle_base_path / f"{part}_metallic.jpg")
-            idx_roughness = self.load_texture(rifle_base_path / f"{part}_roughness.jpg")
-#           idx_roughness = self.load_texture(rifle_base_path / f"{part}_roughness.jpg")
-            idx_normal = self.load_texture(rifle_base_path / f"{part}_normal.png")
-#           idx_normal = self.load_texture(rifle_base_path / f"{part}_normal.png")
+        # Material 0: Upper Receiver
+#       # Material 0: Upper Receiver
+        idx_albedo_0 = self.load_texture(rifle_base_path / "low_UpperReciever_BaseColor.jpg", is_srgb=True)
+#       idx_albedo_0 = self.load_texture(rifle_base_path / "low_UpperReciever_BaseColor.jpg", is_srgb=True)
+        idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
+#       idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
+        idx_roughness_0 = self.load_texture(rifle_base_path / "UR_R.jpg")
+#       idx_roughness_0 = self.load_texture(rifle_base_path / "UR_R.jpg")
 
-            self.materials.append({
-#           self.materials.append({
-                "albedo": (1.0, 1.0, 1.0),
-#               "albedo": (1.0, 1.0, 1.0),
-                "roughness": 1.0,
-#               "roughness": 1.0,
-                "metallic": 1.0,
-#               "metallic": 1.0,
-                "transmission": 0.0,
-#               "transmission": 0.0,
-                "ior": 1.5,
-#               "ior": 1.5,
-                "texture_index_albedo": idx_albedo,
-#               "texture_index_albedo": idx_albedo,
-                "texture_index_roughness": idx_roughness,
-#               "texture_index_roughness": idx_roughness,
-                "texture_index_metallic": idx_metallic,
-#               "texture_index_metallic": idx_metallic,
-                "texture_index_normal": idx_normal,
-#               "texture_index_normal": idx_normal,
-                "emissive": 0.0,
-#               "emissive": 0.0,
-                "texture_index_emissive": -1.0,
-#               "texture_index_emissive": -1.0,
-            })
-#           })
-            rifle_material_indices.append(len(self.materials) - 1)
-#           rifle_material_indices.append(len(self.materials) - 1)
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0, # Assume metallic
+#           "metallic": 1.0, # Assume metallic
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_0,
+#           "texture_index_albedo": idx_albedo_0,
+            "texture_index_roughness": idx_roughness_0,
+#           "texture_index_roughness": idx_roughness_0,
+            "texture_index_metallic": -1.0,
+#           "texture_index_metallic": -1.0,
+            "texture_index_normal": idx_normal_0,
+#           "texture_index_normal": idx_normal_0,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        rifle_material_indices.append(len(self.materials) - 1)
+#       rifle_material_indices.append(len(self.materials) - 1)
 
-        rifle_path = str(self.resource_dir / "../assets/assult-rifle-rapi-nikke/model.dae")
-#       rifle_path = str(self.resource_dir / "../assets/assult-rifle-rapi-nikke/model.dae")
-        self.scene_builder.load_model(path=rifle_path, position=(0.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(5.0, 5.0, 5.0), material_indices=rifle_material_indices)
-#       self.scene_builder.load_model(path=rifle_path, position=(0.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(5.0, 5.0, 5.0), material_indices=rifle_material_indices)
+        # Material 1: Lower Receiver
+#       # Material 1: Lower Receiver
+        idx_albedo_1 = self.load_texture(rifle_base_path / "low_LowerReciever_BaseColor.jpg", is_srgb=True)
+#       idx_albedo_1 = self.load_texture(rifle_base_path / "low_LowerReciever_BaseColor.jpg", is_srgb=True)
+        idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
+#       idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
+        idx_roughness_1 = self.load_texture(rifle_base_path / "LR_R.png")
+#       idx_roughness_1 = self.load_texture(rifle_base_path / "LR_R.png")
+        idx_metallic_1 = self.load_texture(rifle_base_path / "LR_M.png")
+#       idx_metallic_1 = self.load_texture(rifle_base_path / "LR_M.png")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_1,
+#           "texture_index_albedo": idx_albedo_1,
+            "texture_index_roughness": idx_roughness_1,
+#           "texture_index_roughness": idx_roughness_1,
+            "texture_index_metallic": idx_metallic_1,
+#           "texture_index_metallic": idx_metallic_1,
+            "texture_index_normal": idx_normal_1,
+#           "texture_index_normal": idx_normal_1,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        rifle_material_indices.append(len(self.materials) - 1)
+#       rifle_material_indices.append(len(self.materials) - 1)
+
+        # Material 2: Magazine
+#       # Material 2: Magazine
+        idx_albedo_2 = self.load_texture(rifle_base_path / "low_Magazine_BaseColor.jpg", is_srgb=True)
+#       idx_albedo_2 = self.load_texture(rifle_base_path / "low_Magazine_BaseColor.jpg", is_srgb=True)
+        idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
+#       idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
+        idx_roughness_2 = self.load_texture(rifle_base_path / "M_R.png")
+#       idx_roughness_2 = self.load_texture(rifle_base_path / "M_R.png")
+        idx_metallic_2 = self.load_texture(rifle_base_path / "M_M.png")
+#       idx_metallic_2 = self.load_texture(rifle_base_path / "M_M.png")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_2,
+#           "texture_index_albedo": idx_albedo_2,
+            "texture_index_roughness": idx_roughness_2,
+#           "texture_index_roughness": idx_roughness_2,
+            "texture_index_metallic": idx_metallic_2,
+#           "texture_index_metallic": idx_metallic_2,
+            "texture_index_normal": idx_normal_2,
+#           "texture_index_normal": idx_normal_2,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        rifle_material_indices.append(len(self.materials) - 1)
+#       rifle_material_indices.append(len(self.materials) - 1)
+
+        # Material 3: Trijicon MRO
+#       # Material 3: Trijicon MRO
+        idx_albedo_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_BaseColor.jpg", is_srgb=True)
+#       idx_albedo_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_BaseColor.jpg", is_srgb=True)
+        idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
+#       idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
+        idx_roughness_3 = self.load_texture(rifle_base_path / "T_R.png")
+#       idx_roughness_3 = self.load_texture(rifle_base_path / "T_R.png")
+        idx_metallic_3 = self.load_texture(rifle_base_path / "T_M.png")
+#       idx_metallic_3 = self.load_texture(rifle_base_path / "T_M.png")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_3,
+#           "texture_index_albedo": idx_albedo_3,
+            "texture_index_roughness": idx_roughness_3,
+#           "texture_index_roughness": idx_roughness_3,
+            "texture_index_metallic": idx_metallic_3,
+#           "texture_index_metallic": idx_metallic_3,
+            "texture_index_normal": idx_normal_3,
+#           "texture_index_normal": idx_normal_3,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        rifle_material_indices.append(len(self.materials) - 1)
+#       rifle_material_indices.append(len(self.materials) - 1)
+
+        rifle_path = str(self.resource_dir / "../assets/slr-ar-15/AR-15.fbx")
+#       rifle_path = str(self.resource_dir / "../assets/slr-ar-15/AR-15.fbx")
+        self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
+#       self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
+
+        # Load AR-15
+#       # Load AR-15
+        ar15_base_path = self.resource_dir / "../assets/ar-15"
+#       ar15_base_path = self.resource_dir / "../assets/ar-15"
+        ar15_material_indices = []
+#       ar15_material_indices = []
+
+        # Material 0: DefaultMaterial
+#       # Material 0: DefaultMaterial
+        idx_albedo_def = self.load_texture(ar15_base_path / "DefaultMaterial_albedo.jpg", is_srgb=True)
+#       idx_albedo_def = self.load_texture(ar15_base_path / "DefaultMaterial_albedo.jpg", is_srgb=True)
+        idx_normal_def = self.load_texture(ar15_base_path / "DefaultMaterial_normal.png")
+#       idx_normal_def = self.load_texture(ar15_base_path / "DefaultMaterial_normal.png")
+        idx_roughness_def = self.load_texture(ar15_base_path / "DefaultMaterial_roughness.jpg")
+#       idx_roughness_def = self.load_texture(ar15_base_path / "DefaultMaterial_roughness.jpg")
+        idx_metallic_def = self.load_texture(ar15_base_path / "DefaultMaterial_metallic.jpg")
+#       idx_metallic_def = self.load_texture(ar15_base_path / "DefaultMaterial_metallic.jpg")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_def,
+#           "texture_index_albedo": idx_albedo_def,
+            "texture_index_roughness": idx_roughness_def,
+#           "texture_index_roughness": idx_roughness_def,
+            "texture_index_metallic": idx_metallic_def,
+#           "texture_index_metallic": idx_metallic_def,
+            "texture_index_normal": idx_normal_def,
+#           "texture_index_normal": idx_normal_def,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        ar15_material_indices.append(len(self.materials) - 1)
+#       ar15_material_indices.append(len(self.materials) - 1)
+
+        # Material 1: Lower
+#       # Material 1: Lower
+        idx_albedo_low = self.load_texture(ar15_base_path / "lower_albedo.jpg", is_srgb=True)
+#       idx_albedo_low = self.load_texture(ar15_base_path / "lower_albedo.jpg", is_srgb=True)
+        idx_normal_low = self.load_texture(ar15_base_path / "lower_normal.png")
+#       idx_normal_low = self.load_texture(ar15_base_path / "lower_normal.png")
+        idx_roughness_low = self.load_texture(ar15_base_path / "lower_roughness.jpg")
+#       idx_roughness_low = self.load_texture(ar15_base_path / "lower_roughness.jpg")
+        idx_metallic_low = self.load_texture(ar15_base_path / "lower_metallic.jpg")
+#       idx_metallic_low = self.load_texture(ar15_base_path / "lower_metallic.jpg")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_low,
+#           "texture_index_albedo": idx_albedo_low,
+            "texture_index_roughness": idx_roughness_low,
+#           "texture_index_roughness": idx_roughness_low,
+            "texture_index_metallic": idx_metallic_low,
+#           "texture_index_metallic": idx_metallic_low,
+            "texture_index_normal": idx_normal_low,
+#           "texture_index_normal": idx_normal_low,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        ar15_material_indices.append(len(self.materials) - 1)
+#       ar15_material_indices.append(len(self.materials) - 1)
+
+        # Material 2: Sight/Default (прицел) -> reuse DefaultMaterial
+#       # Material 2: Sight/Default (прицел) -> reuse DefaultMaterial
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_def,
+#           "texture_index_albedo": idx_albedo_def,
+            "texture_index_roughness": idx_roughness_def,
+#           "texture_index_roughness": idx_roughness_def,
+            "texture_index_metallic": idx_metallic_def,
+#           "texture_index_metallic": idx_metallic_def,
+            "texture_index_normal": idx_normal_def,
+#           "texture_index_normal": idx_normal_def,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        ar15_material_indices.append(len(self.materials) - 1)
+#       ar15_material_indices.append(len(self.materials) - 1)
+
+        # Material 3: Upper
+#       # Material 3: Upper
+        idx_albedo_up = self.load_texture(ar15_base_path / "upper_albedo.jpg", is_srgb=True)
+#       idx_albedo_up = self.load_texture(ar15_base_path / "upper_albedo.jpg", is_srgb=True)
+        idx_normal_up = self.load_texture(ar15_base_path / "upper_normal.png")
+#       idx_normal_up = self.load_texture(ar15_base_path / "upper_normal.png")
+        idx_roughness_up = self.load_texture(ar15_base_path / "upper_roughness.jpg")
+#       idx_roughness_up = self.load_texture(ar15_base_path / "upper_roughness.jpg")
+        idx_metallic_up = self.load_texture(ar15_base_path / "upper_metallic.jpg")
+#       idx_metallic_up = self.load_texture(ar15_base_path / "upper_metallic.jpg")
+
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 1.0,
+#           "roughness": 1.0,
+            "metallic": 1.0,
+#           "metallic": 1.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_up,
+#           "texture_index_albedo": idx_albedo_up,
+            "texture_index_roughness": idx_roughness_up,
+#           "texture_index_roughness": idx_roughness_up,
+            "texture_index_metallic": idx_metallic_up,
+#           "texture_index_metallic": idx_metallic_up,
+            "texture_index_normal": idx_normal_up,
+#           "texture_index_normal": idx_normal_up,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        ar15_material_indices.append(len(self.materials) - 1)
+#       ar15_material_indices.append(len(self.materials) - 1)
+
+        ar15_path = str(self.resource_dir / "../assets/ar-15/ar-15.obj")
+#       ar15_path = str(self.resource_dir / "../assets/ar-15/ar-15.obj")
+        self.scene_builder.load_model(path=ar15_path, position=(0.0, 5.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(2.0, 2.0, 2.0), material_indices=ar15_material_indices)
+#       self.scene_builder.load_model(path=ar15_path, position=(0.0, 5.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(2.0, 2.0, 2.0), material_indices=ar15_material_indices)
+
+
 
         bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
 #       bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
@@ -455,6 +790,37 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
+
+        # -----------------------------
+#       # -----------------------------
+        # 6. Post Processing System
+#       # 6. Post Processing System
+        # -----------------------------
+#       # -----------------------------
+        post_chromatic_aberration_cs_path: pl.Path = self.resource_dir / "../shaders/post_chromatic_aberration_cs.glsl"
+#       post_chromatic_aberration_cs_path: pl.Path = self.resource_dir / "../shaders/post_chromatic_aberration_cs.glsl"
+        post_chromatic_aberration_cs_code: str = resolve_includes(post_chromatic_aberration_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       post_chromatic_aberration_cs_code: str = resolve_includes(post_chromatic_aberration_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_post_chromatic_aberration: mgl.ComputeShader = self.ctx.compute_shader(source=post_chromatic_aberration_cs_code)
+#       self.program_post_chromatic_aberration: mgl.ComputeShader = self.ctx.compute_shader(source=post_chromatic_aberration_cs_code)
+
+        post_vignette_cs_path: pl.Path = self.resource_dir / "../shaders/post_vignette_cs.glsl"
+#       post_vignette_cs_path: pl.Path = self.resource_dir / "../shaders/post_vignette_cs.glsl"
+        post_vignette_cs_code: str = resolve_includes(post_vignette_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       post_vignette_cs_code: str = resolve_includes(post_vignette_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
+#       self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
+
+        # Pipeline of active post-processing shaders
+#       # Pipeline of active post-processing shaders
+        self.post_processing_pipeline: list[mgl.ComputeShader] = [
+#       self.post_processing_pipeline: list[mgl.ComputeShader] = [
+            self.program_post_chromatic_aberration,
+#           self.program_post_chromatic_aberration,
+            self.program_post_vignette,
+#           self.program_post_vignette,
+        ]
+#       ]
 
         # Camera
 #       # Camera
@@ -766,6 +1132,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         #     print("ERROR: OIDN did not write to output array!")
 #       #     print("ERROR: OIDN did not write to output array!")
 
+        # Apply ACES Tonemap
+#       # Apply ACES Tonemap
+        a = 2.51
+#       a = 2.51
+        b = 0.03
+#       b = 0.03
+        c = 2.43
+#       c = 2.43
+        d = 0.59
+#       d = 0.59
+        e = 0.14
+#       e = 0.14
+        output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
+#       output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
+        output_arr = np.clip(output_arr, 0.0, 1.0)
+#       output_arr = np.clip(output_arr, 0.0, 1.0)
+
+        # Apply Gamma Correction
+#       # Apply Gamma Correction
+        output_arr = np.power(output_arr, 1.0 / 2.2)
+#       output_arr = np.power(output_arr, 1.0 / 2.2)
+
         # Show result
 #       # Show result
         # Convert RGB to BGR for OpenCV and Flip for correct orientation
@@ -797,8 +1185,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 3. Ray Trace Lighting using Compute Shader (reads G-Buffer & BVH)
         # 4. Denoise the output
 #       # 4. Denoise the output
-        # 5. Display to Screen
-#       # 5. Display to Screen
+        # 5. Post Processing Pipeline
+#       # 5. Post Processing Pipeline
+        # 6. Display to Screen
+#       # 6. Display to Screen
         self.frame_count += 1
 #       self.frame_count += 1
 
@@ -931,16 +1321,75 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uTime" in self.program_shading:
             self.program_shading["uTime"] = time
 #           self.program_shading["uTime"] = time
-        if "uPointLight001GlobalPosition" in self.program_shading:
-#       if "uPointLight001GlobalPosition" in self.program_shading:
-            radius: float = 6.0
-#           radius: float = 6.0
-            x: float = np.cos(time) * radius
-#           x: float = np.cos(time) * radius
-            z: float = np.sin(time) * radius
-#           z: float = np.sin(time) * radius
-            self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
-#           self.program_shading["uPointLight001GlobalPosition"] = (x, 5.0, z)
+
+        # Point Lights Setup
+#       # Point Lights Setup
+        radius: float = 10.0
+#       radius: float = 10.0
+        x: float = np.cos(time) * radius
+#       x: float = np.cos(time) * radius
+        z: float = np.sin(time) * radius
+#       z: float = np.sin(time) * radius
+
+        point_lights = [
+#       point_lights = [
+            ( (x, 10.0, z), (500.0, 500.0, 500.0), 0.5 ),
+#           ( (x, 10.0, z), (500.0, 500.0, 500.0), 0.5 ),
+            ( (-x, 5.0, -z), (200.0, 50.0, 50.0), 0.5 ),
+#           ( (-x, 5.0, -z), (200.0, 50.0, 50.0), 0.5 ),
+            ( (0.0, 5.0, 0.0), (50.0, 50.0, 200.0), 1.0 ),
+#           ( (0.0, 5.0, 0.0), (50.0, 50.0, 200.0), 1.0 ),
+        ]
+#       ]
+
+        # Optimize by sorting lights by emission strength
+#       # Optimize by sorting lights by emission strength
+        def get_light_power(light: tuple[tuple[float, float, float], tuple[float, float, float], float]) -> float:
+#       def get_light_power(light: tuple[tuple[float, float, float], tuple[float, float, float], float]) -> float:
+            c = light[1]
+#           c = light[1]
+            r = light[2]
+#           r = light[2]
+            luminance = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+#           luminance = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+            return luminance * 4.0 * np.pi * r * r
+#           return luminance * 4.0 * np.pi * r * r
+
+        point_lights.sort(key=get_light_power, reverse=True)
+#       point_lights.sort(key=get_light_power, reverse=True)
+        total_power = sum(get_light_power(light) for light in point_lights)
+#       total_power = sum(get_light_power(light) for light in point_lights)
+
+        if "uPointLightCount" in self.program_shading:
+#       if "uPointLightCount" in self.program_shading:
+            self.program_shading["uPointLightCount"] = len(point_lights)
+#           self.program_shading["uPointLightCount"] = len(point_lights)
+            cumulative_prob = 0.0
+#           cumulative_prob = 0.0
+            for i, (pos, color, r) in enumerate(point_lights):
+#           for i, (pos, color, r) in enumerate(point_lights):
+                power = get_light_power((pos, color, r))
+#               power = get_light_power((pos, color, r))
+                prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
+#               prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
+                cumulative_prob += prob
+#               cumulative_prob += prob
+
+                if f"uPointLights[{i}].position" in self.program_shading:
+#               if f"uPointLights[{i}].position" in self.program_shading:
+                    self.program_shading[f"uPointLights[{i}].position"] = pos
+#                   self.program_shading[f"uPointLights[{i}].position"] = pos
+                    self.program_shading[f"uPointLights[{i}].color"] = color
+#                   self.program_shading[f"uPointLights[{i}].color"] = color
+                    self.program_shading[f"uPointLights[{i}].radius"] = r
+#                   self.program_shading[f"uPointLights[{i}].radius"] = r
+                    if f"uPointLights[{i}].cdf" in self.program_shading:
+#                   if f"uPointLights[{i}].cdf" in self.program_shading:
+                        self.program_shading[f"uPointLights[{i}].cdf"] = cumulative_prob
+#                       self.program_shading[f"uPointLights[{i}].cdf"] = cumulative_prob
+                        self.program_shading[f"uPointLights[{i}].pdf"] = prob
+#                       self.program_shading[f"uPointLights[{i}].pdf"] = prob
+
         if "uCameraGlobalPosition" in self.program_shading:
 #       if "uCameraGlobalPosition" in self.program_shading:
             self.program_shading["uCameraGlobalPosition"] = tuple(self.camera.look_from)
@@ -1096,15 +1545,39 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
-        # 4. Display Result to Screen
-#       # 4. Display Result to Screen
+        # 4. Post Processing Pipeline
+#       # 4. Post Processing Pipeline
+        current_read_texture: mgl.Texture = self.texture_output
+#       current_read_texture: mgl.Texture = self.texture_output
+        current_write_texture: mgl.Texture = self.texture_ping
+#       current_write_texture: mgl.Texture = self.texture_ping
+
+        for post_program in self.post_processing_pipeline:
+#       for post_program in self.post_processing_pipeline:
+            current_write_texture.bind_to_image(0, read=False, write=True)  # Output
+#           current_write_texture.bind_to_image(0, read=False, write=True)  # Output
+            current_read_texture.bind_to_image(1, read=True, write=False)   # Input
+#           current_read_texture.bind_to_image(1, read=True, write=False)   # Input
+
+            post_program.run(group_x=gx, group_y=gy, group_z=1)
+#           post_program.run(group_x=gx, group_y=gy, group_z=1)
+            self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#           self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+            # Swap textures
+#           # Swap textures
+            current_read_texture, current_write_texture = current_write_texture, current_read_texture
+#           current_read_texture, current_write_texture = current_write_texture, current_read_texture
+
+        # 5. Display Result to Screen
+#       # 5. Display Result to Screen
         self.ctx.screen.use()
 #       self.ctx.screen.use()
         self.ctx.clear()
 #       self.ctx.clear()
 
-        self.texture_output.use()
-#       self.texture_output.use()
+        current_read_texture.use()
+#       current_read_texture.use()
         self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
 #       self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
         pass

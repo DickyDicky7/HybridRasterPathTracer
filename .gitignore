@@ -15,3 +15,18 @@ __pycache__
 
 !/src/assets/dummy.exr
 !/src/assets/dummy.exr
+
+/src/assets/
+/src/assets/
+
+kuzu_cli-windows-x86_64.zip
+kuzu_cli-windows-x86_64.zip
+kuzu_script.cypher
+kuzu_script.cypher
+kuzu.exe
+kuzu.exe
+project_db
+project_db
+
+windows-x64-v6.0.4.zip
+windows-x64-v6.0.4.zip

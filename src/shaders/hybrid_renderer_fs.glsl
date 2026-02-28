@@ -9,6 +9,8 @@
     uniform sampler2D uTextureOutput;
 //  uniform sampler2D uTextureOutput;
 
+    #include "tonemap.glsl"
+
     // FXAA settings
 //  // FXAA settings
     #define FXAA_SPAN_MAX 8.0
@@ -92,5 +94,10 @@
 //          fragmentColor = vec4(rgbB, 1.0);
         }
 //      }
+
+        fragmentColor.rgb = aces(fragmentColor.rgb);
+//      fragmentColor.rgb = aces(fragmentColor.rgb);
+        fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
+//      fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
     }
 //  }
