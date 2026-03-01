@@ -285,8 +285,8 @@
 //          float v = clamp(theta / PI, 0.0, 1.0);
             vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
 //          vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
-            return min(hdriColor, vec3(10.0));
-//          return min(hdriColor, vec3(10.0));
+            return min(hdriColor, vec3(20.0));
+//          return min(hdriColor, vec3(20.0));
         }
 //      }
         /*
