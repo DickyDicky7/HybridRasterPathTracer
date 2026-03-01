@@ -289,12 +289,42 @@
 //          return min(hdriColor, vec3(10.0));
         }
 //      }
+        /*
         // Fallback: procedural gradient sky
         // Fallback: procedural gradient sky
         float t = 0.5 * (dir.y + 1.0);
 //      float t = 0.5 * (dir.y + 1.0);
         return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), t);
 //      return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), t);
+        */
+        // Fallback: procedural atmospheric sky
+//      // Fallback: procedural atmospheric sky
+        // Rayleigh Gradient: Approximates scattering of blue wavelengths, deeper at zenith
+//      // Rayleigh Gradient: Approximates scattering of blue wavelengths, deeper at zenith
+        vec3 col = vec3(0.2, 0.45, 0.9) - dir.y * 0.25 * vec3(1.0, 0.5, 1.2) + 0.1 * vec3(1.0);
+//      vec3 col = vec3(0.2, 0.45, 0.9) - dir.y * 0.25 * vec3(1.0, 0.5, 1.2) + 0.1 * vec3(1.0);
+        // Mie Scattering: Exponential horizon haze due to higher atmospheric density
+//      // Mie Scattering: Exponential horizon haze due to higher atmospheric density
+        col = mix(col, vec3(0.9, 0.95, 1.0), exp(-15.0 * max(dir.y, 0.0)));
+//      col = mix(col, vec3(0.9, 0.95, 1.0), exp(-15.0 * max(dir.y, 0.0)));
+        // Cloud-like ground: Replace the bottom with a bright, vivid white-blue deck
+//      // Cloud-like ground: Replace the bottom with a bright, vivid white-blue deck
+        if (dir.y < 0.0) col = mix(vec3(0.9, 0.95, 1.0), vec3(0.98, 0.99, 1.0), pow(abs(dir.y), 0.5));
+//      if (dir.y < 0.0) col = mix(vec3(0.9, 0.95, 1.0), vec3(0.98, 0.99, 1.0), pow(abs(dir.y), 0.5));
+        // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
+//      // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
+        vec3 sunDir = normalize(vec3(0.5, 0.4, -0.6));
+//      vec3 sunDir = normalize(vec3(0.5, 0.4, -0.6));
+        float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
+//      float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
+        col += 0.4 * vec3(1.0, 0.6, 0.3) * pow(sun, 8.0); // Wide soft orange glow
+//      col += 0.4 * vec3(1.0, 0.6, 0.3) * pow(sun, 8.0); // Wide soft orange glow
+        col += 0.3 * vec3(1.0, 0.8, 0.5) * pow(sun, 64.0); // Bright golden core
+//      col += 0.3 * vec3(1.0, 0.8, 0.5) * pow(sun, 64.0); // Bright golden core
+        col += 0.5 * vec3(1.0, 1.0, 1.0) * pow(sun, 512.0); // Intense white disk
+//      col += 0.5 * vec3(1.0, 1.0, 1.0) * pow(sun, 512.0); // Intense white disk
+        return col;
+//      return col;
     }
 //  }
 
@@ -1251,7 +1281,7 @@
 //      hit.dist = INF;
         hit.lightIndex = -1;
 //      hit.lightIndex = -1;
-        
+
         for (int i = 0; i < uPointLightCount; i++) {
 //      for (int i = 0; i < uPointLightCount; i++) {
             vec3 oc = ray.origin - uPointLights[i].position;
@@ -1404,7 +1434,7 @@
 
             SphereLightHit lightHit = intersectSphereLights(currentRay);
 //          SphereLightHit lightHit = intersectSphereLights(currentRay);
-            
+
             bool hitLight = false;
 //          bool hitLight = false;
             if (lightHit.isHitted) {
@@ -1422,7 +1452,7 @@
 //          if (hitLight) {
                 vec3 Le = uPointLights[lightHit.lightIndex].color;
 //              vec3 Le = uPointLights[lightHit.lightIndex].color;
-                
+
                 if (depth == 0 || lastWasDelta) {
 //              if (depth == 0 || lastWasDelta) {
                     accumulatedColor += attenuation * Le;
@@ -1439,7 +1469,7 @@
 //                  float area = 4.0 * PI * r * r;
                     float pdfLightArea = lightPdf / area;
 //                  float pdfLightArea = lightPdf / area;
-                    
+
                     float pdfLightW = 0.0;
 //                  float pdfLightW = 0.0;
                     if (cosThetaLight > 0.0) {
@@ -1448,7 +1478,7 @@
 //                      pdfLightW = (pdfLightArea * lightHit.dist * lightHit.dist) / cosThetaLight;
                     }
 //                  }
-                    
+
                     float weightBrdf = 1.0;
 //                  float weightBrdf = 1.0;
                     if (pdfLightW > 0.0) {
@@ -1457,7 +1487,7 @@
 //                      weightBrdf = lastPdfW / (lastPdfW + pdfLightW);
                     }
 //                  }
-                    
+
                     accumulatedColor += attenuation * Le * weightBrdf;
 //                  accumulatedColor += attenuation * Le * weightBrdf;
                 }
@@ -1509,7 +1539,7 @@
 //                  }
                 }
 //              }
-                
+
                 vec3 lightPos = uPointLights[lightIdx].position;
 //              vec3 lightPos = uPointLights[lightIdx].position;
                 float r = uPointLights[lightIdx].radius;
@@ -1518,21 +1548,21 @@
 //              float lightPdf = uPointLights[lightIdx].pdf;
                 vec3 sampledPoint = lightPos + randomUnitVector() * r;
 //              vec3 sampledPoint = lightPos + randomUnitVector() * r;
-                
+
                 vec3 shadowDir = sampledPoint - rayHitResult.at;
 //              vec3 shadowDir = sampledPoint - rayHitResult.at;
                 float distLight = length(shadowDir);
 //              float distLight = length(shadowDir);
                 shadowDir = normalize(shadowDir);
 //              shadowDir = normalize(shadowDir);
-                
+
                 float cosTheta = max(0.0, dot(scatterResult.shadingNormal, shadowDir));
 //              float cosTheta = max(0.0, dot(scatterResult.shadingNormal, shadowDir));
                 vec3 lightNormal = normalize(sampledPoint - lightPos);
 //              vec3 lightNormal = normalize(sampledPoint - lightPos);
                 float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
 //              float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
-                
+
                 if (cosTheta > 0.0 && cosThetaLight > 0.0) {
 //              if (cosTheta > 0.0 && cosThetaLight > 0.0) {
                     Ray shadowRay;
@@ -1541,14 +1571,14 @@
 //                  shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
                     shadowRay.direction = shadowDir;
 //                  shadowRay.direction = shadowDir;
-                    
+
                     Interval shadowInterval;
 //                  Interval shadowInterval;
                     shadowInterval.min = 0.001;
 //                  shadowInterval.min = 0.001;
                     shadowInterval.max = distLight - 0.001;
 //                  shadowInterval.max = distLight - 0.001;
-                    
+
                     if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
 //                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
                         float area = 4.0 * PI * r * r;
@@ -1557,16 +1587,16 @@
 //                      float pdfLightArea = lightPdf / area;
                         float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
 //                      float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
-                        
+
                         float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 //                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-                        
+
                         float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
 //                      float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
-                        
+
                         vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 //                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-                        
+
                         // Radiance emitted by the point light's surface
 //                      // Radiance emitted by the point light's surface
                         vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / pdfLightW;

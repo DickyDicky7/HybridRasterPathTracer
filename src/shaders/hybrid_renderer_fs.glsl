@@ -95,8 +95,8 @@
         }
 //      }
 
-        fragmentColor.rgb = aces(fragmentColor.rgb);
-//      fragmentColor.rgb = aces(fragmentColor.rgb);
+        fragmentColor.rgb = pbrNeutral(fragmentColor.rgb);
+//      fragmentColor.rgb = pbrNeutral(fragmentColor.rgb);
         fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
 //      fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
     }

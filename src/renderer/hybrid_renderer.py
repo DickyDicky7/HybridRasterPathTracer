@@ -28,8 +28,8 @@ from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.scene_builder import SceneBuilder, SceneBatch
 from src.scene.camera import Camera
 from src.scene.camera import Camera
-from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material
-from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
 
 class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
     # Main Renderer Class implementing a Hybrid Pipeline:
@@ -135,8 +135,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # HDRI Texture Loading
         hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
 #       hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
-        self.use_hdri: bool = hdri_path.exists()
-#       self.use_hdri: bool = hdri_path.exists()
+        self.use_hdri: bool = False # hdri_path.exists()
+#       self.use_hdri: bool = False # hdri_path.exists()
         if self.use_hdri:
 #       if self.use_hdri:
             loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
@@ -172,8 +172,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Texture Array for Scene Materials
         self.texture_array_size: int = 2048
 #       self.texture_array_size: int = 2048
-        self.texture_array_layers: int = 32
-#       self.texture_array_layers: int = 32
+        self.texture_array_layers: int = 64
+#       self.texture_array_layers: int = 64
         self.texture_array: mgl.TextureArray = self.ctx.texture_array(
 #       self.texture_array: mgl.TextureArray = self.ctx.texture_array(
             size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
@@ -364,24 +364,55 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
 #       self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
 
-        # Load AK-12
-#       # Load AK-12
-        ak12_base_path = self.resource_dir / "../assets/ak-12"
-#       ak12_base_path = self.resource_dir / "../assets/ak-12"
-        ak12_material_indices = []
-#       ak12_material_indices = []
+        # Load Pistol
+#       # Load Pistol
+        pistol_base_path = self.resource_dir / "../assets/pistol"
+#       pistol_base_path = self.resource_dir / "../assets/pistol"
+        pistol_material_indices = []
+#       pistol_material_indices = []
 
-        # Material 0: uv
-#       # Material 0: uv
-        idx_albedo_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_BaseColor.png", is_srgb=True)
-#       idx_albedo_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_BaseColor.png", is_srgb=True)
-        idx_normal_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Normal.png")
-#       idx_normal_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Normal.png")
-        idx_roughness_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Roughness.png")
-#       idx_roughness_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Roughness.png")
-        idx_metallic_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Metallic.png")
-#       idx_metallic_ak12 = self.load_texture(ak12_base_path / "ak13_low_uv_Metallic.png")
+        # Material 0: glock
+#       # Material 0: glock
+        idx_albedo_pistol = self.load_texture(pistol_base_path / "pistol_albedo.png", is_srgb=True)
+#       idx_albedo_pistol = self.load_texture(pistol_base_path / "pistol_albedo.png", is_srgb=True)
+        idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
+#       idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
+        idx_met_sm_pistol = self.load_texture(pistol_base_path / "pistol_metallic_smoothness.png")
+#       idx_met_sm_pistol = self.load_texture(pistol_base_path / "pistol_metallic_smoothness.png")
 
+        # Material 0: lambert4
+#       # Material 0: lambert4
+        self.materials.append({
+#       self.materials.append({
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
+            "roughness": 0.5,
+#           "roughness": 0.5,
+            "metallic": 0.0,
+#           "metallic": 0.0,
+            "transmission": 0.0,
+#           "transmission": 0.0,
+            "ior": 1.5,
+#           "ior": 1.5,
+            "texture_index_albedo": idx_albedo_pistol,
+#           "texture_index_albedo": idx_albedo_pistol,
+            "texture_index_roughness": -1.0,
+#           "texture_index_roughness": -1.0,
+            "texture_index_metallic": -1.0,
+#           "texture_index_metallic": -1.0,
+            "texture_index_normal": idx_normal_pistol,
+#           "texture_index_normal": idx_normal_pistol,
+            "emissive": 0.0,
+#           "emissive": 0.0,
+            "texture_index_emissive": -1.0,
+#           "texture_index_emissive": -1.0,
+        })
+#       })
+        pistol_material_indices.append(len(self.materials) - 1)
+#       pistol_material_indices.append(len(self.materials) - 1)
+
+        # Material 1: glock
+#       # Material 1: glock
         self.materials.append({
 #       self.materials.append({
             "albedo": (1.0, 1.0, 1.0),
@@ -394,27 +425,27 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "transmission": 0.0,
             "ior": 1.5,
 #           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_ak12,
-#           "texture_index_albedo": idx_albedo_ak12,
-            "texture_index_roughness": idx_roughness_ak12,
-#           "texture_index_roughness": idx_roughness_ak12,
-            "texture_index_metallic": idx_metallic_ak12,
-#           "texture_index_metallic": idx_metallic_ak12,
-            "texture_index_normal": idx_normal_ak12,
-#           "texture_index_normal": idx_normal_ak12,
+            "texture_index_albedo": idx_albedo_pistol,
+#           "texture_index_albedo": idx_albedo_pistol,
+            "texture_index_roughness": -1.0,
+#           "texture_index_roughness": -1.0,
+            "texture_index_metallic": idx_met_sm_pistol,
+#           "texture_index_metallic": idx_met_sm_pistol,
+            "texture_index_normal": idx_normal_pistol,
+#           "texture_index_normal": idx_normal_pistol,
             "emissive": 0.0,
 #           "emissive": 0.0,
             "texture_index_emissive": -1.0,
 #           "texture_index_emissive": -1.0,
         })
 #       })
-        ak12_material_indices.append(len(self.materials) - 1)
-#       ak12_material_indices.append(len(self.materials) - 1)
+        pistol_material_indices.append(len(self.materials) - 1)
+#       pistol_material_indices.append(len(self.materials) - 1)
 
-        ak12_path = str(self.resource_dir / "../assets/ak-12/ak.fbx")
-#       ak12_path = str(self.resource_dir / "../assets/ak-12/ak.fbx")
-        self.scene_builder.load_model(path=ak12_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.02, 0.02, 0.02), material_indices=ak12_material_indices)
-#       self.scene_builder.load_model(path=ak12_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.02, 0.02, 0.02), material_indices=ak12_material_indices)
+        pistol_path = str(self.resource_dir / "../assets/pistol/pistol.fbx")
+#       pistol_path = str(self.resource_dir / "../assets/pistol/pistol.fbx")
+        self.scene_builder.load_model(path=pistol_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.2, 0.2, 0.2), material_indices=pistol_material_indices)
+#       self.scene_builder.load_model(path=pistol_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.2, 0.2, 0.2), material_indices=pistol_material_indices)
 
         # Load Rifle (SLR AR-15)
 #       # Load Rifle (SLR AR-15)
@@ -586,63 +617,25 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
 #       self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
 
-        # Load AR-15
-#       # Load AR-15
-        ar15_base_path = self.resource_dir / "../assets/ar-15"
-#       ar15_base_path = self.resource_dir / "../assets/ar-15"
-        ar15_material_indices = []
-#       ar15_material_indices = []
+        # Load MP9
+#       # Load MP9
+        mp9_base_path = self.resource_dir / "../assets/mp9"
+#       mp9_base_path = self.resource_dir / "../assets/mp9"
+        mp9_material_indices = []
+#       mp9_material_indices = []
 
-        # Material 0: DefaultMaterial
-#       # Material 0: DefaultMaterial
-        idx_albedo_def = self.load_texture(ar15_base_path / "DefaultMaterial_albedo.jpg", is_srgb=True)
-#       idx_albedo_def = self.load_texture(ar15_base_path / "DefaultMaterial_albedo.jpg", is_srgb=True)
-        idx_normal_def = self.load_texture(ar15_base_path / "DefaultMaterial_normal.png")
-#       idx_normal_def = self.load_texture(ar15_base_path / "DefaultMaterial_normal.png")
-        idx_roughness_def = self.load_texture(ar15_base_path / "DefaultMaterial_roughness.jpg")
-#       idx_roughness_def = self.load_texture(ar15_base_path / "DefaultMaterial_roughness.jpg")
-        idx_metallic_def = self.load_texture(ar15_base_path / "DefaultMaterial_metallic.jpg")
-#       idx_metallic_def = self.load_texture(ar15_base_path / "DefaultMaterial_metallic.jpg")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_def,
-#           "texture_index_albedo": idx_albedo_def,
-            "texture_index_roughness": idx_roughness_def,
-#           "texture_index_roughness": idx_roughness_def,
-            "texture_index_metallic": idx_metallic_def,
-#           "texture_index_metallic": idx_metallic_def,
-            "texture_index_normal": idx_normal_def,
-#           "texture_index_normal": idx_normal_def,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-        })
-#       })
-        ar15_material_indices.append(len(self.materials) - 1)
-#       ar15_material_indices.append(len(self.materials) - 1)
-
-        # Material 1: Lower
-#       # Material 1: Lower
-        idx_albedo_low = self.load_texture(ar15_base_path / "lower_albedo.jpg", is_srgb=True)
-#       idx_albedo_low = self.load_texture(ar15_base_path / "lower_albedo.jpg", is_srgb=True)
-        idx_normal_low = self.load_texture(ar15_base_path / "lower_normal.png")
-#       idx_normal_low = self.load_texture(ar15_base_path / "lower_normal.png")
-        idx_roughness_low = self.load_texture(ar15_base_path / "lower_roughness.jpg")
-#       idx_roughness_low = self.load_texture(ar15_base_path / "lower_roughness.jpg")
-        idx_metallic_low = self.load_texture(ar15_base_path / "lower_metallic.jpg")
-#       idx_metallic_low = self.load_texture(ar15_base_path / "lower_metallic.jpg")
+        # Material 0: M_MP9
+#       # Material 0: M_MP9
+        idx_albedo_mp9 = self.load_texture(mp9_base_path / "M_MP9_Base_color.png", is_srgb=True)
+#       idx_albedo_mp9 = self.load_texture(mp9_base_path / "M_MP9_Base_color.png", is_srgb=True)
+        idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
+#       idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
+        idx_roughness_mp9 = self.load_texture(mp9_base_path / "M_MP9_Roughness.png")
+#       idx_roughness_mp9 = self.load_texture(mp9_base_path / "M_MP9_Roughness.png")
+        idx_metallic_mp9 = self.load_texture(mp9_base_path / "M_MP9_Metallic.png")
+#       idx_metallic_mp9 = self.load_texture(mp9_base_path / "M_MP9_Metallic.png")
+        idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
+#       idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
 
         self.materials.append({
 #       self.materials.append({
@@ -656,98 +649,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "transmission": 0.0,
             "ior": 1.5,
 #           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_low,
-#           "texture_index_albedo": idx_albedo_low,
-            "texture_index_roughness": idx_roughness_low,
-#           "texture_index_roughness": idx_roughness_low,
-            "texture_index_metallic": idx_metallic_low,
-#           "texture_index_metallic": idx_metallic_low,
-            "texture_index_normal": idx_normal_low,
-#           "texture_index_normal": idx_normal_low,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
+            "texture_index_albedo": idx_albedo_mp9,
+#           "texture_index_albedo": idx_albedo_mp9,
+            "texture_index_roughness": idx_roughness_mp9,
+#           "texture_index_roughness": idx_roughness_mp9,
+            "texture_index_metallic": idx_metallic_mp9,
+#           "texture_index_metallic": idx_metallic_mp9,
+            "texture_index_normal": idx_normal_mp9,
+#           "texture_index_normal": idx_normal_mp9,
+            "emissive": 1.0,
+#           "emissive": 1.0,
+            "texture_index_emissive": idx_emissive_mp9,
+#           "texture_index_emissive": idx_emissive_mp9,
         })
 #       })
-        ar15_material_indices.append(len(self.materials) - 1)
-#       ar15_material_indices.append(len(self.materials) - 1)
+        mp9_material_indices.append(len(self.materials) - 1)
+#       mp9_material_indices.append(len(self.materials) - 1)
 
-        # Material 2: Sight/Default (прицел) -> reuse DefaultMaterial
-#       # Material 2: Sight/Default (прицел) -> reuse DefaultMaterial
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_def,
-#           "texture_index_albedo": idx_albedo_def,
-            "texture_index_roughness": idx_roughness_def,
-#           "texture_index_roughness": idx_roughness_def,
-            "texture_index_metallic": idx_metallic_def,
-#           "texture_index_metallic": idx_metallic_def,
-            "texture_index_normal": idx_normal_def,
-#           "texture_index_normal": idx_normal_def,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-        })
-#       })
-        ar15_material_indices.append(len(self.materials) - 1)
-#       ar15_material_indices.append(len(self.materials) - 1)
+        mp9_path = str(self.resource_dir / "../assets/mp9/MP9_Sketchfab.fbx")
+#       mp9_path = str(self.resource_dir / "../assets/mp9/MP9_Sketchfab.fbx")
+        self.scene_builder.load_model(path=mp9_path, position=(0.0, 5.0, 5.0), rotation=(np.pi * 0.25, 0.0, np.pi * -0.5), scale=(0.1, 0.1, 0.1), material_indices=mp9_material_indices)
+#       self.scene_builder.load_model(path=mp9_path, position=(0.0, 5.0, 5.0), rotation=(np.pi * 0.25, 0.0, np.pi * -0.5), scale=(0.1, 0.1, 0.1), material_indices=mp9_material_indices)
 
-        # Material 3: Upper
-#       # Material 3: Upper
-        idx_albedo_up = self.load_texture(ar15_base_path / "upper_albedo.jpg", is_srgb=True)
-#       idx_albedo_up = self.load_texture(ar15_base_path / "upper_albedo.jpg", is_srgb=True)
-        idx_normal_up = self.load_texture(ar15_base_path / "upper_normal.png")
-#       idx_normal_up = self.load_texture(ar15_base_path / "upper_normal.png")
-        idx_roughness_up = self.load_texture(ar15_base_path / "upper_roughness.jpg")
-#       idx_roughness_up = self.load_texture(ar15_base_path / "upper_roughness.jpg")
-        idx_metallic_up = self.load_texture(ar15_base_path / "upper_metallic.jpg")
-#       idx_metallic_up = self.load_texture(ar15_base_path / "upper_metallic.jpg")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_up,
-#           "texture_index_albedo": idx_albedo_up,
-            "texture_index_roughness": idx_roughness_up,
-#           "texture_index_roughness": idx_roughness_up,
-            "texture_index_metallic": idx_metallic_up,
-#           "texture_index_metallic": idx_metallic_up,
-            "texture_index_normal": idx_normal_up,
-#           "texture_index_normal": idx_normal_up,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-        })
-#       })
-        ar15_material_indices.append(len(self.materials) - 1)
-#       ar15_material_indices.append(len(self.materials) - 1)
-
-        ar15_path = str(self.resource_dir / "../assets/ar-15/ar-15.obj")
-#       ar15_path = str(self.resource_dir / "../assets/ar-15/ar-15.obj")
-        self.scene_builder.load_model(path=ar15_path, position=(0.0, 5.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(2.0, 2.0, 2.0), material_indices=ar15_material_indices)
-#       self.scene_builder.load_model(path=ar15_path, position=(0.0, 5.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(2.0, 2.0, 2.0), material_indices=ar15_material_indices)
 
 
 
@@ -1132,6 +1055,7 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         #     print("ERROR: OIDN did not write to output array!")
 #       #     print("ERROR: OIDN did not write to output array!")
 
+        """
         # Apply ACES Tonemap
 #       # Apply ACES Tonemap
         a = 2.51
@@ -1146,6 +1070,45 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       e = 0.14
         output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
 #       output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
+        """
+
+        # Apply Khronos PBR Neutral Tonemap
+#       # Apply Khronos PBR Neutral Tonemap
+        start_compression = 0.8 - 0.04
+#       start_compression = 0.8 - 0.04
+        desaturation = 0.15
+#       desaturation = 0.15
+
+        x = np.min(output_arr, axis=-1, keepdims=True)
+#       x = np.min(output_arr, axis=-1, keepdims=True)
+        offset = np.where(x < 0.08, x - 6.25 * x * x, 0.04)
+#       offset = np.where(x < 0.08, x - 6.25 * x * x, 0.04)
+        output_arr = output_arr - offset
+#       output_arr = output_arr - offset
+
+        peak = np.max(output_arr, axis=-1, keepdims=True)
+#       peak = np.max(output_arr, axis=-1, keepdims=True)
+
+        d = 1.0 - start_compression
+#       d = 1.0 - start_compression
+        new_peak = 1.0 - d * d / (np.maximum(peak, 1e-6) + d - start_compression)
+#       new_peak = 1.0 - d * d / (np.maximum(peak, 1e-6) + d - start_compression)
+
+        # Mask for peaks that need compression
+#       # Mask for peaks that need compression
+        mask = peak >= start_compression
+#       mask = peak >= start_compression
+
+        output_arr = np.where(mask, output_arr * (new_peak / np.maximum(peak, 1e-6)), output_arr)
+#       output_arr = np.where(mask, output_arr * (new_peak / np.maximum(peak, 1e-6)), output_arr)
+
+        current_peak = np.where(mask, new_peak, peak)
+#       current_peak = np.where(mask, new_peak, peak)
+        g = 1.0 - 1.0 / (desaturation * (peak - current_peak) + 1.0)
+#       g = 1.0 - 1.0 / (desaturation * (peak - current_peak) + 1.0)
+        output_arr = output_arr * (1.0 - g) + current_peak * g
+#       output_arr = output_arr * (1.0 - g) + current_peak * g
+
         output_arr = np.clip(output_arr, 0.0, 1.0)
 #       output_arr = np.clip(output_arr, 0.0, 1.0)
 
@@ -1331,25 +1294,25 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         z: float = np.sin(time) * radius
 #       z: float = np.sin(time) * radius
 
-        point_lights = [
-#       point_lights = [
-            ( (x, 10.0, z), (500.0, 500.0, 500.0), 0.5 ),
-#           ( (x, 10.0, z), (500.0, 500.0, 500.0), 0.5 ),
-            ( (-x, 5.0, -z), (200.0, 50.0, 50.0), 0.5 ),
-#           ( (-x, 5.0, -z), (200.0, 50.0, 50.0), 0.5 ),
-            ( (0.0, 5.0, 0.0), (50.0, 50.0, 200.0), 1.0 ),
-#           ( (0.0, 5.0, 0.0), (50.0, 50.0, 200.0), 1.0 ),
+        point_lights: list[PointLight] = [
+#       point_lights: list[PointLight] = [
+            {"position": (x, 10.0, z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
+#           {"position": (x, 10.0, z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
+            {"position": (-x, 5.0, -z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
+#           {"position": (-x, 5.0, -z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
+            {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
+#           {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
         ]
 #       ]
 
         # Optimize by sorting lights by emission strength
 #       # Optimize by sorting lights by emission strength
-        def get_light_power(light: tuple[tuple[float, float, float], tuple[float, float, float], float]) -> float:
-#       def get_light_power(light: tuple[tuple[float, float, float], tuple[float, float, float], float]) -> float:
-            c = light[1]
-#           c = light[1]
-            r = light[2]
-#           r = light[2]
+        def get_light_power(light: PointLight) -> float:
+#       def get_light_power(light: PointLight) -> float:
+            c = light["color"]
+#           c = light["color"]
+            r = light["radius"]
+#           r = light["radius"]
             luminance = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 #           luminance = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
             return luminance * 4.0 * np.pi * r * r
@@ -1366,10 +1329,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           self.program_shading["uPointLightCount"] = len(point_lights)
             cumulative_prob = 0.0
 #           cumulative_prob = 0.0
-            for i, (pos, color, r) in enumerate(point_lights):
-#           for i, (pos, color, r) in enumerate(point_lights):
-                power = get_light_power((pos, color, r))
-#               power = get_light_power((pos, color, r))
+            for i, light in enumerate(point_lights):
+#           for i, light in enumerate(point_lights):
+                pos = light["position"]
+#               pos = light["position"]
+                color = light["color"]
+#               color = light["color"]
+                r = light["radius"]
+#               r = light["radius"]
+                power = get_light_power(light)
+#               power = get_light_power(light)
                 prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
 #               prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
                 cumulative_prob += prob

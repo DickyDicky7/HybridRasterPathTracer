@@ -108,3 +108,13 @@ class Material(typing.TypedDict):
 #   emissive: float
     texture_index_emissive: float
 #   texture_index_emissive: float
+
+class PointLight(typing.TypedDict):
+    # Defines the CPU-side structure for a Point Light.
+#   # Defines the CPU-side structure for a Point Light.
+    position: vec3f32
+#   position: vec3f32
+    color: vec3f32
+#   color: vec3f32
+    radius: float
+#   radius: float
