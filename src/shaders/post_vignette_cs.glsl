@@ -8,14 +8,21 @@
     layout(binding = 1, rgba32f) uniform image2D textureInput;
 //  layout(binding = 1, rgba32f) uniform image2D textureInput;
 
-    // Vignette intensity, smoothness, and color
-    // Vignette intensity, smoothness, and color
+    // Vignette Parameters: Dictates the core visual framing profile. The intensity scalar drives the darkening gradient, smoothness governs the geometric falloff transition from the center, and the color override allows for cinematic tinting of the attenuated border regions.
+    // Vignette Parameters: Dictates the core visual framing profile. The intensity scalar drives the darkening gradient, smoothness governs the geometric falloff transition from the center, and the color override allows for cinematic tinting of the attenuated border regions.
     uniform float uIntensity = 1.0;
 //  uniform float uIntensity = 1.0;
     uniform float uSmoothness = 0.5;
 //  uniform float uSmoothness = 0.5;
     uniform vec3 uColor = vec3(0.0);
 //  uniform vec3 uColor = vec3(0.0);
+
+    // Constants
+//  // Constants
+    const float VIGNETTE_START = 0.8;
+//  const float VIGNETTE_START = 0.8;
+    const float VIGNETTE_CURVE = 1.2;
+//  const float VIGNETTE_CURVE = 1.2;
 
     void main() {
 //  void main() {
@@ -36,27 +43,27 @@
         vec4 color = imageLoad(textureInput, coord);
 //      vec4 color = imageLoad(textureInput, coord);
 
-        // Enhance: aspect ratio correction for circular vignette
-        // Enhance: aspect ratio correction for circular vignette
+        // Aspect Ratio Normalization: Modifies the radial distance coordinate vector by scaling the horizontal axis inversely to the viewport resolution. This mathematically preserves a perfectly circular vignette gradient structure irrespective of the physical window or screen dimensions.
+        // Aspect Ratio Normalization: Modifies the radial distance coordinate vector by scaling the horizontal axis inversely to the viewport resolution. This mathematically preserves a perfectly circular vignette gradient structure irrespective of the physical window or screen dimensions.
         vec2 dir = uv - 0.5;
 //      vec2 dir = uv - 0.5;
         dir.x *= float(size.x) / float(size.y);
 //      dir.x *= float(size.x) / float(size.y);
 
-        // Calculate distance from center
-        // Calculate distance from center
+        // Distance Evaluation: Determines the Euclidean magnitude from the normalized screen center to the current fragment coordinate.
+        // Distance Evaluation: Determines the Euclidean magnitude from the normalized screen center to the current fragment coordinate.
         float dist = length(dir);
 //      float dist = length(dir);
 
-        // Enhance: smoothstep and subtle power curve for filmic vignette
-        // Enhance: smoothstep and subtle power curve for filmic vignette
-        float vignette = 1.0 - smoothstep(uSmoothness * 0.5, 0.8 + uSmoothness, dist * uIntensity);
-//      float vignette = 1.0 - smoothstep(uSmoothness * 0.5, 0.8 + uSmoothness, dist * uIntensity);
-        vignette = pow(vignette, 1.2);
-//      vignette = pow(vignette, 1.2);
+        // Filmic Attenuation Curve: Employs a non-linear smoothstep function to calculate the foundational vignette mask based on the spatial distance. A supplementary power curve is subsequently applied to sculpt a physically accurate light drop-off reminiscent of classic cinema lenses.
+        // Filmic Attenuation Curve: Employs a non-linear smoothstep function to calculate the foundational vignette mask based on the spatial distance. A supplementary power curve is subsequently applied to sculpt a physically accurate light drop-off reminiscent of classic cinema lenses.
+        float vignette = 1.0 - smoothstep(uSmoothness * 0.5, VIGNETTE_START + uSmoothness, dist * uIntensity);
+//      float vignette = 1.0 - smoothstep(uSmoothness * 0.5, VIGNETTE_START + uSmoothness, dist * uIntensity);
+        vignette = pow(vignette, VIGNETTE_CURVE);
+//      vignette = pow(vignette, VIGNETTE_CURVE);
 
-        // Enhance: Mix with vignette color instead of pure multiply
-        // Enhance: Mix with vignette color instead of pure multiply
+        // Color Blending Integration: Transitions smoothly between the custom vignette color value and the underlying rendered fragment color utilizing the calculated attenuation mask as a linear interpolant, avoiding the muddy results typical of rudimentary multiplicative darkening methods.
+        // Color Blending Integration: Transitions smoothly between the custom vignette color value and the underlying rendered fragment color utilizing the calculated attenuation mask as a linear interpolant, avoiding the muddy results typical of rudimentary multiplicative darkening methods.
         color.rgb = mix(uColor, color.rgb, vignette);
 //      color.rgb = mix(uColor, color.rgb, vignette);
 

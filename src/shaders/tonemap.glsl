@@ -23,8 +23,8 @@
     }
 //  }
 
-    // Khronos PBR Neutral Tone Mapper
-    // Khronos PBR Neutral Tone Mapper
+    // Khronos PBR Neutral Tone Mapper: An advanced curve that gracefully compresses high dynamic range energy into standard display parameters while meticulously preserving the perceived hue and saturation of extreme light sources, preventing the common "yellow shift" seen in Reinhard or basic ACES.
+    // Khronos PBR Neutral Tone Mapper: An advanced curve that gracefully compresses high dynamic range energy into standard display parameters while meticulously preserving the perceived hue and saturation of extreme light sources, preventing the common "yellow shift" seen in Reinhard or basic ACES.
     vec3 pbrNeutral(vec3 color) {
 //  vec3 pbrNeutral(vec3 color) {
         const float startCompression = 0.8 - 0.04;

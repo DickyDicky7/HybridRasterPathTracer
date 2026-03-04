@@ -32,20 +32,8 @@
 //  void main() {
         int globalTriIdx = uBaseTriangleIndexOffset + vInstanceID * uTriangleCountPerInstance + gl_PrimitiveID;
 //      int globalTriIdx = uBaseTriangleIndexOffset + vInstanceID * uTriangleCountPerInstance + gl_PrimitiveID;
-        // outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx) + 0.5); // .w stores index. +0.5 to avoid precision issues when rounding? 
-//      // outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx) + 0.5); // .w stores index. +0.5 to avoid precision issues when rounding? 
-        // Logic: if w > 0, it's a hit.
-//      // Logic: if w > 0, it's a hit.
-        // float(idx) could be 0. So float(idx + 1) is safer?
-//      // float(idx) could be 0. So float(idx + 1) is safer?
-        // But if I store float(idx), 0 is a valid index.
-//      // But if I store float(idx), 0 is a valid index.
-        // But usually background is 0.0.
-//      // But usually background is 0.0.
-        // If I use float(idx + 1), then 0.0 means miss.
-//      // If I use float(idx + 1), then 0.0 means miss.
-        // Let's use float(idx + 1).
-//      // Let's use float(idx + 1).
+        // Primitive Identity Packing: Stores the global triangle index in the 'w' component. We offset the index by +1.0 during encoding so that a 0.0 value definitively represents an empty background/sky-miss, eliminating potential ambiguity with index 0 while retrieving geometry hits later.
+//      // Primitive Identity Packing: Stores the global triangle index in the 'w' component. We offset the index by +1.0 during encoding so that a 0.0 value definitively represents an empty background/sky-miss, eliminating potential ambiguity with index 0 while retrieving geometry hits later.
         outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx + 1));
 //      outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx + 1));
 

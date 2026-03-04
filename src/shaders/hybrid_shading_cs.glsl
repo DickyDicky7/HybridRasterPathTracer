@@ -17,8 +17,8 @@
     layout(binding = 5, rgba32f) uniform image2D textureAccum;
 //  layout(binding = 5, rgba32f) uniform image2D textureAccum;
 
-    // BVH acceleration structure: Nodes store AABB bounds and hierarchy pointers (child index or face index)
-    // BVH acceleration structure: Nodes store AABB bounds and hierarchy pointers (child index or face index)
+    // Bounding Volume Hierarchy (BVH) acceleration structure: Nodes store Axis-Aligned Bounding Box (AABB) extents to rapidly cull empty space. Inner nodes store pointers to child nodes, while leaf nodes store offsets to primitive triangle data, enabling logarithmic time-complexity for ray intersection tests.
+    // Bounding Volume Hierarchy (BVH) acceleration structure: Nodes store Axis-Aligned Bounding Box (AABB) extents to rapidly cull empty space. Inner nodes store pointers to child nodes, while leaf nodes store offsets to primitive triangle data, enabling logarithmic time-complexity for ray intersection tests.
     struct Node {
 //  struct Node {
         vec4 min_left; // min.xyz, left_child_index (or -1.0 if leaf)
@@ -35,8 +35,8 @@
     };
 //  };
 
-    // Global Geometry Buffer: Flat array of vertex positions (3 floats per vertex, 9 floats per triangle)
-    // Global Geometry Buffer: Flat array of vertex positions (3 floats per vertex, 9 floats per triangle)
+    // Global Geometry Buffer: A contiguous, tightly-packed flat array of world-space vertex positions (3 floats per vertex, 9 floats per triangle). This linearly mapped buffer minimizes cache misses during the computationally heavy closest-hit and any-hit ray-triangle intersection routines.
+    // Global Geometry Buffer: A contiguous, tightly-packed flat array of world-space vertex positions (3 floats per vertex, 9 floats per triangle). This linearly mapped buffer minimizes cache misses during the computationally heavy closest-hit and any-hit ray-triangle intersection routines.
     layout(std430, binding = 7) buffer SceneTriangles {
 //  layout(std430, binding = 7) buffer SceneTriangles {
         float triangles[];
@@ -44,8 +44,8 @@
     };
 //  };
 
-    // Material Properties: Stores PBR parameters like Albedo, Roughness, Metallic, and Texture indices
-    // Material Properties: Stores PBR parameters like Albedo, Roughness, Metallic, and Texture indices
+    // Material Properties Buffer: Stores physically-based rendering (PBR) parameters including Base Color/Albedo, perceptual Roughness, Metallic masking, and Transmission coefficients. It also holds indexed pointers to bindless texture arrays for spatially varying material evaluations during shading.
+    // Material Properties Buffer: Stores physically-based rendering (PBR) parameters including Base Color/Albedo, perceptual Roughness, Metallic masking, and Transmission coefficients. It also holds indexed pointers to bindless texture arrays for spatially varying material evaluations during shading.
     struct Material {
 //  struct Material {
         vec4 albedo;       // r, g, b, padding
@@ -215,8 +215,46 @@
     const float INF = 1e30;
 //  const float INF = 1e30;
 
-    // Xorshift/Wang Hash based Pseudo-Random Number Generator for Monte Carlo integration
-    // Xorshift/Wang Hash based Pseudo-Random Number Generator for Monte Carlo integration
+    // Shading Tuning Constants
+//  // Shading Tuning Constants
+    const float HDRI_CLAMP = 20.0;
+//  const float HDRI_CLAMP = 20.0;
+    const float MIN_ROUGHNESS = 0.04;
+//  const float MIN_ROUGHNESS = 0.04;
+    const float NEE_PDF_EPSILON = 0.0001;
+//  const float NEE_PDF_EPSILON = 0.0001;
+    const float NEE_DIRECT_LIGHT_CLAMP = 50.0;
+//  const float NEE_DIRECT_LIGHT_CLAMP = 50.0;
+    const float RR_MIN_PROBABILITY = 0.05;
+//  const float RR_MIN_PROBABILITY = 0.05;
+    const float RR_MAX_PROBABILITY = 0.95;
+//  const float RR_MAX_PROBABILITY = 0.95;
+    const uint RR_MIN_BOUNCES = 4u;
+//  const uint RR_MIN_BOUNCES = 4u;
+    const float ACCUM_CLAMP = 20.0;
+//  const float ACCUM_CLAMP = 20.0;
+    const float F0_DEFAULT = 0.04;
+//  const float F0_DEFAULT = 0.04;
+    const float EPSILON_INTERSECT = 1.0e-4;
+//  const float EPSILON_INTERSECT = 1.0e-4;
+    const float EPSILON_OFFSET = 0.001;
+//  const float EPSILON_OFFSET = 0.001;
+    const float MISS_DISTANCE = 9999999.0;
+//  const float MISS_DISTANCE = 9999999.0;
+
+    // Hardcoded Math Constants
+//  // Hardcoded Math Constants
+    const float EPSILON_MATH = 0.0001;
+//  const float EPSILON_MATH = 0.0001;
+    const float EPSILON_DOT = 0.001;
+//  const float EPSILON_DOT = 0.001;
+    const float EPSILON_RAND = 0.999;
+//  const float EPSILON_RAND = 0.999;
+    const int MAX_BOUNCES = 32;
+//  const int MAX_BOUNCES = 32;
+
+    // Xorshift/Wang Hash Pseudo-Random Number Generator (PRNG): Provides fast, statistically robust uniform random number sequences essential for Monte Carlo integration. This ensures unbiased stochastic sampling across hemisphere distributions, Russian Roulette termination, and Next Event Estimation.
+    // Xorshift/Wang Hash Pseudo-Random Number Generator (PRNG): Provides fast, statistically robust uniform random number sequences essential for Monte Carlo integration. This ensures unbiased stochastic sampling across hemisphere distributions, Russian Roulette termination, and Next Event Estimation.
     uint seed;
 //  uint seed;
     uint wang_hash(uint seed) {
@@ -245,8 +283,12 @@
 //  }
     void initRNG(vec2 pixel) {
 //  void initRNG(vec2 pixel) {
-        seed = uint(pixel.x * 1973 + pixel.y * 9277 + uFrameCount * 26699) | 1u;
-//      seed = uint(pixel.x * 1973 + pixel.y * 9277 + uFrameCount * 26699) | 1u;
+        // Use float coordinates and wang_hash for better random distribution
+//      // Use float coordinates and wang_hash for better random distribution
+        seed = uint(pixel.x * 1973.0 + pixel.y * 9277.0 + float(uFrameCount) * 26699.0);
+//      seed = uint(pixel.x * 1973.0 + pixel.y * 9277.0 + float(uFrameCount) * 26699.0);
+        seed = wang_hash(seed);
+//      seed = wang_hash(seed);
     }
 //  }
 
@@ -267,8 +309,8 @@
     }
 //  }
 
-    // Environment Lighting: Samples the HDRI map using equirectangular projection or uses a procedural sky
-    // Environment Lighting: Samples the HDRI map using equirectangular projection or uses a procedural sky
+    // Environment Lighting: Evaluates infinite background illumination by either sampling a High Dynamic Range (HDR) environment map via equirectangular (latitude-longitude) projection, or by falling back to a computationally derived procedural atmospheric scattering sky model.
+    // Environment Lighting: Evaluates infinite background illumination by either sampling a High Dynamic Range (HDR) environment map via equirectangular (latitude-longitude) projection, or by falling back to a computationally derived procedural atmospheric scattering sky model.
     vec3 getSkyColor(vec3 dir) {
 //  vec3 getSkyColor(vec3 dir) {
         if (uUseHdri) {
@@ -285,8 +327,8 @@
 //          float v = clamp(theta / PI, 0.0, 1.0);
             vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
 //          vec3 hdriColor = texture(uHdriTexture, vec2(u, v)).rgb;
-            return min(hdriColor, vec3(20.0));
-//          return min(hdriColor, vec3(20.0));
+            return min(hdriColor, vec3(HDRI_CLAMP));
+//          return min(hdriColor, vec3(HDRI_CLAMP));
         }
 //      }
         /*
@@ -313,16 +355,18 @@
 //      if (dir.y < 0.0) col = mix(vec3(0.9, 0.95, 1.0), vec3(0.98, 0.99, 1.0), pow(abs(dir.y), 0.5));
         // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
 //      // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
-        vec3 sunDir = normalize(vec3(0.5, 0.4, -0.6));
-//      vec3 sunDir = normalize(vec3(0.5, 0.4, -0.6));
+        // Enhance sun intensity and direction for a more dramatic sky
+//      // Enhance sun intensity and direction for a more dramatic sky
+        vec3 sunDir = normalize(vec3(0.0, 0.5, 0.5));
+//      vec3 sunDir = normalize(vec3(0.0, 0.5, 0.5));
         float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
 //      float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
-        col += 0.4 * vec3(1.0, 0.6, 0.3) * pow(sun, 8.0); // Wide soft orange glow
-//      col += 0.4 * vec3(1.0, 0.6, 0.3) * pow(sun, 8.0); // Wide soft orange glow
-        col += 0.3 * vec3(1.0, 0.8, 0.5) * pow(sun, 64.0); // Bright golden core
-//      col += 0.3 * vec3(1.0, 0.8, 0.5) * pow(sun, 64.0); // Bright golden core
-        col += 0.5 * vec3(1.0, 1.0, 1.0) * pow(sun, 512.0); // Intense white disk
-//      col += 0.5 * vec3(1.0, 1.0, 1.0) * pow(sun, 512.0); // Intense white disk
+        col += 0.4 * vec3(10.0, 10.6, 10.3) * pow(sun, 8.0); // Wide soft orange glow
+//      col += 0.4 * vec3(10.0, 10.6, 10.3) * pow(sun, 8.0); // Wide soft orange glow
+        col += 0.3 * vec3(10.0, 10.8, 10.5) * pow(sun, 64.0); // Bright golden core
+//      col += 0.3 * vec3(10.0, 10.8, 10.5) * pow(sun, 64.0); // Bright golden core
+        col += 0.5 * vec3(10.0, 10.0, 10.0) * pow(sun, 512.0); // Intense white disk
+//      col += 0.5 * vec3(10.0, 10.0, 10.0) * pow(sun, 512.0); // Intense white disk
         return col;
 //      return col;
     }
@@ -352,8 +396,8 @@
     float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
 //  float minVec3(vec3 v) { return min(v.x, min(v.y, v.z)); }
 
-    // Ray-AABB Intersection: Slab method implementation for axis-aligned bounding box testing
-//  // Ray-AABB Intersection: Slab method implementation for axis-aligned bounding box testing
+    // Ray-AABB Intersection (Slab Method): An optimized branchless algorithm testing ray intersections against the 3 pairs of parallel planes defining an AABB. This robust implementation quickly culls rays that completely miss the bounding volume limits during BVH traversal.
+//  // Ray-AABB Intersection (Slab Method): An optimized branchless algorithm testing ray intersections against the 3 pairs of parallel planes defining an AABB. This robust implementation quickly culls rays that completely miss the bounding volume limits during BVH traversal.
     bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
 //  bool intersectAABB_Interval(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
         vec3 t1 = (boxMin - ray.origin) * invDir;
@@ -380,8 +424,8 @@
     }
 //  }
 
-    // Distance estimation to AABB: Used for front-to-back sorting during BVH traversal
-//  // Distance estimation to AABB: Used for front-to-back sorting during BVH traversal
+    // Distance Estimation to AABB: Computes the precise parametric distance to the entry point of a bounding box. This enables crucial front-to-back heuristic sorting of BVH child nodes, drastically reducing traversal steps by prioritizing the closest spatial regions.
+//  // Distance Estimation to AABB: Computes the precise parametric distance to the entry point of a bounding box. This enables crucial front-to-back heuristic sorting of BVH child nodes, drastically reducing traversal steps by prioritizing the closest spatial regions.
     float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
 //  float calculateDistanceToAABB3D(Ray ray, vec3 invDir, Interval rayTravelDistanceLimit, vec3 boxMin, vec3 boxMax) {
         vec3 t1 = (boxMin - ray.origin) * invDir;
@@ -405,13 +449,13 @@
 //          return distanceToBoxMin;
         }
 //      }
-        return 9999999.0;
-//      return 9999999.0;
+        return MISS_DISTANCE;
+//      return MISS_DISTANCE;
     }
 //  }
 
-    // Ray-Triangle Fast Intersection (Any-Hit): Optimized for shadow rays and occlusion testing
-//  // Ray-Triangle Fast Intersection (Any-Hit): Optimized for shadow rays and occlusion testing
+    // Ray-Triangle Fast Intersection (Any-Hit): A specialized Möller-Trumbore intersection algorithm optimized for boolean occlusion queries. It terminates immediately upon finding any valid surface within the distance limits, making it highly efficient for evaluating binary shadow rays in Next Event Estimation.
+//  // Ray-Triangle Fast Intersection (Any-Hit): A specialized Möller-Trumbore intersection algorithm optimized for boolean occlusion queries. It terminates immediately upon finding any valid surface within the distance limits, making it highly efficient for evaluating binary shadow rays in Next Event Estimation.
     bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
 //  bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
         int offset = triangleIndex * 9;
@@ -423,8 +467,8 @@
         vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 //      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 
-        const float EPSILON = 1.0e-4;
-//      const float EPSILON = 1.0e-4;
+        const float EPSILON = EPSILON_INTERSECT;
+//      const float EPSILON = EPSILON_INTERSECT;
 
         vec3 e1 = v1 - v0;
 //      vec3 e1 = v1 - v0;
@@ -468,8 +512,8 @@
     }
 //  }
 
-    // Ray-Triangle Detailed Intersection (Closest-Hit): Calculates barycentrics and interpolates attributes (UV, Normal, Tangent)
-//  // Ray-Triangle Detailed Intersection (Closest-Hit): Calculates barycentrics and interpolates attributes (UV, Normal, Tangent)
+    // Ray-Triangle Detailed Intersection (Closest-Hit): A comprehensive Möller-Trumbore implementation that computes barycentric coordinates upon a successful hit. It leverages these coordinates to seamlessly interpolate per-vertex attributes such as UVs, normals, and tangents for high-fidelity shading.
+//  // Ray-Triangle Detailed Intersection (Closest-Hit): A comprehensive Möller-Trumbore implementation that computes barycentric coordinates upon a successful hit. It leverages these coordinates to seamlessly interpolate per-vertex attributes such as UVs, normals, and tangents for high-fidelity shading.
     RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
 //  RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
         RayHitResult result;
@@ -493,8 +537,8 @@
         vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 //      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
 
-        const float EPSILON = 1.0e-4;
-//      const float EPSILON = 1.0e-4;
+        const float EPSILON = EPSILON_INTERSECT;
+//      const float EPSILON = EPSILON_INTERSECT;
         vec3 e1 = v1 - v0;
 //      vec3 e1 = v1 - v0;
         vec3 e2 = v2 - v0;
@@ -592,8 +636,8 @@
     }
 //  }
 
-    // BVH Occlusion Query: Rapidly determined if any geometry exists between two points
-//  // BVH Occlusion Query: Rapidly determined if any geometry exists between two points
+    // BVH Occlusion Query (Any-Hit Traversal): Rapidly traverses the hierarchy to determine if any unoccluded geometry exists between two points. Designed specifically for shadow rays, it aborts traversal the moment a blocking primitive is found, saving unnecessary distance calculations.
+//  // BVH Occlusion Query (Any-Hit Traversal): Rapidly traverses the hierarchy to determine if any unoccluded geometry exists between two points. Designed specifically for shadow rays, it aborts traversal the moment a blocking primitive is found, saving unnecessary distance calculations.
     bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
 //  bool traverseBVHAnyHit(Ray ray, Interval rayTravelDistanceLimit) {
         vec3 invDir = 1.0 / ray.direction;
@@ -656,21 +700,21 @@
             float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
 //          float distR = calculateDistanceToAABB3D(ray, invDir, rayTravelDistanceLimit, childR.min_left.xyz, childR.max_right.xyz);
 
-            if (distL == 9999999.0 && distR == 9999999.0) continue;
-//          if (distL == 9999999.0 && distR == 9999999.0) continue;
+            if (distL == MISS_DISTANCE && distR == MISS_DISTANCE) continue;
+//          if (distL == MISS_DISTANCE && distR == MISS_DISTANCE) continue;
 
             if (distL < distR) {
 //          if (distL < distR) {
-                if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
-//              if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
-                if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
-//              if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
+                if (distR < MISS_DISTANCE) stack[stackPtr++] = childIndexR;
+//              if (distR < MISS_DISTANCE) stack[stackPtr++] = childIndexR;
+                if (distL < MISS_DISTANCE) stack[stackPtr++] = childIndexL;
+//              if (distL < MISS_DISTANCE) stack[stackPtr++] = childIndexL;
             } else {
 //          } else {
-                if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
-//              if (distL < 9999999.0) stack[stackPtr++] = childIndexL;
-                if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
-//              if (distR < 9999999.0) stack[stackPtr++] = childIndexR;
+                if (distL < MISS_DISTANCE) stack[stackPtr++] = childIndexL;
+//              if (distL < MISS_DISTANCE) stack[stackPtr++] = childIndexL;
+                if (distR < MISS_DISTANCE) stack[stackPtr++] = childIndexR;
+//              if (distR < MISS_DISTANCE) stack[stackPtr++] = childIndexR;
             }
 //          }
         }
@@ -680,8 +724,8 @@
     }
 //  }
 
-    // BVH Nearest Hit Query: Traverses the hierarchy to find the closest intersection point
-//  // BVH Nearest Hit Query: Traverses the hierarchy to find the closest intersection point
+    // BVH Nearest Hit Query (Closest-Hit Traversal): Rigorously searches the bounding volume hierarchy to find the single closest intersection point along a ray's path. It continuously narrows the valid depth interval as closer hits are discovered, discarding occluded geometry behind the nearest surface.
+//  // BVH Nearest Hit Query (Closest-Hit Traversal): Rigorously searches the bounding volume hierarchy to find the single closest intersection point along a ray's path. It continuously narrows the valid depth interval as closer hits are discovered, discarding occluded geometry behind the nearest surface.
     RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
 //  RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
         RayHitResult finalResult;
@@ -755,8 +799,8 @@
             float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
 //          float distR = calculateDistanceToAABB3D(ray, invDir, currentLimit, childR.min_left.xyz, childR.max_right.xyz);
 
-            if (distL == 9999999.0 && distR == 9999999.0) continue;
-//          if (distL == 9999999.0 && distR == 9999999.0) continue;
+            if (distL == MISS_DISTANCE && distR == MISS_DISTANCE) continue;
+//          if (distL == MISS_DISTANCE && distR == MISS_DISTANCE) continue;
 
             if (distL < distR) {
 //          if (distL < distR) {
@@ -780,8 +824,8 @@
     }
 //  }
 
-    // Disney Principled BSDF component functions (Fresnel, GGX Microfacet Distribution, etc.)
-    // Disney Principled BSDF component functions (Fresnel, GGX Microfacet Distribution, etc.)
+    // Principled BSDF Components: A collection of physically-based Bidirectional Scattering Distribution Function routines. Includes Schlick's Fresnel approximation for view-dependent reflectivity, and the GGX (Trowbridge-Reitz) microfacet distribution model for realistic rough surface scattering.
+    // Principled BSDF Components: A collection of physically-based Bidirectional Scattering Distribution Function routines. Includes Schlick's Fresnel approximation for view-dependent reflectivity, and the GGX (Trowbridge-Reitz) microfacet distribution model for realistic rough surface scattering.
     vec3 schlickFresnel(float cosine, vec3 f0) {
 //  vec3 schlickFresnel(float cosine, vec3 f0) {
         float oneMinusCos = 1.0 - cosine;
@@ -801,8 +845,10 @@
 //  vec3 sampleGGX(vec3 normal, float roughness) {
         float random1 = rand();
 //      float random1 = rand();
-        float random2 = rand();
-//      float random2 = rand();
+        // Clamp random2 to prevent NaN/Inf in GGX sampling
+//      // Clamp random2 to prevent NaN/Inf in GGX sampling
+        float random2 = clamp(rand(), 0.0, EPSILON_RAND);
+//      float random2 = clamp(rand(), 0.0, EPSILON_RAND);
 
         float term = roughness * roughness;
 //      float term = roughness * roughness;
@@ -822,8 +868,8 @@
 
         // Tangent space basis construction (orthonormal basis)
 //      // Tangent space basis construction (orthonormal basis)
-        vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-//      vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+//      vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
         vec3 tangent = normalize(cross(up, normal));
 //      vec3 tangent = normalize(cross(up, normal));
         vec3 bitangent = cross(normal, tangent);
@@ -854,8 +900,8 @@
     }
 //  }
 
-    // BRDF Evaluation: Calculates the combined specular and diffuse response for the shading point
-//  // BRDF Evaluation: Calculates the combined specular and diffuse response for the shading point
+    // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
+//  // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
     vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
 //  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
         vec3 N = normal;
@@ -875,8 +921,8 @@
         if (NdotL <= 0.0 || NdotV <= 0.0) return vec3(0.0);
 //      if (NdotL <= 0.0 || NdotV <= 0.0) return vec3(0.0);
 
-        vec3 F0 = mix(vec3(0.04), albedo, metallic);
-//      vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
+//      vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
         float HdotV = max(dot(H, V), 0.0);
 //      float HdotV = max(dot(H, V), 0.0);
         vec3 F = schlickFresnel(HdotV, F0);
@@ -906,15 +952,15 @@
 
         float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
 //      float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-        float G1 = NdotV / (NdotV * (1.0 - k) + k);
-//      float G1 = NdotV / (NdotV * (1.0 - k) + k);
-        float G2 = NdotL / (NdotL * (1.0 - k) + k);
-//      float G2 = NdotL / (NdotL * (1.0 - k) + k);
-        float G = G1 * G2;
-//      float G = G1 * G2;
+        // Optimize G term calculation by factoring out NdotV and NdotL
+//      // Optimize G term calculation by factoring out NdotV and NdotL
+        float NdotV_G = NdotV * (1.0 - k) + k;
+//      float NdotV_G = NdotV * (1.0 - k) + k;
+        float NdotL_G = NdotL * (1.0 - k) + k;
+//      float NdotL_G = NdotL * (1.0 - k) + k;
 
-        vec3 specular = (D * F * G) / (4.0 * NdotV * NdotL + 0.001);
-//      vec3 specular = (D * F * G) / (4.0 * NdotV * NdotL + 0.001);
+        vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
+//      vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
 
         return diffuse + specular;
 //      return diffuse + specular;
@@ -944,8 +990,8 @@
 
         float alpha = roughness * roughness;
 //      float alpha = roughness * roughness;
-        float alpha2 = max(alpha * alpha, 0.00001);
-//      float alpha2 = max(alpha * alpha, 0.00001);
+        float alpha2 = max(alpha * alpha, EPSILON_MATH);
+//      float alpha2 = max(alpha * alpha, EPSILON_MATH);
         float NdotH = max(dot(N, H), 0.0);
 //      float NdotH = max(dot(N, H), 0.0);
         float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
@@ -954,11 +1000,11 @@
 //      float D = alpha2 / (PI * denom * denom);
         float VdotH = max(dot(V, H), 0.0);
 //      float VdotH = max(dot(V, H), 0.0);
-        float pdfSpecular = (D * NdotH) / (4.0 * VdotH + 0.001);
-//      float pdfSpecular = (D * NdotH) / (4.0 * VdotH + 0.001);
+        float pdfSpecular = (D * NdotH) / (4.0 * VdotH + EPSILON_DOT);
+//      float pdfSpecular = (D * NdotH) / (4.0 * VdotH + EPSILON_DOT);
 
-        vec3 F0 = mix(vec3(0.04), albedo, metallic);
-//      vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
+//      vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
         vec3 F = schlickFresnel(VdotH, F0);
 //      vec3 F = schlickFresnel(VdotH, F0);
         float fresnelProb = (F.r + F.g + F.b) / 3.0;
@@ -971,8 +1017,8 @@
     }
 //  }
 
-    // Importance Sampling: Scatters ray based on material properties using GGX distribution for specular and Cosine for diffuse
-//  // Importance Sampling: Scatters ray based on material properties using GGX distribution for specular and Cosine for diffuse
+    // Stochastic Importance Sampling: Generates optimal secondary ray directions guided by the material's underlying BSDF probability density functions (PDF). Specular paths follow a GGX-mapped distribution, while diffuse paths follow a cosine-weighted hemisphere, minimizing Monte Carlo variance.
+//  // Stochastic Importance Sampling: Generates optimal secondary ray directions guided by the material's underlying BSDF probability density functions (PDF). Specular paths follow a GGX-mapped distribution, while diffuse paths follow a cosine-weighted hemisphere, minimizing Monte Carlo variance.
     MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
 //  MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
         MaterialLightScatteringResult materialLightScatteringResult;
@@ -1033,6 +1079,11 @@
 //          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
         }
 //      }
+
+        // Clamp roughness to prevent division by zero in specular calculations
+//      // Clamp roughness to prevent division by zero in specular calculations
+        roughness = max(roughness, MIN_ROUGHNESS);
+//      roughness = max(roughness, MIN_ROUGHNESS);
 
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
@@ -1098,13 +1149,24 @@
 
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
-        vec3 f0 = mix(vec3(0.04), albedo, metallic);
-//      vec3 f0 = mix(vec3(0.04), albedo, metallic);
+        vec3 f0 = mix(vec3(F0_DEFAULT), albedo, metallic);
+//      vec3 f0 = mix(vec3(F0_DEFAULT), albedo, metallic);
+
+        // Early exit for back-facing rays to prevent shading artifacts
+//      // Early exit for back-facing rays to prevent shading artifacts
+        if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
+//      if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
+            materialLightScatteringResult.isScattered = false;
+//          materialLightScatteringResult.isScattered = false;
+            return materialLightScatteringResult;
+//          return materialLightScatteringResult;
+        }
+//      }
 
         // Schlick's fresnel approximation at incident angle
 //      // Schlick's fresnel approximation at incident angle
-        float cosTheta = min(dot(-incomingRay.direction, shadingNormal), 1.0);
-//      float cosTheta = min(dot(-incomingRay.direction, shadingNormal), 1.0);
+        float cosTheta = clamp(dot(-incomingRay.direction, shadingNormal), 0.0, 1.0);
+//      float cosTheta = clamp(dot(-incomingRay.direction, shadingNormal), 0.0, 1.0);
         vec3 fresnel = schlickFresnel(cosTheta, f0);
 //      vec3 fresnel = schlickFresnel(cosTheta, f0);
         // Use average fresnel for importance sampling probability
@@ -1117,8 +1179,10 @@
 
         // --- PATH A: METALLIC REFLECTION ---
 //      // --- PATH A: METALLIC REFLECTION ---
-        float specularProbability = mix(fresnelProb, 1.0, metallic);
-//      float specularProbability = mix(fresnelProb, 1.0, metallic);
+        // Clamp specular probability to minimum 15% to eliminate dielectric fireflies caused by extremely low 1/PDF divisions
+//      // Clamp specular probability to minimum 15% to eliminate dielectric fireflies caused by extremely low 1/PDF divisions
+        float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
+//      float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
 
         if (randomChoice < specularProbability) {
 //      if (randomChoice < specularProbability) {
@@ -1135,26 +1199,26 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
 //              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                float NdotV = max(dot(shadingNormal, -incomingRay.direction), 0.001);
-//              float NdotV = max(dot(shadingNormal, -incomingRay.direction), 0.001);
-                float NdotH = max(dot(shadingNormal, microfacetNormal), 0.001);
-//              float NdotH = max(dot(shadingNormal, microfacetNormal), 0.001);
-                float VdotH = max(dot(-incomingRay.direction, microfacetNormal), 0.001);
-//              float VdotH = max(dot(-incomingRay.direction, microfacetNormal), 0.001);
-                float NdotL = max(dot(shadingNormal, specularReflectedDirection), 0.001);
-//              float NdotL = max(dot(shadingNormal, specularReflectedDirection), 0.001);
+                float NdotV = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
+//              float NdotV = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
+                float NdotH = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
+//              float NdotH = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
+                float VdotH = max(dot(-incomingRay.direction, microfacetNormal), EPSILON_DOT);
+//              float VdotH = max(dot(-incomingRay.direction, microfacetNormal), EPSILON_DOT);
+                float NdotL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
+//              float NdotL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
                 vec3 F = schlickFresnel(VdotH, f0);
 //              vec3 F = schlickFresnel(VdotH, f0);
                 float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
 //              float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-                float G1 = NdotV / (NdotV * (1.0 - k) + k);
-//              float G1 = NdotV / (NdotV * (1.0 - k) + k);
-                float G2 = NdotL / (NdotL * (1.0 - k) + k);
-//              float G2 = NdotL / (NdotL * (1.0 - k) + k);
-                float G = G1 * G2;
-//              float G = G1 * G2;
-                materialLightScatteringResult.attenuation = (F * G * VdotH) / ((NdotV * NdotH + 0.001) * specularProbability);
-//              materialLightScatteringResult.attenuation = (F * G * VdotH) / ((NdotV * NdotH + 0.001) * specularProbability);
+                // Optimize G term calculation by factoring out NdotV and NdotL
+//              // Optimize G term calculation by factoring out NdotV and NdotL
+                float NdotV_G = NdotV * (1.0 - k) + k;
+//              float NdotV_G = NdotV * (1.0 - k) + k;
+                float NdotL_G = NdotL * (1.0 - k) + k;
+//              float NdotL_G = NdotL * (1.0 - k) + k;
+                materialLightScatteringResult.attenuation = (F * VdotH * NdotL) / (NdotH * NdotV_G * NdotL_G * specularProbability + EPSILON_MATH);
+//              materialLightScatteringResult.attenuation = (F * VdotH * NdotL) / (NdotH * NdotV_G * NdotL_G * specularProbability + EPSILON_MATH);
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = roughness < 0.05;
@@ -1296,8 +1360,8 @@
 //          if (h > 0.0) {
                 float d = -b - sqrt(h);
 //              float d = -b - sqrt(h);
-                if (d > 0.001 && d < hit.dist) {
-//              if (d > 0.001 && d < hit.dist) {
+                if (d > EPSILON_OFFSET && d < hit.dist) {
+//              if (d > EPSILON_OFFSET && d < hit.dist) {
                     hit.isHitted = true;
 //                  hit.isHitted = true;
                     hit.dist = d;
@@ -1339,8 +1403,8 @@
         vec3 attenuation = vec3(1.0);
 //      vec3 attenuation = vec3(1.0);
 
-        // Primary Ray Initialization: Calculates direction from camera to jittered pixel samples
-//      // Primary Ray Initialization: Calculates direction from camera to jittered pixel samples
+        // Primary Ray Initialization: Computes the initial world-space ray vector projecting from the virtual camera origin through the respective screen-space pixel coordinate. Applies sub-pixel jittering matrices for spatio-temporal anti-aliasing (TAA) and smoother sampling convergence.
+//      // Primary Ray Initialization: Computes the initial world-space ray vector projecting from the virtual camera origin through the respective screen-space pixel coordinate. Applies sub-pixel jittering matrices for spatio-temporal anti-aliasing (TAA) and smoother sampling convergence.
         vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
 //      vec3 pixelSampleCenter = uPixel00Coordinates + uPixelDeltaU * (float(pixelCoordinates.x) + uJitter.x) + uPixelDeltaV * (float(pixelCoordinates.y) + uJitter.y);
 
@@ -1351,13 +1415,17 @@
         currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
 //      currentRay.direction = normalize(pixelSampleCenter - uCameraGlobalPosition);
 
-        int maxDepth = 32;
-//      int maxDepth = 32;
+        int maxDepth = MAX_BOUNCES;
+//      int maxDepth = MAX_BOUNCES;
 
         float lastPdfW = 1.0;
 //      float lastPdfW = 1.0;
         bool lastWasDelta = true;
 //      bool lastWasDelta = true;
+        // Tracker for roughness annealing to mitigate Specular-Diffuse-Specular (SDS) variance explosions
+//      // Tracker for roughness annealing to mitigate Specular-Diffuse-Specular (SDS) variance explosions
+        float pathRoughness = 0.0;
+//      float pathRoughness = 0.0;
 
         for (int depth = 0; depth < maxDepth; depth++) {
 //      for (int depth = 0; depth < maxDepth; depth++) {
@@ -1405,8 +1473,8 @@
 //          } else {
                 Interval hitInterval;
 //              Interval hitInterval;
-                hitInterval.min = 0.001;
-//              hitInterval.min = 0.001;
+                hitInterval.min = EPSILON_OFFSET;
+//              hitInterval.min = EPSILON_OFFSET;
                 hitInterval.max = INF;
 //              hitInterval.max = INF;
 
@@ -1483,8 +1551,10 @@
 //                  float weightBrdf = 1.0;
                     if (pdfLightW > 0.0) {
 //                  if (pdfLightW > 0.0) {
-                        weightBrdf = lastPdfW / (lastPdfW + pdfLightW);
-//                      weightBrdf = lastPdfW / (lastPdfW + pdfLightW);
+                        // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightBrdf
+//                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightBrdf
+                        weightBrdf = (lastPdfW * lastPdfW) / max(lastPdfW * lastPdfW + pdfLightW * pdfLightW, 1e-8);
+//                      weightBrdf = (lastPdfW * lastPdfW) / max(lastPdfW * lastPdfW + pdfLightW * pdfLightW, 1e-8);
                     }
 //                  }
 
@@ -1512,6 +1582,17 @@
 
             Material material = materials[rayHitResult.materialIndex];
 //          Material material = materials[rayHitResult.materialIndex];
+
+            // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
+//          // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
+            if (depth > 0) {
+//          if (depth > 0) {
+                material.roughness = max(material.roughness, pathRoughness);
+//              material.roughness = max(material.roughness, pathRoughness);
+            }
+//          }
+            pathRoughness = max(pathRoughness, material.roughness);
+//          pathRoughness = max(pathRoughness, material.roughness);
 
             MaterialLightScatteringResult scatterResult = scatterPrincipled(currentRay, rayHitResult, material);
 //          MaterialLightScatteringResult scatterResult = scatterPrincipled(currentRay, rayHitResult, material);
@@ -1553,6 +1634,10 @@
 //              vec3 shadowDir = sampledPoint - rayHitResult.at;
                 float distLight = length(shadowDir);
 //              float distLight = length(shadowDir);
+                // Clamped distLight to slightly above the light's radius to prevent division-by-zero singularities
+//              // Clamped distLight to slightly above the light's radius to prevent division-by-zero singularities
+                distLight = max(distLight, r + 0.05);
+//              distLight = max(distLight, r + 0.05);
                 shadowDir = normalize(shadowDir);
 //              shadowDir = normalize(shadowDir);
 
@@ -1560,24 +1645,26 @@
 //              float cosTheta = max(0.0, dot(scatterResult.shadingNormal, shadowDir));
                 vec3 lightNormal = normalize(sampledPoint - lightPos);
 //              vec3 lightNormal = normalize(sampledPoint - lightPos);
-                float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
-//              float cosThetaLight = max(0.0, dot(lightNormal, -shadowDir));
+                // Clamped cosThetaLight to 0.01 to prevent division-by-zero singularities
+//              // Clamped cosThetaLight to 0.01 to prevent division-by-zero singularities
+                float cosThetaLight = max(0.01, dot(lightNormal, -shadowDir));
+//              float cosThetaLight = max(0.01, dot(lightNormal, -shadowDir));
 
                 if (cosTheta > 0.0 && cosThetaLight > 0.0) {
 //              if (cosTheta > 0.0 && cosThetaLight > 0.0) {
                     Ray shadowRay;
 //                  Ray shadowRay;
-                    shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
-//                  shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * 0.001;
+                    shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * EPSILON_OFFSET;
+//                  shadowRay.origin = rayHitResult.at + rayHitResult.hittedSideNormal * EPSILON_OFFSET;
                     shadowRay.direction = shadowDir;
 //                  shadowRay.direction = shadowDir;
 
                     Interval shadowInterval;
 //                  Interval shadowInterval;
-                    shadowInterval.min = 0.001;
-//                  shadowInterval.min = 0.001;
-                    shadowInterval.max = distLight - 0.001;
-//                  shadowInterval.max = distLight - 0.001;
+                    shadowInterval.min = EPSILON_OFFSET;
+//                  shadowInterval.min = EPSILON_OFFSET;
+                    shadowInterval.max = distLight - EPSILON_OFFSET;
+//                  shadowInterval.max = distLight - EPSILON_OFFSET;
 
                     if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
 //                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
@@ -1591,16 +1678,22 @@
                         float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 //                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 
-                        float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
-//                      float weightNee = pdfLightW / (pdfLightW + pdfBrdfW);
+                        // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
+//                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
+                        float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
+//                      float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
 
                         vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 //                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
 
                         // Radiance emitted by the point light's surface
 //                      // Radiance emitted by the point light's surface
-                        vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / pdfLightW;
-//                      vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / pdfLightW;
+                        vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / max(pdfLightW, NEE_PDF_EPSILON);
+//                      vec3 directLight = uPointLights[lightIdx].color * bsdf * cosTheta / max(pdfLightW, NEE_PDF_EPSILON);
+                        // Clamp direct light to prevent fireflies from extreme NEE contributions
+//                      // Clamp direct light to prevent fireflies from extreme NEE contributions
+                        directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
+//                      directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
                         accumulatedColor += attenuation * directLight * weightNee;
 //                      accumulatedColor += attenuation * directLight * weightNee;
                     }
@@ -1622,12 +1715,14 @@
 
             // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
 //          // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
-            uint minBouncesForRR = 4u;
-//          uint minBouncesForRR = 4u;
+            uint minBouncesForRR = RR_MIN_BOUNCES;
+//          uint minBouncesForRR = RR_MIN_BOUNCES;
             if (depth >= minBouncesForRR) {
 //          if (depth >= minBouncesForRR) {
-                float p = maxVec3(attenuation);
-//              float p = maxVec3(attenuation);
+                // Clamp probability to avoid extreme weights and premature termination
+//              // Clamp probability to avoid extreme weights and premature termination
+                float p = clamp(maxVec3(attenuation), RR_MIN_PROBABILITY, RR_MAX_PROBABILITY);
+//              float p = clamp(maxVec3(attenuation), RR_MIN_PROBABILITY, RR_MAX_PROBABILITY);
                 if (rand() > p) break;
 //              if (rand() > p) break;
                 attenuation *= 1.0 / p;
@@ -1644,8 +1739,20 @@
         }
 //      }
 
-        // Temporal Accumulation: Blends current frame with history for progressive refinement
-//      // Temporal Accumulation: Blends current frame with history for progressive refinement
+        accumulatedColor = min(accumulatedColor, vec3(ACCUM_CLAMP));
+//      accumulatedColor = min(accumulatedColor, vec3(ACCUM_CLAMP));
+
+        // Prevent NaN propagation in the accumulated frame buffer
+//      // Prevent NaN propagation in the accumulated frame buffer
+        if (isnan(accumulatedColor.r) || isnan(accumulatedColor.g) || isnan(accumulatedColor.b)) {
+//      if (isnan(accumulatedColor.r) || isnan(accumulatedColor.g) || isnan(accumulatedColor.b)) {
+            accumulatedColor = vec3(0.0);
+//          accumulatedColor = vec3(0.0);
+        }
+//      }
+
+        // Temporal Reprojection Accumulation: Blends the stochastically sampled noisy irradiance of the current frame into the persistent history buffer. This progressive refinement algorithm geometrically decreases variance over consecutive stationary frames to synthesize a pristine, converged image.
+//      // Temporal Reprojection Accumulation: Blends the stochastically sampled noisy irradiance of the current frame into the persistent history buffer. This progressive refinement algorithm geometrically decreases variance over consecutive stationary frames to synthesize a pristine, converged image.
         vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
 //      vec4 prevAccum = imageLoad(textureAccum, pixelCoordinates);
         vec3 history = prevAccum.rgb;

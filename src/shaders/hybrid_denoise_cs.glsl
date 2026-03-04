@@ -14,8 +14,8 @@
     layout(binding = 5, rgba32f) uniform image2D textureInput;
 //  layout(binding = 5, rgba32f) uniform image2D textureInput;
 
-    // À-Trous Filter Configuration: Controls kernel radius and spatial/geometric edge-stopping sensitivity
-    // À-Trous Filter Configuration: Controls kernel radius and spatial/geometric edge-stopping sensitivity
+    // À-Trous Filter Configuration: Controls the multi-resolution filtering kernel radius and the spatial/geometric edge-stopping sensitivity. This defines how aggressive the denoising is at each scale and how well it preserves high-frequency structural details like sharp edges and corners.
+    // À-Trous Filter Configuration: Controls the multi-resolution filtering kernel radius and the spatial/geometric edge-stopping sensitivity. This defines how aggressive the denoising is at each scale and how well it preserves high-frequency structural details like sharp edges and corners.
     const int KERNEL_RADIUS = 2;
 //  const int KERNEL_RADIUS = 2;
     // B3-Spline weights for À-Trous (1/16, 1/4, 3/8, 1/4, 1/16)
@@ -23,14 +23,27 @@
     const float KERNEL_WEIGHTS[5] = float[](0.0625, 0.25, 0.375, 0.25, 0.0625);
 //  const float KERNEL_WEIGHTS[5] = float[](0.0625, 0.25, 0.375, 0.25, 0.0625);
 
-    // SIGMA parameters: Tuning thresholds for edge-stopping functions (higher = more blurring/bleeding)
-    // SIGMA parameters: Tuning thresholds for edge-stopping functions (higher = more blurring/bleeding)
+    // SIGMA parameters: Fine-tuning thresholds for the bilateral edge-stopping functions. Higher values increase tolerance for variance, leading to more aggressive blurring and potential detail bleeding across boundaries, while lower values strictly preserve edges but may leave residual noise.
+    // SIGMA parameters: Fine-tuning thresholds for the bilateral edge-stopping functions. Higher values increase tolerance for variance, leading to more aggressive blurring and potential detail bleeding across boundaries, while lower values strictly preserve edges but may leave residual noise.
     const float SIGMA_COLOR = 0.2;
 //  const float SIGMA_COLOR = 0.2;
     const float SIGMA_NORMAL = 0.1;
 //  const float SIGMA_NORMAL = 0.1;
     const float SIGMA_POSITION = 0.5;
 //  const float SIGMA_POSITION = 0.5;
+
+    // Denoiser Tuning Constants
+//  // Denoiser Tuning Constants
+    const float MAX_RADIANCE = 20.0;
+//  const float MAX_RADIANCE = 20.0;
+    const vec3 LUMA_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);
+//  const vec3 LUMA_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);
+    const float ALBEDO_EPSILON = 0.001;
+//  const float ALBEDO_EPSILON = 0.001;
+    const float NORM_FACTOR_MIN = 0.03;
+//  const float NORM_FACTOR_MIN = 0.03;
+    const float LUMA_EPSILON = 0.0001;
+//  const float LUMA_EPSILON = 0.0001;
 
     uniform int uStepSize;
 //  uniform int uStepSize;
@@ -53,8 +66,8 @@
         }
 //      }
 
-        // Geometry Fetch: Retrieve world-space guidance data from G-Buffer for bilateral weighting
-        // Geometry Fetch: Retrieve world-space guidance data from G-Buffer for bilateral weighting
+        // Geometry Fetch: Retrieve world-space guidance features (position, normal, albedo) from the G-Buffer. These are crucial for calculating accurate edge-stopping weights during the joint bilateral filtering pass, preventing noise reduction from blurring across actual geometric discontinuities.
+        // Geometry Fetch: Retrieve world-space guidance features (position, normal, albedo) from the G-Buffer. These are crucial for calculating accurate edge-stopping weights during the joint bilateral filtering pass, preventing noise reduction from blurring across actual geometric discontinuities.
         vec4 centerPos = imageLoad(textureGeometryGlobalPosition, centerCoord);
 //      vec4 centerPos = imageLoad(textureGeometryGlobalPosition, centerCoord);
         vec4 centerNorm = imageLoad(textureGeometryGlobalNormal, centerCoord);
@@ -65,8 +78,8 @@
 //      vec3 centerAlbedo = imageLoad(textureGeometryAlbedo, centerCoord).rgb;
 
 
-        // If background (sky), just pass through
-        // If background (sky), just pass through
+        // Skybox/Background Bypass: If the spatial position is explicitly zeroed out or invalid (indicating a sky hit), bypass the denoising filter entirely to preserve the uncorrupted procedural or HDRI background and save computational cycles.
+        // Skybox/Background Bypass: If the spatial position is explicitly zeroed out or invalid (indicating a sky hit), bypass the denoising filter entirely to preserve the uncorrupted procedural or HDRI background and save computational cycles.
         if (centerPos.w == 0.0) {
 //      if (centerPos.w == 0.0) {
             vec3 final = centerColor.rgb;
@@ -94,8 +107,8 @@
 //      // Albedo Demodulation: Factor out surface reflectance to filter core illumination (low variance)
         if (uStepSize == 1) {
 //      if (uStepSize == 1) {
-            centerColor.rgb /= max(centerAlbedo, vec3(0.001));
-//          centerColor.rgb /= max(centerAlbedo, vec3(0.001));
+            centerColor.rgb /= max(centerAlbedo, vec3(ALBEDO_EPSILON));
+//          centerColor.rgb /= max(centerAlbedo, vec3(ALBEDO_EPSILON));
         }
 //      }
 
@@ -103,15 +116,13 @@
 //      // Outlier Clamping: Suppress HDR 'fireflies' produced by extreme path contributions to stabilize the filter
         // Clamp extremely high values to prevent fireflies from exploding the filter.
 //      // Clamp extremely high values to prevent fireflies from exploding the filter.
-        float maxRadiance = 20.0;
-//      float maxRadiance = 20.0;
-        centerColor.rgb = min(centerColor.rgb, vec3(maxRadiance));
-//      centerColor.rgb = min(centerColor.rgb, vec3(maxRadiance));
+        centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
+//      centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
 
 //      // Calculate center luminance and tonemap to reduce firefly weight (Karis Average)
         // Calculate center luminance and tonemap to reduce firefly weight (Karis Average)
-//      float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-        float centerLuma = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+//      float centerLuma = dot(centerColor.rgb, LUMA_WEIGHTS);
+        float centerLuma = dot(centerColor.rgb, LUMA_WEIGHTS);
 //      vec3 centerColorTM = centerColor.rgb / (1.0 + centerLuma);
         vec3 centerColorTM = centerColor.rgb / (1.0 + centerLuma);
 
@@ -166,18 +177,18 @@
 //              // Demodulation (Pass 1 only)
                 if (uStepSize == 1) {
 //              if (uStepSize == 1) {
-                    tapColor.rgb /= max(tapAlbedo, vec3(0.001));
-//                  tapColor.rgb /= max(tapAlbedo, vec3(0.001));
+                    tapColor.rgb /= max(tapAlbedo, vec3(ALBEDO_EPSILON));
+//                  tapColor.rgb /= max(tapAlbedo, vec3(ALBEDO_EPSILON));
                 }
 //              }
 
                 // Firefly Clamping for Tap
 //              // Firefly Clamping for Tap
-                tapColor.rgb = min(tapColor.rgb, vec3(maxRadiance));
-//              tapColor.rgb = min(tapColor.rgb, vec3(maxRadiance));
+                tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
+//              tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
 
-//              float tapLuma = dot(tapColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-                float tapLuma = dot(tapColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+//              float tapLuma = dot(tapColor.rgb, LUMA_WEIGHTS);
+                float tapLuma = dot(tapColor.rgb, LUMA_WEIGHTS);
 
                 // Geometric Edge-Stopping Functions: Weight the tap based on similarity to center geometry
 //              // Geometric Edge-Stopping Functions: Weight the tap based on similarity to center geometry
@@ -219,8 +230,8 @@
 //              // Relative Color Weighting
                 // Made luminance scaling symmetric by comparing the max luminance of both center and tap
 //              // Made luminance scaling symmetric by comparing the max luminance of both center and tap
-                float normFactor = max(max(centerLuma, tapLuma), 0.03);
-//              float normFactor = max(max(centerLuma, tapLuma), 0.03);
+                float normFactor = max(max(centerLuma, tapLuma), NORM_FACTOR_MIN);
+//              float normFactor = max(max(centerLuma, tapLuma), NORM_FACTOR_MIN);
 
                 float distColor = distance(centerColor.rgb, tapColor.rgb);
 //              float distColor = distance(centerColor.rgb, tapColor.rgb);
@@ -254,10 +265,10 @@
 
 //      // Inverse reversible tonemapping to restore energy
         // Inverse reversible tonemapping to restore energy
-//      float finalLuma = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
-        float finalLuma = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
-//      finalColor = finalColor / max(1.0 - finalLuma, 0.0001);
-        finalColor = finalColor / max(1.0 - finalLuma, 0.0001);
+//      float finalLuma = dot(finalColor, LUMA_WEIGHTS);
+        float finalLuma = dot(finalColor, LUMA_WEIGHTS);
+//      finalColor = finalColor / max(1.0 - finalLuma, LUMA_EPSILON);
+        finalColor = finalColor / max(1.0 - finalLuma, LUMA_EPSILON);
 
         if (uFinalPass == 1) {
 //      if (uFinalPass == 1) {
@@ -265,8 +276,8 @@
 //          // Albedo Remodulation: Re-apply surface textures to the filtered irradiance signal
             // Matched the demodulation clamping curve exactly to fix the energy conservation bug
 //          // Matched the demodulation clamping curve exactly to fix the energy conservation bug
-            finalColor *= max(centerAlbedo, vec3(0.001));
-//          finalColor *= max(centerAlbedo, vec3(0.001));
+            finalColor *= max(centerAlbedo, vec3(ALBEDO_EPSILON));
+//          finalColor *= max(centerAlbedo, vec3(ALBEDO_EPSILON));
 
             /*
             // LDR Conversion: Apply ACES Tone Mapper and sRGB Gamma correction

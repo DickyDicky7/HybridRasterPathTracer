@@ -11,8 +11,8 @@
 
     #include "tonemap.glsl"
 
-    // FXAA settings
-//  // FXAA settings
+    // Fast Approximate Anti-Aliasing (FXAA) Configuration: Defines algorithm thresholds for edge detection span lengths and sub-pixel blending multipliers to eliminate spatial aliasing and jagged geometry lines efficiently.
+//  // Fast Approximate Anti-Aliasing (FXAA) Configuration: Defines algorithm thresholds for edge detection span lengths and sub-pixel blending multipliers to eliminate spatial aliasing and jagged geometry lines efficiently.
     #define FXAA_SPAN_MAX 8.0
 //  #define FXAA_SPAN_MAX 8.0
     #define FXAA_REDUCE_MUL   (1.0/8.0)
@@ -20,15 +20,20 @@
     #define FXAA_REDUCE_MIN   (1.0/128.0)
 //  #define FXAA_REDUCE_MIN   (1.0/128.0)
 
+    const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
+//  const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
+    const float DISPLAY_GAMMA = 2.2;
+//  const float DISPLAY_GAMMA = 2.2;
+
     void main() {
 //  void main() {
-        // Calculate inverse texture size (texel size)
-//      // Calculate inverse texture size (texel size)
+        // Texel Dimension Normalization: Calculates the fractional step size of a single texture element in normalized coordinate space, essential for precision neighbor-sampling when fetching surrounding kernel pixels during post-processing analysis.
+//      // Texel Dimension Normalization: Calculates the fractional step size of a single texture element in normalized coordinate space, essential for precision neighbor-sampling when fetching surrounding kernel pixels during post-processing analysis.
         vec2 texCoordOffset = 1.0 / vec2(textureSize(uTextureOutput, 0));
 //      vec2 texCoordOffset = 1.0 / vec2(textureSize(uTextureOutput, 0));
 
-        vec3 luma = vec3(0.299, 0.587, 0.114);
-//      vec3 luma = vec3(0.299, 0.587, 0.114);
+        vec3 luma = LUMA_WEIGHTS;
+//      vec3 luma = LUMA_WEIGHTS;
         float lumaTL = dot(luma, texture(uTextureOutput, inScreenFragmentUV + (vec2(-1.0, -1.0) * texCoordOffset)).rgb);
 //      float lumaTL = dot(luma, texture(uTextureOutput, inScreenFragmentUV + (vec2(-1.0, -1.0) * texCoordOffset)).rgb);
         float lumaTR = dot(luma, texture(uTextureOutput, inScreenFragmentUV + (vec2(1.0, -1.0) * texCoordOffset)).rgb);
@@ -97,7 +102,7 @@
 
         fragmentColor.rgb = pbrNeutral(fragmentColor.rgb);
 //      fragmentColor.rgb = pbrNeutral(fragmentColor.rgb);
-        fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
-//      fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/2.2));
+        fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/DISPLAY_GAMMA));
+//      fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/DISPLAY_GAMMA));
     }
 //  }
