@@ -882,6 +882,41 @@
     }
 //  }
 
+    vec3 sampleCharlie(vec3 normal, float roughness) {
+//  vec3 sampleCharlie(vec3 normal, float roughness) {
+        float random1 = rand();
+//      float random1 = rand();
+        float random2 = clamp(rand(), 0.0, EPSILON_RAND);
+//      float random2 = clamp(rand(), 0.0, EPSILON_RAND);
+
+        float alpha = max(roughness, EPSILON_MATH);
+//      float alpha = max(roughness, EPSILON_MATH);
+        float sinTheta = pow(random2, alpha / (1.0 + 2.0 * alpha));
+//      float sinTheta = pow(random2, alpha / (1.0 + 2.0 * alpha));
+        float cosTheta = sqrt(max(1.0 - sinTheta * sinTheta, 0.0));
+//      float cosTheta = sqrt(max(1.0 - sinTheta * sinTheta, 0.0));
+
+        float phi = 2.0 * PI * random1;
+//      float phi = 2.0 * PI * random1;
+        float x = sinTheta * cos(phi);
+//      float x = sinTheta * cos(phi);
+        float y = sinTheta * sin(phi);
+//      float y = sinTheta * sin(phi);
+        float z = cosTheta;
+//      float z = cosTheta;
+
+        vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+//      vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        vec3 tangent = normalize(cross(up, normal));
+//      vec3 tangent = normalize(cross(up, normal));
+        vec3 bitangent = cross(normal, tangent);
+//      vec3 bitangent = cross(normal, tangent);
+
+        return normalize(tangent * x + bitangent * y + normal * z);
+//      return normalize(tangent * x + bitangent * y + normal * z);
+    }
+//  }
+
     vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) {
 //  vec3 reflectPrincipled(vec3 incomingVector, vec3 normal) {
         return incomingVector - 2.0 * dot(incomingVector, normal) * normal;
@@ -1011,30 +1046,26 @@
         // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 //      // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 
-        // Specular
-//      // Specular
-        float alpha = roughness * roughness;
-//      float alpha = roughness * roughness;
-        float alpha2 = alpha * alpha;
-//      float alpha2 = alpha * alpha;
+        // --- Specular (Charlie Sheen / Asperity Scattering) ---
+//      // --- Specular (Charlie Sheen / Asperity Scattering) ---
+        float alpha = max(roughness, EPSILON_MATH);
+//      float alpha = max(roughness, EPSILON_MATH);
+        float invAlpha = 1.0 / alpha;
+//      float invAlpha = 1.0 / alpha;
         float NdotH = max(dot(N, H), 0.0);
 //      float NdotH = max(dot(N, H), 0.0);
-        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-        float D = alpha2 / (PI * denom * denom);
-//      float D = alpha2 / (PI * denom * denom);
+        float sin2h = max(1.0 - NdotH * NdotH, 0.0078125);
+//      float sin2h = max(1.0 - NdotH * NdotH, 0.0078125);
+        float D = (2.0 + invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * PI);
+//      float D = (2.0 + invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * PI);
 
-        float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-//      float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-        // Optimize G term calculation by factoring out NdotV and NdotL
-//      // Optimize G term calculation by factoring out NdotV and NdotL
-        float NdotV_G = NdotV * (1.0 - k) + k;
-//      float NdotV_G = NdotV * (1.0 - k) + k;
-        float NdotL_G = NdotL * (1.0 - k) + k;
-//      float NdotL_G = NdotL * (1.0 - k) + k;
+        // Visibility term (Neubelt) replaces G / (4 * NdotV * NdotL)
+//      // Visibility term (Neubelt) replaces G / (4 * NdotV * NdotL)
+        float V_sheen = 1.0 / (4.0 * (NdotL + NdotV - NdotL * NdotV) + EPSILON_MATH);
+//      float V_sheen = 1.0 / (4.0 * (NdotL + NdotV - NdotL * NdotV) + EPSILON_MATH);
 
-        vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
-//      vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
+        vec3 specular = D * V_sheen * F;
+//      vec3 specular = D * V_sheen * F;
 
         return diffuse + specular;
 //      return diffuse + specular;
@@ -1062,16 +1093,16 @@
         float pdfDiffuse = NdotL / PI;
 //      float pdfDiffuse = NdotL / PI;
 
-        float alpha = roughness * roughness;
-//      float alpha = roughness * roughness;
-        float alpha2 = max(alpha * alpha, EPSILON_MATH);
-//      float alpha2 = max(alpha * alpha, EPSILON_MATH);
+        float alpha = max(roughness, EPSILON_MATH);
+//      float alpha = max(roughness, EPSILON_MATH);
+        float invAlpha = 1.0 / alpha;
+//      float invAlpha = 1.0 / alpha;
         float NdotH = max(dot(N, H), 0.0);
 //      float NdotH = max(dot(N, H), 0.0);
-        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-        float D = alpha2 / (PI * denom * denom);
-//      float D = alpha2 / (PI * denom * denom);
+        float sin2h = max(1.0 - NdotH * NdotH, 0.0078125);
+//      float sin2h = max(1.0 - NdotH * NdotH, 0.0078125);
+        float D = (2.0 + invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * PI);
+//      float D = (2.0 + invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * PI);
         float VdotH = max(dot(V, H), 0.0);
 //      float VdotH = max(dot(V, H), 0.0);
         float pdfSpecular = (D * NdotH) / (4.0 * VdotH + EPSILON_DOT);
@@ -1262,8 +1293,8 @@
 //      if (randomChoice < specularProbability) {
             // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
 //          // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-            vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
-//          vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
+            vec3 microfacetNormal = sampleCharlie(shadingNormal, roughness);
+//          vec3 microfacetNormal = sampleCharlie(shadingNormal, roughness);
             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 //          vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
@@ -1318,8 +1349,8 @@
                 }
 //              }
 
-                vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
-//              vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+                vec3 microfacetNormal = sampleCharlie(shadingNormal, material.roughness);
+//              vec3 microfacetNormal = sampleCharlie(shadingNormal, material.roughness);
 
                 float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
 //              float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
