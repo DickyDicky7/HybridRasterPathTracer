@@ -951,6 +951,13 @@
     }
 //  }
 
+    vec3 evalLambertDiffuse(vec3 albedo) {
+//  vec3 evalLambertDiffuse(vec3 albedo) {
+        return albedo / PI;
+//      return albedo / PI;
+    }
+//  }
+
     // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
 //  // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
     vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
@@ -991,8 +998,8 @@
 
         // 1. Original Lambert
 //      // 1. Original Lambert
-        // vec3 diffuse = kD * albedo / PI;
-//      // vec3 diffuse = kD * albedo / PI;
+        // vec3 diffuse = kD * evalLambertDiffuse(albedo) * (1.0 - transmission);
+//      // vec3 diffuse = kD * evalLambertDiffuse(albedo) * (1.0 - transmission);
 
         // 2. Disney Diffuse (Recommended)
 //      // 2. Disney Diffuse (Recommended)
@@ -1001,8 +1008,8 @@
 
         // 3. Oren-Nayar Diffuse
 //      // 3. Oren-Nayar Diffuse
-        // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness);
-//      // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness);
+        // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
+//      // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 
         // Specular
 //      // Specular
