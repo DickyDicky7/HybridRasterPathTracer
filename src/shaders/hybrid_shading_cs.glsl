@@ -953,8 +953,8 @@
 
     // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
 //  // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
-    vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
-//  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+    vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
+//  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
         vec3 N = normal;
 //      vec3 N = normal;
         vec3 V = -incomingDir;
@@ -996,8 +996,8 @@
 
         // 2. Disney Diffuse (Recommended)
 //      // 2. Disney Diffuse (Recommended)
-        vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness);
-//      vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness);
+        vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
+//      vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 
         // 3. Oren-Nayar Diffuse
 //      // 3. Oren-Nayar Diffuse
@@ -1034,8 +1034,8 @@
     }
 //  }
 
-    float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
-//  float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
+    float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
+//  float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
         vec3 N = normal;
 //      vec3 N = normal;
         vec3 V = -incomingDir;
@@ -1079,8 +1079,8 @@
         float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
 //      float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
 
-        return mix(pdfDiffuse, pdfSpecular, specularProbability);
-//      return mix(pdfDiffuse, pdfSpecular, specularProbability);
+        return mix(pdfDiffuse * (1.0 - transmission), pdfSpecular, specularProbability);
+//      return mix(pdfDiffuse * (1.0 - transmission), pdfSpecular, specularProbability);
     }
 //  }
 
@@ -1266,10 +1266,10 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
 //              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
-//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
-                float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
-//              float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
                 float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
 //              float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
                 materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
@@ -1360,10 +1360,10 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
 //              materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
-//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
-                float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
-//              float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
                 float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
 //              float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
                 materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
@@ -1522,6 +1522,12 @@
 //                  rayHitResult.uvSurfaceCoordinate = vec2(sampleGlobalNormal.w, sampleGlobalTangent.w);
                     rayHitResult.isFrontFaceHitted = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
 //                  rayHitResult.isFrontFaceHitted = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
+                    if (!rayHitResult.isFrontFaceHitted) {
+//                  if (!rayHitResult.isFrontFaceHitted) {
+                        rayHitResult.hittedSideNormal = -rayHitResult.hittedSideNormal;
+//                      rayHitResult.hittedSideNormal = -rayHitResult.hittedSideNormal;
+                    }
+//                  }
                     rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
 //                  rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
                     rayHitResult.triangleIndex = int(sampleGlobalPosition.w) - 1;
@@ -1663,8 +1669,10 @@
 
             // Direct Illumination (Next Event Estimation) with MIS
 //          // Direct Illumination (Next Event Estimation) with MIS
-            if (uPointLightCount > 0 && !scatterResult.isDelta) {
-//          if (uPointLightCount > 0 && !scatterResult.isDelta) {
+            bool skipNEE = scatterResult.roughness < 0.05 && (scatterResult.metallic > 0.99 || material.transmission > 0.99);
+//          bool skipNEE = scatterResult.roughness < 0.05 && (scatterResult.metallic > 0.99 || material.transmission > 0.99);
+            if (uPointLightCount > 0 && !skipNEE) {
+//          if (uPointLightCount > 0 && !skipNEE) {
                 float rnd = rand();
 //              float rnd = rand();
                 int lightIdx = 0;
@@ -1736,16 +1744,16 @@
                         float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
 //                      float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
 
-                        float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-//                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+                        float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
+//                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
 
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
                         float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
 //                      float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
 
-                        vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
-//                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic);
+                        vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
+//                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
 
                         // Radiance emitted by the point light's surface
 //                      // Radiance emitted by the point light's surface
