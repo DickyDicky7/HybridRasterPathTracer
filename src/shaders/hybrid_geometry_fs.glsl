@@ -9,8 +9,8 @@
 //  layout(location = 2) in vec3 inGeometryAlbedo;
     layout(location = 3) in vec3 inGeometryGlobalTangent;
 //  layout(location = 3) in vec3 inGeometryGlobalTangent;
-    layout(location = 4) in vec2 inVertexUV;
-//  layout(location = 4) in vec2 inVertexUV;
+    layout(location = 4) in vec2 inGeometryUV;
+//  layout(location = 4) in vec2 inGeometryUV;
     flat in int vInstanceID;
 //  flat in int vInstanceID;
 
@@ -28,6 +28,9 @@
     uniform int uTriangleCountPerInstance;
 //  uniform int uTriangleCountPerInstance;
 
+    uniform sampler2DArray uSceneTextureArray;
+//  uniform sampler2DArray uSceneTextureArray;
+
     void main() {
 //  void main() {
         int globalTriIdx = uBaseTriangleIndexOffset + vInstanceID * uTriangleCountPerInstance + gl_PrimitiveID;
@@ -37,11 +40,21 @@
         outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx + 1));
 //      outGeometryGlobalPosition = vec4(inGeometryGlobalPosition, float(globalTriIdx + 1));
 
-        outGeometryGlobalNormal = vec4(normalize(inGeometryGlobalNormal), inVertexUV.x);
-//      outGeometryGlobalNormal = vec4(normalize(inGeometryGlobalNormal), inVertexUV.x);
-        outGeometryAlbedo = vec4(inGeometryAlbedo, 1.0);
-//      outGeometryAlbedo = vec4(inGeometryAlbedo, 1.0);
-        outGeometryGlobalTangent = vec4(normalize(inGeometryGlobalTangent), inVertexUV.y);
-//      outGeometryGlobalTangent = vec4(normalize(inGeometryGlobalTangent), inVertexUV.y);
+        outGeometryGlobalNormal = vec4(normalize(inGeometryGlobalNormal), inGeometryUV.x);
+//      outGeometryGlobalNormal = vec4(normalize(inGeometryGlobalNormal), inGeometryUV.x);
+
+        vec3 finalAlbedo = inGeometryAlbedo;
+//      vec3 finalAlbedo = inGeometryAlbedo;
+        if (inGeometryAlbedo.y < 0.0) {
+//      if (inGeometryAlbedo.y < 0.0) {
+            finalAlbedo = texture(uSceneTextureArray, vec3(inGeometryUV, inGeometryAlbedo.x)).rgb;
+//          finalAlbedo = texture(uSceneTextureArray, vec3(inGeometryUV, inGeometryAlbedo.x)).rgb;
+        }
+//      }
+        outGeometryAlbedo = vec4(finalAlbedo, 1.0);
+//      outGeometryAlbedo = vec4(finalAlbedo, 1.0);
+
+        outGeometryGlobalTangent = vec4(normalize(inGeometryGlobalTangent), inGeometryUV.y);
+//      outGeometryGlobalTangent = vec4(normalize(inGeometryGlobalTangent), inGeometryUV.y);
     }
 //  }

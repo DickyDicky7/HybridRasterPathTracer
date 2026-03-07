@@ -8,6 +8,8 @@
 
     uniform sampler2D uTextureOutput;
 //  uniform sampler2D uTextureOutput;
+    uniform int uRenderMode;
+//  uniform int uRenderMode;
 
     #include "tonemap.glsl"
 
@@ -27,6 +29,39 @@
 
     void main() {
 //  void main() {
+        if (uRenderMode != 0) {
+//      if (uRenderMode != 0) {
+            vec4 val = texture(uTextureOutput, inScreenFragmentUV);
+//          vec4 val = texture(uTextureOutput, inScreenFragmentUV);
+            if (uRenderMode == 1) {
+//          if (uRenderMode == 1) {
+                fragmentColor = vec4(val.rgb, 1.0);
+//              fragmentColor = vec4(val.rgb, 1.0);
+            } else if (uRenderMode == 2) {
+//          } else if (uRenderMode == 2) {
+                fragmentColor = vec4(val.rgb * 0.5 + 0.5, 1.0);
+//              fragmentColor = vec4(val.rgb * 0.5 + 0.5, 1.0);
+            } else if (uRenderMode == 3) {
+//          } else if (uRenderMode == 3) {
+                fragmentColor = vec4(fract(val.rgb), 1.0);
+//              fragmentColor = vec4(fract(val.rgb), 1.0);
+            } else if (uRenderMode == 4) {
+//          } else if (uRenderMode == 4) {
+                fragmentColor = vec4(val.rgb * 0.5 + 0.5, 1.0);
+//              fragmentColor = vec4(val.rgb * 0.5 + 0.5, 1.0);
+            } else {
+//          } else {
+                fragmentColor = vec4(1.0, 0.0, 1.0, 1.0);
+//              fragmentColor = vec4(1.0, 0.0, 1.0, 1.0);
+            }
+//          }
+            fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/DISPLAY_GAMMA));
+//          fragmentColor.rgb = pow(fragmentColor.rgb, vec3(1.0/DISPLAY_GAMMA));
+            return;
+//          return;
+        }
+//      }
+
         // Texel Dimension Normalization: Calculates the fractional step size of a single texture element in normalized coordinate space, essential for precision neighbor-sampling when fetching surrounding kernel pixels during post-processing analysis.
 //      // Texel Dimension Normalization: Calculates the fractional step size of a single texture element in normalized coordinate space, essential for precision neighbor-sampling when fetching surrounding kernel pixels during post-processing analysis.
         vec2 texCoordOffset = 1.0 / vec2(textureSize(uTextureOutput, 0));

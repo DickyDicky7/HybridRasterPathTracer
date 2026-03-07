@@ -14,6 +14,8 @@ import pathlib as pl
 import pathlib as pl
 import typing
 import typing
+import enum
+import enum
 import os
 import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -30,6 +32,18 @@ from src.scene.camera import Camera
 from src.scene.camera import Camera
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
+
+class RenderMode(enum.IntEnum):
+    PATH_TRACE = 0
+#   PATH_TRACE = 0
+    ALBEDO = 1
+#   ALBEDO = 1
+    NORMAL = 2
+#   NORMAL = 2
+    POSITION = 3
+#   POSITION = 3
+    TANGENT = 4
+#   TANGENT = 4
 
 class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
     # Main Renderer Class implementing a Hybrid Pipeline:
@@ -66,6 +80,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.frame_count: int = 0
         self.last_view_matrix: rr.Matrix44 = None
 #       self.last_view_matrix: rr.Matrix44 = None
+        self.render_mode: RenderMode = RenderMode.PATH_TRACE
+#       self.render_mode: RenderMode = RenderMode.PATH_TRACE
 
         # -----------------------------
 #       # -----------------------------
@@ -210,6 +226,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           fragment_shader=hybrid_geometry_fs_code,
         )
 #       )
+        if "uSceneTextureArray" in self.program_geometry:
+#       if "uSceneTextureArray" in self.program_geometry:
+            self.program_geometry["uSceneTextureArray"] = 9
+#           self.program_geometry["uSceneTextureArray"] = 9
 
         # -----------------------------
 #       # -----------------------------
@@ -332,8 +352,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 0.5, 1.0),
-#           "albedo": (1.0, 0.5, 1.0),
+            "albedo": (vase_albedo_idx, -1.0, -1.0) if vase_albedo_idx >= 0.0 else (1.0, 0.5, 1.0),
+#           "albedo": (vase_albedo_idx, -1.0, -1.0) if vase_albedo_idx >= 0.0 else (1.0, 0.5, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 0.0,
@@ -384,8 +404,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Material 0: lambert4
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 0.5,
 #           "roughness": 0.5,
             "metallic": 0.0,
@@ -415,8 +435,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Material 1: glock
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -465,8 +485,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_0, -1.0, -1.0) if idx_albedo_0 >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_0, -1.0, -1.0) if idx_albedo_0 >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0, # Assume metallic
@@ -505,8 +525,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_1, -1.0, -1.0) if idx_albedo_1 >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_1, -1.0, -1.0) if idx_albedo_1 >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -545,8 +565,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_2, -1.0, -1.0) if idx_albedo_2 >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_2, -1.0, -1.0) if idx_albedo_2 >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -585,8 +605,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_3, -1.0, -1.0) if idx_albedo_3 >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_3, -1.0, -1.0) if idx_albedo_3 >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -639,8 +659,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
+            "albedo": (idx_albedo_mp9, -1.0, -1.0) if idx_albedo_mp9 >= 0.0 else (1.0, 1.0, 1.0),
+#           "albedo": (idx_albedo_mp9, -1.0, -1.0) if idx_albedo_mp9 >= 0.0 else (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -1247,6 +1267,39 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
 #           current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
 
+        if "uRenderMode" in self.program_renderer:
+#       if "uRenderMode" in self.program_renderer:
+            self.program_renderer["uRenderMode"] = self.render_mode.value
+#           self.program_renderer["uRenderMode"] = self.render_mode.value
+
+        if self.render_mode != RenderMode.PATH_TRACE:
+#       if self.render_mode != RenderMode.PATH_TRACE:
+            self.ctx.screen.use()
+#           self.ctx.screen.use()
+            self.ctx.clear()
+#           self.ctx.clear()
+            if self.render_mode == RenderMode.ALBEDO:
+#           if self.render_mode == RenderMode.ALBEDO:
+                self.texture_geometry_albedo.use(location=0)
+#               self.texture_geometry_albedo.use(location=0)
+            elif self.render_mode == RenderMode.NORMAL:
+#           elif self.render_mode == RenderMode.NORMAL:
+                self.texture_geometry_global_normal.use(location=0)
+#               self.texture_geometry_global_normal.use(location=0)
+            elif self.render_mode == RenderMode.POSITION:
+#           elif self.render_mode == RenderMode.POSITION:
+                self.texture_geometry_global_position.use(location=0)
+#               self.texture_geometry_global_position.use(location=0)
+            elif self.render_mode == RenderMode.TANGENT:
+#           elif self.render_mode == RenderMode.TANGENT:
+                self.texture_geometry_global_tangent.use(location=0)
+#               self.texture_geometry_global_tangent.use(location=0)
+
+            self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
+#           self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
+            return
+#           return
+
         # 2. Compute Shade
 #       # 2. Compute Shade
         self.texture_output.bind_to_image(0, read=False, write=True)
@@ -1560,6 +1613,36 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if key == self.wnd.keys.I:
                 self.denoise_and_show()
 #               self.denoise_and_show()
+            elif key == self.wnd.keys.NUMBER_0:
+#           elif key == self.wnd.keys.NUMBER_0:
+                self.render_mode = RenderMode.PATH_TRACE
+#               self.render_mode = RenderMode.PATH_TRACE
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.NUMBER_1:
+#           elif key == self.wnd.keys.NUMBER_1:
+                self.render_mode = RenderMode.ALBEDO
+#               self.render_mode = RenderMode.ALBEDO
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.NUMBER_2:
+#           elif key == self.wnd.keys.NUMBER_2:
+                self.render_mode = RenderMode.NORMAL
+#               self.render_mode = RenderMode.NORMAL
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.NUMBER_3:
+#           elif key == self.wnd.keys.NUMBER_3:
+                self.render_mode = RenderMode.POSITION
+#               self.render_mode = RenderMode.POSITION
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.NUMBER_4:
+#           elif key == self.wnd.keys.NUMBER_4:
+                self.render_mode = RenderMode.TANGENT
+#               self.render_mode = RenderMode.TANGENT
+                self.frame_count = 0
+#               self.frame_count = 0
             pass
 #           pass
         pass
