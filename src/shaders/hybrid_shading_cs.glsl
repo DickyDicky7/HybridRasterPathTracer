@@ -900,6 +900,57 @@
     }
 //  }
 
+    vec3 evalDisneyDiffuse(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness) {
+//  vec3 evalDisneyDiffuse(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness) {
+        vec3 H = normalize(V + L);
+//      vec3 H = normalize(V + L);
+        float NdotL = max(dot(N, L), 0.0);
+//      float NdotL = max(dot(N, L), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+//      float NdotV = max(dot(N, V), 0.0);
+        float LdotH = max(dot(L, H), 0.0);
+//      float LdotH = max(dot(L, H), 0.0);
+
+        // Schlick weight for grazing angles
+//      // Schlick weight for grazing angles
+        float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
+//      float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
+        float lightScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotL, 5.0);
+//      float lightScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotL, 5.0);
+        float viewScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotV, 5.0);
+//      float viewScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotV, 5.0);
+
+        return (albedo / PI) * lightScatter * viewScatter;
+//      return (albedo / PI) * lightScatter * viewScatter;
+    }
+//  }
+
+    vec3 evalOrenNayarDiffuse(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness) {
+//  vec3 evalOrenNayarDiffuse(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness) {
+        float NdotL = max(dot(N, L), 0.0);
+//      float NdotL = max(dot(N, L), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+//      float NdotV = max(dot(N, V), 0.0);
+
+        float LdotV = dot(L, V);
+//      float LdotV = dot(L, V);
+        float s = LdotV - NdotL * NdotV;
+//      float s = LdotV - NdotL * NdotV;
+        float t = mix(1.0, max(NdotL, NdotV), step(0.0, s));
+//      float t = mix(1.0, max(NdotL, NdotV), step(0.0, s));
+
+        float sigma2 = roughness * roughness;
+//      float sigma2 = roughness * roughness;
+        float A = 1.0 - 0.5 * (sigma2 / (sigma2 + 0.33));
+//      float A = 1.0 - 0.5 * (sigma2 / (sigma2 + 0.33));
+        float B = 0.45 * (sigma2 / (sigma2 + 0.09));
+//      float B = 0.45 * (sigma2 / (sigma2 + 0.09));
+
+        return (albedo / PI) * (A + B * (s / (t + EPSILON_MATH)));
+//      return (albedo / PI) * (A + B * (s / (t + EPSILON_MATH)));
+    }
+//  }
+
     // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
 //  // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
     vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic) {
@@ -934,8 +985,24 @@
 //      vec3 kS = F;
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 //      vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-        vec3 diffuse = kD * albedo / PI;
-//      vec3 diffuse = kD * albedo / PI;
+
+        // --- Try uncommenting one of these ---
+//      // --- Try uncommenting one of these ---
+
+        // 1. Original Lambert
+//      // 1. Original Lambert
+        // vec3 diffuse = kD * albedo / PI;
+//      // vec3 diffuse = kD * albedo / PI;
+
+        // 2. Disney Diffuse (Recommended)
+//      // 2. Disney Diffuse (Recommended)
+        vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness);
+//      vec3 diffuse = kD * evalDisneyDiffuse(N, V, L, albedo, roughness);
+
+        // 3. Oren-Nayar Diffuse
+//      // 3. Oren-Nayar Diffuse
+        // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness);
+//      // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness);
 
         // Specular
 //      // Specular
