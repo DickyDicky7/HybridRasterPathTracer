@@ -239,8 +239,8 @@
 //  const float EPSILON_INTERSECT = 1.0e-4;
     const float EPSILON_OFFSET = 0.001;
 //  const float EPSILON_OFFSET = 0.001;
-    const float MISS_DISTANCE = 9999999.0;
-//  const float MISS_DISTANCE = 9999999.0;
+    const float MISS_DISTANCE = INF;
+//  const float MISS_DISTANCE = INF;
 
     // Hardcoded Math Constants
 //  // Hardcoded Math Constants
@@ -891,8 +891,8 @@
 
     vec3 refractPrincipled(vec3 incomingVector, vec3 normal, float etaRatioOfIncidenceOverTransmission, float cosThetaIncidence, float sinThetaTransmission) {
 //  vec3 refractPrincipled(vec3 incomingVector, vec3 normal, float etaRatioOfIncidenceOverTransmission, float cosThetaIncidence, float sinThetaTransmission) {
-        float cosThetaTransmission = sqrt(1.0 - sinThetaTransmission);
-//      float cosThetaTransmission = sqrt(1.0 - sinThetaTransmission);
+        float cosThetaTransmission = sqrt(max(0.0, 1.0 - sinThetaTransmission));
+//      float cosThetaTransmission = sqrt(max(0.0, 1.0 - sinThetaTransmission));
         vec3 refractedDirection = normalize(etaRatioOfIncidenceOverTransmission * incomingVector + (etaRatioOfIncidenceOverTransmission * cosThetaIncidence - cosThetaTransmission) * normal);
 //      vec3 refractedDirection = normalize(etaRatioOfIncidenceOverTransmission * incomingVector + (etaRatioOfIncidenceOverTransmission * cosThetaIncidence - cosThetaTransmission) * normal);
         return refractedDirection;
@@ -1072,12 +1072,12 @@
 
         vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
 //      vec3 F0 = mix(vec3(F0_DEFAULT), albedo, metallic);
-        vec3 F = schlickFresnel(VdotH, F0);
-//      vec3 F = schlickFresnel(VdotH, F0);
+        vec3 F = schlickFresnel(NdotV, F0);
+//      vec3 F = schlickFresnel(NdotV, F0);
         float fresnelProb = (F.r + F.g + F.b) / 3.0;
 //      float fresnelProb = (F.r + F.g + F.b) / 3.0;
-        float specularProbability = mix(fresnelProb, 1.0, metallic);
-//      float specularProbability = mix(fresnelProb, 1.0, metallic);
+        float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
+//      float specularProbability = max(mix(fresnelProb, 1.0, metallic), 0.15);
 
         return mix(pdfDiffuse, pdfSpecular, specularProbability);
 //      return mix(pdfDiffuse, pdfSpecular, specularProbability);
@@ -1266,32 +1266,20 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
 //              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                float NdotV = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
-//              float NdotV = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
-                float NdotH = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
-//              float NdotH = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
-                float VdotH = max(dot(-incomingRay.direction, microfacetNormal), EPSILON_DOT);
-//              float VdotH = max(dot(-incomingRay.direction, microfacetNormal), EPSILON_DOT);
-                float NdotL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
-//              float NdotL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
-                vec3 F = schlickFresnel(VdotH, f0);
-//              vec3 F = schlickFresnel(VdotH, f0);
-                float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-//              float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-                // Optimize G term calculation by factoring out NdotV and NdotL
-//              // Optimize G term calculation by factoring out NdotV and NdotL
-                float NdotV_G = NdotV * (1.0 - k) + k;
-//              float NdotV_G = NdotV * (1.0 - k) + k;
-                float NdotL_G = NdotL * (1.0 - k) + k;
-//              float NdotL_G = NdotL * (1.0 - k) + k;
-                materialLightScatteringResult.attenuation = (F * VdotH * NdotL) / (NdotH * NdotV_G * NdotL_G * specularProbability + EPSILON_MATH);
-//              materialLightScatteringResult.attenuation = (F * VdotH * NdotL) / (NdotH * NdotV_G * NdotL_G * specularProbability + EPSILON_MATH);
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+                float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+                float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
+//              float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
+                materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
+//              materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = roughness < 0.05;
 //              materialLightScatteringResult.isDelta = roughness < 0.05;
-                materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
-//              materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic);
+                materialLightScatteringResult.pdf = pdf;
+//              materialLightScatteringResult.pdf = pdf;
             } else {
 //          } else {
                 // Current/Recent ray is/was absorbed (next ray is scattering into surface)
@@ -1372,14 +1360,20 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
 //              materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-                materialLightScatteringResult.attenuation = albedo;
-//              materialLightScatteringResult.attenuation = albedo;
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+                float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+                float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
+//              float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
+                materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
+//              materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = false;
 //              materialLightScatteringResult.isDelta = false;
-                materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
-//              materialLightScatteringResult.pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic);
+                materialLightScatteringResult.pdf = pdf;
+//              materialLightScatteringResult.pdf = pdf;
             }
 //          }
         }
