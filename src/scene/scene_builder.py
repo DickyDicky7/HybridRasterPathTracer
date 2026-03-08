@@ -304,10 +304,10 @@ class SceneBuilder:
 #                       material["emissive"],
                         material["texture_index_emissive"],
 #                       material["texture_index_emissive"],
-                        0.0,
-#                       0.0,
-                        0.0,
-#                       0.0,
+                        material.get("anisotropy", 0.0),
+#                       material.get("anisotropy", 0.0),
+                        material.get("texture_index_anisotropy", -1.0),
+#                       material.get("texture_index_anisotropy", -1.0),
                     ], dtype=np.float32)
 #                   ], dtype=np.float32)
 
@@ -571,14 +571,14 @@ class SceneBuilder:
 #           #     float emissive;
             #     float texture_index_emissive;
 #           #     float texture_index_emissive;
-            #     float padding001;
-#           #     float padding001;
-            #     float padding002;
-#           #     float padding002;
+            #     float anisotropy;
+#           #     float anisotropy;
+            #     float texture_index_anisotropy;
+#           #     float texture_index_anisotropy;
             # };
 #           # };
-            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
-#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
+            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, anisotropy, texture_index_anisotropy]
+#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, anisotropy, texture_index_anisotropy]
             material_data: npt.NDArray[np.float32] = np.array([
 #           material_data: npt.NDArray[np.float32] = np.array([
                 albedo[0], albedo[1], albedo[2], 0.0,

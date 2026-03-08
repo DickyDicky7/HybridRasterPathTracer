@@ -70,10 +70,10 @@
 //      float emissive;
         float textureIndexEmissive;
 //      float textureIndexEmissive;
-        float padding001;
-//      float padding001;
-        float padding002;
-//      float padding002;
+        float anisotropy;
+//      float anisotropy;
+        float textureIndexAnisotropy;
+//      float textureIndexAnisotropy;
     };
 //  };
 
@@ -165,6 +165,12 @@
 //      float pdf;
         bool isDelta;
 //      bool isDelta;
+        float anisotropy;
+//      float anisotropy;
+        vec3 tangent;
+//      vec3 tangent;
+        vec3 bitangent;
+//      vec3 bitangent;
     };
 //  };
 
@@ -841,44 +847,32 @@
     }
 //  }
 
-    vec3 sampleGGX(vec3 normal, float roughness) {
-//  vec3 sampleGGX(vec3 normal, float roughness) {
-        float random1 = rand();
-//      float random1 = rand();
-        // Clamp random2 to prevent NaN/Inf in GGX sampling
-//      // Clamp random2 to prevent NaN/Inf in GGX sampling
-        float random2 = clamp(rand(), 0.0, EPSILON_RAND);
-//      float random2 = clamp(rand(), 0.0, EPSILON_RAND);
+    vec3 sampleAnisotropicGGX(vec3 normal, vec3 tangent, vec3 bitangent, float alphaX, float alphaY) {
+//  vec3 sampleAnisotropicGGX(vec3 normal, vec3 tangent, vec3 bitangent, float alphaX, float alphaY) {
+        float r1 = rand();
+//      float r1 = rand();
+        float r2 = clamp(rand(), 0.0, EPSILON_RAND);
+//      float r2 = clamp(rand(), 0.0, EPSILON_RAND);
 
-        float term = roughness * roughness;
-//      float term = roughness * roughness;
-        float phi = 2.0 * PI * random1;
-//      float phi = 2.0 * PI * random1;
-        float cosTheta = sqrt((1.0 - random2) / (1.0 + (term * term - 1.0) * random2));
-//      float cosTheta = sqrt((1.0 - random2) / (1.0 + (term * term - 1.0) * random2));
-        float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-//      float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+        float phi = 2.0 * PI * r1;
+//      float phi = 2.0 * PI * r1;
+        float cosPhi = cos(phi);
+//      float cosPhi = cos(phi);
+        float sinPhi = sin(phi);
+//      float sinPhi = sin(phi);
 
-        float x = sinTheta * cos(phi);
-//      float x = sinTheta * cos(phi);
-        float y = sinTheta * sin(phi);
-//      float y = sinTheta * sin(phi);
-        float z = cosTheta;
-//      float z = cosTheta;
+        float x = alphaX * cosPhi;
+//      float x = alphaX * cosPhi;
+        float y = alphaY * sinPhi;
+//      float y = alphaY * sinPhi;
+        float z = sqrt((1.0 - r2) / max(r2, EPSILON_MATH));
+//      float z = sqrt((1.0 - r2) / max(r2, EPSILON_MATH));
 
-        // Tangent space basis construction (orthonormal basis)
-//      // Tangent space basis construction (orthonormal basis)
-        vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-//      vec3 up = abs(normal.z) < EPSILON_RAND ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-        vec3 tangent = normalize(cross(up, normal));
-//      vec3 tangent = normalize(cross(up, normal));
-        vec3 bitangent = cross(normal, tangent);
-//      vec3 bitangent = cross(normal, tangent);
+        vec3 hLocal = normalize(vec3(x, y, z));
+//      vec3 hLocal = normalize(vec3(x, y, z));
 
-        // Transform H to world space
-//      // Transform H to world space
-        return normalize(tangent * x + bitangent * y + normal * z);
-//      return normalize(tangent * x + bitangent * y + normal * z);
+        return normalize(tangent * hLocal.x + bitangent * hLocal.y + normal * hLocal.z);
+//      return normalize(tangent * hLocal.x + bitangent * hLocal.y + normal * hLocal.z);
     }
 //  }
 
@@ -960,8 +954,8 @@
 
     // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
 //  // BSDF Evaluation: Computes the precise ratio of scattered radiance for a specific incoming/outgoing direction pair at a shading point. This combines both the lambertian diffuse and GGX specular microfacet models, scaled by the calculated energy-conserving Fresnel and Geometry terms.
-    vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
-//  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
+    vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 tangent, vec3 bitangent, vec3 albedo, float roughness, float metallic, float transmission, float anisotropy) {
+//  vec3 evalPrincipledBSDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 tangent, vec3 bitangent, vec3 albedo, float roughness, float metallic, float transmission, float anisotropy) {
         vec3 N = normal;
 //      vec3 N = normal;
         vec3 V = -incomingDir;
@@ -1011,38 +1005,59 @@
         // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 //      // vec3 diffuse = kD * evalOrenNayarDiffuse(N, V, L, albedo, roughness) * (1.0 - transmission);
 
-        // Specular
-//      // Specular
+        // Specular (Anisotropic GGX)
+//      // Specular (Anisotropic GGX)
         float alpha = roughness * roughness;
 //      float alpha = roughness * roughness;
-        float alpha2 = alpha * alpha;
-//      float alpha2 = alpha * alpha;
-        float NdotH = max(dot(N, H), 0.0);
-//      float NdotH = max(dot(N, H), 0.0);
-        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-        float D = alpha2 / (PI * denom * denom);
-//      float D = alpha2 / (PI * denom * denom);
+        float aspect = sqrt(1.0 - 0.9 * anisotropy);
+//      float aspect = sqrt(1.0 - 0.9 * anisotropy);
+        float alphaX = max(alpha / aspect, EPSILON_MATH);
+//      float alphaX = max(alpha / aspect, EPSILON_MATH);
+        float alphaY = max(alpha * aspect, EPSILON_MATH);
+//      float alphaY = max(alpha * aspect, EPSILON_MATH);
 
-        float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-//      float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-        // Optimize G term calculation by factoring out NdotV and NdotL
-//      // Optimize G term calculation by factoring out NdotV and NdotL
-        float NdotV_G = NdotV * (1.0 - k) + k;
-//      float NdotV_G = NdotV * (1.0 - k) + k;
-        float NdotL_G = NdotL * (1.0 - k) + k;
-//      float NdotL_G = NdotL * (1.0 - k) + k;
+        float NdotH = dot(N, H);
+//      float NdotH = dot(N, H);
+        float TdotH = dot(tangent, H);
+//      float TdotH = dot(tangent, H);
+        float BdotH = dot(bitangent, H);
+//      float BdotH = dot(bitangent, H);
 
-        vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
-//      vec3 specular = (D * F) / (4.0 * NdotV_G * NdotL_G + EPSILON_MATH);
+        float termX = TdotH / alphaX;
+//      float termX = TdotH / alphaX;
+        float termY = BdotH / alphaY;
+//      float termY = BdotH / alphaY;
+        float d = termX * termX + termY * termY + NdotH * NdotH;
+//      float d = termX * termX + termY * termY + NdotH * NdotH;
+        float D = 1.0 / (PI * alphaX * alphaY * d * d + EPSILON_MATH);
+//      float D = 1.0 / (PI * alphaX * alphaY * d * d + EPSILON_MATH);
+
+        float TdotV = dot(tangent, V);
+//      float TdotV = dot(tangent, V);
+        float BdotV = dot(bitangent, V);
+//      float BdotV = dot(bitangent, V);
+        float TdotL = dot(tangent, L);
+//      float TdotL = dot(tangent, L);
+        float BdotL = dot(bitangent, L);
+//      float BdotL = dot(bitangent, L);
+
+        float lambdaV = NdotL * length(vec3(alphaX * TdotV, alphaY * BdotV, NdotV));
+//      float lambdaV = NdotL * length(vec3(alphaX * TdotV, alphaY * BdotV, NdotV));
+        float lambdaL = NdotV * length(vec3(alphaX * TdotL, alphaY * BdotL, NdotL));
+//      float lambdaL = NdotV * length(vec3(alphaX * TdotL, alphaY * BdotL, NdotL));
+        float G_over_4_NdotV_NdotL = 0.5 / (lambdaV + lambdaL + EPSILON_MATH);
+//      float G_over_4_NdotV_NdotL = 0.5 / (lambdaV + lambdaL + EPSILON_MATH);
+
+        vec3 specular = D * F * G_over_4_NdotV_NdotL;
+//      vec3 specular = D * F * G_over_4_NdotV_NdotL;
 
         return diffuse + specular;
 //      return diffuse + specular;
     }
 //  }
 
-    float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
-//  float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
+    float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 tangent, vec3 bitangent, vec3 albedo, float roughness, float metallic, float transmission, float anisotropy) {
+//  float evalPrincipledPDF(vec3 incomingDir, vec3 outgoingDir, vec3 normal, vec3 tangent, vec3 bitangent, vec3 albedo, float roughness, float metallic, float transmission, float anisotropy) {
         vec3 N = normal;
 //      vec3 N = normal;
         vec3 V = -incomingDir;
@@ -1064,14 +1079,29 @@
 
         float alpha = roughness * roughness;
 //      float alpha = roughness * roughness;
-        float alpha2 = max(alpha * alpha, EPSILON_MATH);
-//      float alpha2 = max(alpha * alpha, EPSILON_MATH);
+        float aspect = sqrt(1.0 - 0.9 * anisotropy);
+//      float aspect = sqrt(1.0 - 0.9 * anisotropy);
+        float alphaX = max(alpha / aspect, EPSILON_MATH);
+//      float alphaX = max(alpha / aspect, EPSILON_MATH);
+        float alphaY = max(alpha * aspect, EPSILON_MATH);
+//      float alphaY = max(alpha * aspect, EPSILON_MATH);
+
         float NdotH = max(dot(N, H), 0.0);
 //      float NdotH = max(dot(N, H), 0.0);
-        float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-//      float denom = (NdotH * NdotH * (alpha2 - 1.0) + 1.0);
-        float D = alpha2 / (PI * denom * denom);
-//      float D = alpha2 / (PI * denom * denom);
+        float TdotH = dot(tangent, H);
+//      float TdotH = dot(tangent, H);
+        float BdotH = dot(bitangent, H);
+//      float BdotH = dot(bitangent, H);
+
+        float termX = TdotH / alphaX;
+//      float termX = TdotH / alphaX;
+        float termY = BdotH / alphaY;
+//      float termY = BdotH / alphaY;
+        float d = termX * termX + termY * termY + NdotH * NdotH;
+//      float d = termX * termX + termY * termY + NdotH * NdotH;
+        float D = 1.0 / (PI * alphaX * alphaY * d * d + EPSILON_MATH);
+//      float D = 1.0 / (PI * alphaX * alphaY * d * d + EPSILON_MATH);
+
         float VdotH = max(dot(V, H), 0.0);
 //      float VdotH = max(dot(V, H), 0.0);
         float pdfSpecular = (D * NdotH) / (4.0 * VdotH + EPSILON_DOT);
@@ -1119,6 +1149,12 @@
 //      materialLightScatteringResult.pdf = 0.0;
         materialLightScatteringResult.isDelta = false;
 //      materialLightScatteringResult.isDelta = false;
+        materialLightScatteringResult.anisotropy = 0.0;
+//      materialLightScatteringResult.anisotropy = 0.0;
+        materialLightScatteringResult.tangent = vec3(0.0);
+//      materialLightScatteringResult.tangent = vec3(0.0);
+        materialLightScatteringResult.bitangent = vec3(0.0);
+//      materialLightScatteringResult.bitangent = vec3(0.0);
 
         // Check texture indices
 //      // Check texture indices
@@ -1128,6 +1164,8 @@
 //      float roughness = material.roughness;
         float metallic = material.metallic;
 //      float metallic = material.metallic;
+        float anisotropy = material.anisotropy;
+//      float anisotropy = material.anisotropy;
 
         // Texture Sampling (using textureLod for Compute Shader safety)
 //      // Texture Sampling (using textureLod for Compute Shader safety)
@@ -1151,6 +1189,12 @@
 //          // Assume metallic is in R channel or grayscale
             metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
 //          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
+        }
+//      }
+        if (material.textureIndexAnisotropy > -0.5) {
+//      if (material.textureIndexAnisotropy > -0.5) {
+            anisotropy = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAnisotropy), 0.0).r;
+//          anisotropy = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAnisotropy), 0.0).r;
         }
 //      }
 
@@ -1184,6 +1228,14 @@
 //      // 1. Shading Normal Calculation (Normal Mapping)
         vec3 shadingNormal = recentRayHitResult.hittedSideNormal;
 //      vec3 shadingNormal = recentRayHitResult.hittedSideNormal;
+        vec3 shadingTangent = normalize(recentRayHitResult.hittedSideTangent);
+//      vec3 shadingTangent = normalize(recentRayHitResult.hittedSideTangent);
+        // Re-orthogonalize T with respect to N
+//      // Re-orthogonalize T with respect to N
+        shadingTangent = normalize(shadingTangent - dot(shadingTangent, shadingNormal) * shadingNormal);
+//      shadingTangent = normalize(shadingTangent - dot(shadingTangent, shadingNormal) * shadingNormal);
+        vec3 shadingBitangent = cross(shadingNormal, shadingTangent);
+//      vec3 shadingBitangent = cross(shadingNormal, shadingTangent);
 
         if (material.textureIndexNormal > -0.5) {
 //      if (material.textureIndexNormal > -0.5) {
@@ -1192,21 +1244,17 @@
             mapN = mapN * 2.0 - 1.0;
 //          mapN = mapN * 2.0 - 1.0;
 
-            vec3 N = normalize(shadingNormal);
-//          vec3 N = normalize(shadingNormal);
-            vec3 T = normalize(recentRayHitResult.hittedSideTangent);
-//          vec3 T = normalize(recentRayHitResult.hittedSideTangent);
-            // Re-orthogonalize T with respect to N
-//          // Re-orthogonalize T with respect to N
-            T = normalize(T - dot(T, N) * N);
-//          T = normalize(T - dot(T, N) * N);
-            vec3 B = cross(N, T);
-//          vec3 B = cross(N, T);
-            mat3 TBN = mat3(T, B, N);
-//          mat3 TBN = mat3(T, B, N);
+            mat3 TBN = mat3(shadingTangent, shadingBitangent, shadingNormal);
+//          mat3 TBN = mat3(shadingTangent, shadingBitangent, shadingNormal);
 
             shadingNormal = normalize(TBN * mapN);
 //          shadingNormal = normalize(TBN * mapN);
+            // After changing normal, re-orthogonalize tangent space
+//          // After changing normal, re-orthogonalize tangent space
+            shadingTangent = normalize(shadingTangent - dot(shadingTangent, shadingNormal) * shadingNormal);
+//          shadingTangent = normalize(shadingTangent - dot(shadingTangent, shadingNormal) * shadingNormal);
+            shadingBitangent = cross(shadingNormal, shadingTangent);
+//          shadingBitangent = cross(shadingNormal, shadingTangent);
         }
 //      }
 
@@ -1220,6 +1268,12 @@
 //      materialLightScatteringResult.metallic = metallic;
         materialLightScatteringResult.shadingNormal = shadingNormal;
 //      materialLightScatteringResult.shadingNormal = shadingNormal;
+        materialLightScatteringResult.tangent = shadingTangent;
+//      materialLightScatteringResult.tangent = shadingTangent;
+        materialLightScatteringResult.bitangent = shadingBitangent;
+//      materialLightScatteringResult.bitangent = shadingBitangent;
+        materialLightScatteringResult.anisotropy = anisotropy;
+//      materialLightScatteringResult.anisotropy = anisotropy;
 
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
@@ -1262,8 +1316,14 @@
 //      if (randomChoice < specularProbability) {
             // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
 //          // SPECULAR REFLECTION (METAL OR DIELECTRIC COAT)
-            vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
-//          vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
+            float aspect = sqrt(1.0 - 0.9 * anisotropy);
+//          float aspect = sqrt(1.0 - 0.9 * anisotropy);
+            float alphaX = max((roughness * roughness) / aspect, EPSILON_MATH);
+//          float alphaX = max((roughness * roughness) / aspect, EPSILON_MATH);
+            float alphaY = max((roughness * roughness) * aspect, EPSILON_MATH);
+//          float alphaY = max((roughness * roughness) * aspect, EPSILON_MATH);
+            vec3 microfacetNormal = sampleAnisotropicGGX(shadingNormal, shadingTangent, shadingBitangent, alphaX, alphaY);
+//          vec3 microfacetNormal = sampleAnisotropicGGX(shadingNormal, shadingTangent, shadingBitangent, alphaX, alphaY);
             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 //          vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
@@ -1273,14 +1333,19 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
 //              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-                float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-                float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
-//              float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
-                materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
-//              materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
+                
+                float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
+//              float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), EPSILON_DOT);
+
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+                float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+                
+                // Weight by 1/specularProbability because we already conditionally chose this path
+//              // Weight by 1/specularProbability because we already conditionally chose this path
+                materialLightScatteringResult.attenuation = (bsdf * cosThetaL) / max(pdf * specularProbability, EPSILON_MATH);
+//              materialLightScatteringResult.attenuation = (bsdf * cosThetaL) / max(pdf * specularProbability, EPSILON_MATH);
                 materialLightScatteringResult.isScattered = true;
 //              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = roughness < 0.05;
@@ -1318,8 +1383,14 @@
                 }
 //              }
 
-                vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
-//              vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+                float aspectT = sqrt(1.0 - 0.9 * anisotropy);
+//              float aspectT = sqrt(1.0 - 0.9 * anisotropy);
+                float alphaXT = max((material.roughness * material.roughness) / aspectT, EPSILON_MATH);
+//              float alphaXT = max((material.roughness * material.roughness) / aspectT, EPSILON_MATH);
+                float alphaYT = max((material.roughness * material.roughness) * aspectT, EPSILON_MATH);
+//              float alphaYT = max((material.roughness * material.roughness) * aspectT, EPSILON_MATH);
+                vec3 microfacetNormal = sampleAnisotropicGGX(shadingNormal, shadingTangent, shadingBitangent, alphaXT, alphaYT);
+//              vec3 microfacetNormal = sampleAnisotropicGGX(shadingNormal, shadingTangent, shadingBitangent, alphaXT, alphaYT);
 
                 float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
 //              float cosThetaIncidence = min(dot(-incomingRay.direction, microfacetNormal), 1.0);
@@ -1367,10 +1438,10 @@
 //              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
                 materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
 //              materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-                float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+//              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+                float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
+//              float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, shadingTangent, shadingBitangent, albedo, roughness, metallic, material.transmission, anisotropy);
                 float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
 //              float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
                 materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
@@ -1751,16 +1822,16 @@
                         float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
 //                      float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
 
-                        float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
-//                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
+                        float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.tangent, scatterResult.bitangent, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission, scatterResult.anisotropy);
+//                      float pdfBrdfW = evalPrincipledPDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.tangent, scatterResult.bitangent, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission, scatterResult.anisotropy);
 
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
                         float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
 //                      float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
 
-                        vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
-//                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission);
+                        vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.tangent, scatterResult.bitangent, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission, scatterResult.anisotropy);
+//                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, scatterResult.shadingNormal, scatterResult.tangent, scatterResult.bitangent, scatterResult.albedo, scatterResult.roughness, scatterResult.metallic, material.transmission, scatterResult.anisotropy);
 
                         // Radiance emitted by the point light's surface
 //                      // Radiance emitted by the point light's surface
