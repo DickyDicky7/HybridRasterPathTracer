@@ -8,12 +8,12 @@
 //  layout(binding = 0, rgba32f) uniform image2D textureOutput;
     layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
 //  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
-    layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
-//  layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
-    layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
-//  layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
-    layout(binding = 4, rgba32f) uniform image2D textureGeometryGlobalTangent;
-//  layout(binding = 4, rgba32f) uniform image2D textureGeometryGlobalTangent;
+    layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
+//  layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
+    layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
+//  layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
+    layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
+//  layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
     layout(binding = 5, rgba32f) uniform image2D textureAccum;
 //  layout(binding = 5, rgba32f) uniform image2D textureAccum;
 
@@ -150,8 +150,8 @@
 
     struct MaterialLightScatteringResult {
 //  struct MaterialLightScatteringResult {
-        Ray scatteredRay;
-//      Ray scatteredRay;
+        vec3 scatteredDirection;
+//      vec3 scatteredDirection;
         vec3 attenuation;
 //      vec3 attenuation;
         vec3 emission;
@@ -1137,10 +1137,8 @@
 //  MaterialLightScatteringResult scatterPrincipled(Ray incomingRay, RayHitResult recentRayHitResult, Material material) {
         MaterialLightScatteringResult materialLightScatteringResult;
 //      MaterialLightScatteringResult materialLightScatteringResult;
-        materialLightScatteringResult.scatteredRay.origin = vec3(0.0);
-//      materialLightScatteringResult.scatteredRay.origin = vec3(0.0);
-        materialLightScatteringResult.scatteredRay.direction = vec3(0.0);
-//      materialLightScatteringResult.scatteredRay.direction = vec3(0.0);
+        materialLightScatteringResult.scatteredDirection = vec3(0.0);
+//      materialLightScatteringResult.scatteredDirection = vec3(0.0);
         materialLightScatteringResult.attenuation = vec3(0.0);
 //      materialLightScatteringResult.attenuation = vec3(0.0);
         materialLightScatteringResult.emission = vec3(0.0);
@@ -1305,10 +1303,8 @@
 
             if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
 //          if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
-                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-                materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
-//              materialLightScatteringResult.scatteredRay.direction = specularReflectedDirection;
+                materialLightScatteringResult.scatteredDirection = specularReflectedDirection;
+//              materialLightScatteringResult.scatteredDirection = specularReflectedDirection;
                 vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
 //              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
                 float pdf = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
@@ -1365,19 +1361,17 @@
 
                 // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
 //              // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
-                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
 
                 if (sinThetaTransmission <= 1.0) {
 //              if (sinThetaTransmission <= 1.0) {
-                    materialLightScatteringResult.scatteredRay.direction = refractedDirection;
-//                  materialLightScatteringResult.scatteredRay.direction = refractedDirection;
+                    materialLightScatteringResult.scatteredDirection = refractedDirection;
+//                  materialLightScatteringResult.scatteredDirection = refractedDirection;
                     materialLightScatteringResult.attenuation = albedo;
 //                  materialLightScatteringResult.attenuation = albedo;
                 } else {
 //              } else {
-                    materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
-//                  materialLightScatteringResult.scatteredRay.direction = reflectedDirection;
+                    materialLightScatteringResult.scatteredDirection = reflectedDirection;
+//                  materialLightScatteringResult.scatteredDirection = reflectedDirection;
                     materialLightScatteringResult.attenuation = vec3(1.0);
 //                  materialLightScatteringResult.attenuation = vec3(1.0);
                 }
@@ -1393,10 +1387,8 @@
                 vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
 //              vec3 diffuseDirection = normalize(shadingNormal + randomUnitVector());
 
-                materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-//              materialLightScatteringResult.scatteredRay.origin = recentRayHitResult.at;
-                materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
-//              materialLightScatteringResult.scatteredRay.direction = diffuseDirection;
+                materialLightScatteringResult.scatteredDirection = diffuseDirection;
+//              materialLightScatteringResult.scatteredDirection = diffuseDirection;
                 vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
 //              vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
                 float pdf = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
@@ -1799,8 +1791,8 @@
             }
 //          }
 
-            if (scatterResult.scatteredRay.direction == vec3(0.0)) {
-//          if (scatterResult.scatteredRay.direction == vec3(0.0)) {
+            if (scatterResult.scatteredDirection == vec3(0.0)) {
+//          if (scatterResult.scatteredDirection == vec3(0.0)) {
                 break;
 //              break;
             }
@@ -1826,8 +1818,10 @@
             }
 //          }
 
-            currentRay = scatterResult.scatteredRay;
-//          currentRay = scatterResult.scatteredRay;
+            currentRay.origin = rayHitResult.at;
+//          currentRay.origin = rayHitResult.at;
+            currentRay.direction = scatterResult.scatteredDirection;
+//          currentRay.direction = scatterResult.scatteredDirection;
             lastPdfW = scatterResult.pdf;
 //          lastPdfW = scatterResult.pdf;
             lastWasDelta = scatterResult.isDelta;

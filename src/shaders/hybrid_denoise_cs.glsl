@@ -7,10 +7,10 @@
 //  layout(binding = 0, rgba32f) uniform image2D textureOutput;
     layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
 //  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
-    layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
-//  layout(binding = 2, rgba32f) uniform image2D textureGeometryGlobalNormal;
-    layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
-//  layout(binding = 3, rgba32f) uniform image2D textureGeometryAlbedo;
+    layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
+//  layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
+    layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
+//  layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
     layout(binding = 5, rgba32f) uniform image2D textureInput;
 //  layout(binding = 5, rgba32f) uniform image2D textureInput;
 
