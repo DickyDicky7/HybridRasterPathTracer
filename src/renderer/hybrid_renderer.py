@@ -694,8 +694,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
 
 
-        bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
-#       bvh_data, triangles_data, materials_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
+        bvh_data, triangles_data, materials_data, material_indices_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
+#       bvh_data, triangles_data, materials_data, material_indices_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
         self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
 #       self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
 
@@ -716,8 +716,13 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 
-        # 4. UVs (vec2s per vertex per triangle: 6 floats per triangle)
-#       # 4. UVs (vec2s per vertex per triangle: 6 floats per triangle)
+        # 4. Material Indices
+#       # 4. Material Indices
+        self.ssbo_material_indices: mgl.Buffer = self.ctx.buffer(data=material_indices_data)
+#       self.ssbo_material_indices: mgl.Buffer = self.ctx.buffer(data=material_indices_data)
+
+        # 5. UVs (vec2s per vertex per triangle: 6 floats per triangle)
+#       # 5. UVs (vec2s per vertex per triangle: 6 floats per triangle)
         self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
 #       self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
 
@@ -1327,6 +1332,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.ssbo_normals.bind_to_storage_buffer(binding=10)
         self.ssbo_tangents.bind_to_storage_buffer(binding=11)
 #       self.ssbo_tangents.bind_to_storage_buffer(binding=11)
+        self.ssbo_material_indices.bind_to_storage_buffer(binding=12)
+#       self.ssbo_material_indices.bind_to_storage_buffer(binding=12)
 
         self.texture_accum.bind_to_image(5, read=True, write=True)
 #       self.texture_accum.bind_to_image(5, read=True, write=True)

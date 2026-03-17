@@ -50,8 +50,8 @@ class SceneBuilder:
 #       self.scene_triangles: list[npt.NDArray[np.float32]] = []
         self.scene_uvs: list[npt.NDArray[np.float32]] = []
 #       self.scene_uvs: list[npt.NDArray[np.float32]] = []
-        self.scene_materials: list[npt.NDArray[np.float32]] = []
-#       self.scene_materials: list[npt.NDArray[np.float32]] = []
+        self.scene_material_indices: list[int] = []
+#       self.scene_material_indices: list[int] = []
         self.scene_normals: list[npt.NDArray[np.float32]] = []
 #       self.scene_normals: list[npt.NDArray[np.float32]] = []
         self.scene_tangents: list[npt.NDArray[np.float32]] = []
@@ -280,36 +280,6 @@ class SceneBuilder:
 #                   material: Material = self.materials[current_material_index]
                     albedo: vec4f32 = (*material["albedo"], 0.0)
 #                   albedo: vec4f32 = (*material["albedo"], 0.0)
-                    material_data: npt.NDArray[np.float32] = np.array([
-#                   material_data: npt.NDArray[np.float32] = np.array([
-                        albedo[0], albedo[1], albedo[2], 0.0,
-#                       albedo[0], albedo[1], albedo[2], 0.0,
-                        material["roughness"],
-#                       material["roughness"],
-                        material["metallic"],
-#                       material["metallic"],
-                        material["transmission"],
-#                       material["transmission"],
-                        material["ior"],
-#                       material["ior"],
-                        material["texture_index_albedo"],
-#                       material["texture_index_albedo"],
-                        material["texture_index_roughness"],
-#                       material["texture_index_roughness"],
-                        material["texture_index_metallic"],
-#                       material["texture_index_metallic"],
-                        material["texture_index_normal"],
-#                       material["texture_index_normal"],
-                        material["emissive"],
-#                       material["emissive"],
-                        material["texture_index_emissive"],
-#                       material["texture_index_emissive"],
-                        0.0,
-#                       0.0,
-                        0.0,
-#                       0.0,
-                    ], dtype=np.float32)
-#                   ], dtype=np.float32)
 
                     # Flatten the mesh indices for processing
 #                   # Flatten the mesh indices for processing
@@ -436,8 +406,8 @@ class SceneBuilder:
 #                       self.scene_tangents.append(tri_tangents[i].astype(dtype=np.float32))
                         self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
 #                       self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
-                        self.scene_materials.append(material_data)
-#                       self.scene_materials.append(material_data)
+                        self.scene_material_indices.append(current_material_index)
+#                       self.scene_material_indices.append(current_material_index)
 
                     # Create VBOs for the rasterization pass to support hybrid rendering.
 #                   # Create VBOs for the rasterization pass to support hybrid rendering.
@@ -543,73 +513,6 @@ class SceneBuilder:
             albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
 #           albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
 
-            # Prepare Material Data for the SSBO
-#           # Prepare Material Data for the SSBO
-            # The layout must match the 'Material' struct definition in the shader (std430 alignment)
-#           # The layout must match the 'Material' struct definition in the shader (std430 alignment)
-            # struct Material {
-#           # struct Material {
-            #     vec4 albedo; // .w is unused/padding
-#           #     vec4 albedo; // .w is unused/padding
-            #     float roughness;
-#           #     float roughness;
-            #     float metallic;
-#           #     float metallic;
-            #     float transmission;
-#           #     float transmission;
-            #     float ior;
-#           #     float ior;
-            #     float texture_index_albedo;
-#           #     float texture_index_albedo;
-            #     float texture_index_roughness;
-#           #     float texture_index_roughness;
-            #     float texture_index_metallic;
-#           #     float texture_index_metallic;
-            #     float texture_index_normal;
-#           #     float texture_index_normal;
-            #     float emissive;
-#           #     float emissive;
-            #     float texture_index_emissive;
-#           #     float texture_index_emissive;
-            #     float padding001;
-#           #     float padding001;
-            #     float padding002;
-#           #     float padding002;
-            # };
-#           # };
-            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
-#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
-            material_data: npt.NDArray[np.float32] = np.array([
-#           material_data: npt.NDArray[np.float32] = np.array([
-                albedo[0], albedo[1], albedo[2], 0.0,
-#               albedo[0], albedo[1], albedo[2], 0.0,
-                material["roughness"],
-#               material["roughness"],
-                material["metallic"],
-#               material["metallic"],
-                material["transmission"],
-#               material["transmission"],
-                material["ior"],
-#               material["ior"],
-                material["texture_index_albedo"],
-#               material["texture_index_albedo"],
-                material["texture_index_roughness"],
-#               material["texture_index_roughness"],
-                material["texture_index_metallic"],
-#               material["texture_index_metallic"],
-                material["texture_index_normal"],
-#               material["texture_index_normal"],
-                material["emissive"],
-#               material["emissive"],
-                material["texture_index_emissive"],
-#               material["texture_index_emissive"],
-                0.0,
-#               0.0,
-                0.0,
-#               0.0,
-            ], dtype=np.float32)
-#           ], dtype=np.float32)
-
             for i, triangle_vertices in enumerate(base_triangles):
 #           for i, triangle_vertices in enumerate(base_triangles):
                 ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype=np.float32)
@@ -624,8 +527,8 @@ class SceneBuilder:
 #               transformed_triangle: npt.NDArray[np.float32] = transformed_vertices_h[:, :3]
                 self.scene_triangles.append(transformed_triangle.copy())
 #               self.scene_triangles.append(transformed_triangle.copy())
-                self.scene_materials.append(material_data)
-#               self.scene_materials.append(material_data)
+                self.scene_material_indices.append(material_index)
+#               self.scene_material_indices.append(material_index)
                 # Append UVs (no transformation needed usually for simple mapping)
 #               # Append UVs (no transformation needed usually for simple mapping)
                 self.scene_uvs.append(base_uvs[i])
@@ -692,8 +595,8 @@ class SceneBuilder:
                 self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
 #               self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
 
-    def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes]:
-#   def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes]:
+    def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
+#   def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
         def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
             return np.array([vertex0, vertex1, vertex2], dtype=np.float32)
@@ -1063,8 +966,49 @@ class SceneBuilder:
 #       # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
         # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
 #       # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
-        world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
-#       world_materials: npt.NDArray[np.float32] = np.array(self.scene_materials, dtype=np.float32)
+        
+        packed_materials = []
+#       packed_materials = []
+        for material in self.materials:
+#       for material in self.materials:
+            albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
+#           albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
+            packed_materials.append(np.array([
+#           packed_materials.append(np.array([
+                albedo[0], albedo[1], albedo[2], 0.0,
+#               albedo[0], albedo[1], albedo[2], 0.0,
+                material["roughness"],
+#               material["roughness"],
+                material["metallic"],
+#               material["metallic"],
+                material["transmission"],
+#               material["transmission"],
+                material["ior"],
+#               material["ior"],
+                material["texture_index_albedo"],
+#               material["texture_index_albedo"],
+                material["texture_index_roughness"],
+#               material["texture_index_roughness"],
+                material["texture_index_metallic"],
+#               material["texture_index_metallic"],
+                material["texture_index_normal"],
+#               material["texture_index_normal"],
+                material["emissive"],
+#               material["emissive"],
+                material["texture_index_emissive"],
+#               material["texture_index_emissive"],
+                0.0,
+#               0.0,
+                0.0,
+#               0.0,
+            ], dtype=np.float32))
+#           ], dtype=np.float32))
+
+        world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
+#       world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
+
+        world_material_indices: npt.NDArray[np.int32] = np.array(self.scene_material_indices, dtype=np.int32)
+#       world_material_indices: npt.NDArray[np.int32] = np.array(self.scene_material_indices, dtype=np.int32)
 
         world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
 #       world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
@@ -1075,5 +1019,5 @@ class SceneBuilder:
         world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
 #       world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
 
-        return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
-#       return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
+        return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_material_indices.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
+#       return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_material_indices.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()

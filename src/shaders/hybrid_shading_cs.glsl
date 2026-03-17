@@ -111,6 +111,15 @@
     };
 //  };
 
+    // Material Indices Buffer
+//  // Material Indices Buffer
+    layout(std430, binding = 12) buffer SceneMaterialIndices {
+//  layout(std430, binding = 12) buffer SceneMaterialIndices {
+        int materialIndices[]; // 1 integer per triangle
+//      int materialIndices[]; // 1 integer per triangle
+    };
+//  };
+
     struct Ray {
 //  struct Ray {
         vec3 origin;
@@ -132,12 +141,8 @@
 //      vec2 uvSurfaceCoordinate;
         float minDistance;
 //      float minDistance;
-        bool isHitted;
-//      bool isHitted;
         bool isFrontFaceHitted;
 //      bool isFrontFaceHitted;
-        int materialIndex;
-//      int materialIndex;
         int triangleIndex;
 //      int triangleIndex;
     };
@@ -151,8 +156,6 @@
 //      vec3 attenuation;
         vec3 emission;
 //      vec3 emission;
-        bool isScattered;
-//      bool isScattered;
         vec3 albedo;
 //      vec3 albedo;
         float roughness;
@@ -361,12 +364,30 @@
 //      vec3 sunDir = normalize(vec3(0.0, 0.5, 0.5));
         float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
 //      float sun = clamp(dot(dir, sunDir), 0.0, 1.0);
-        col += 0.4 * vec3(10.0, 10.6, 10.3) * pow(sun, 8.0); // Wide soft orange glow
-//      col += 0.4 * vec3(10.0, 10.6, 10.3) * pow(sun, 8.0); // Wide soft orange glow
-        col += 0.3 * vec3(10.0, 10.8, 10.5) * pow(sun, 64.0); // Bright golden core
-//      col += 0.3 * vec3(10.0, 10.8, 10.5) * pow(sun, 64.0); // Bright golden core
-        col += 0.5 * vec3(10.0, 10.0, 10.0) * pow(sun, 512.0); // Intense white disk
-//      col += 0.5 * vec3(10.0, 10.0, 10.0) * pow(sun, 512.0); // Intense white disk
+        float sun2 = sun * sun;
+//      float sun2 = sun * sun;
+        float sun4 = sun2 * sun2;
+//      float sun4 = sun2 * sun2;
+        float sun8 = sun4 * sun4;
+//      float sun8 = sun4 * sun4;
+        float sun16 = sun8 * sun8;
+//      float sun16 = sun8 * sun8;
+        float sun32 = sun16 * sun16;
+//      float sun32 = sun16 * sun16;
+        float sun64 = sun32 * sun32;
+//      float sun64 = sun32 * sun32;
+        float sun128 = sun64 * sun64;
+//      float sun128 = sun64 * sun64;
+        float sun256 = sun128 * sun128;
+//      float sun256 = sun128 * sun128;
+        float sun512 = sun256 * sun256;
+//      float sun512 = sun256 * sun256;
+        col += 0.4 * vec3(10.0, 10.6, 10.3) * sun8; // Wide soft orange glow
+//      col += 0.4 * vec3(10.0, 10.6, 10.3) * sun8; // Wide soft orange glow
+        col += 0.3 * vec3(10.0, 10.8, 10.5) * sun64; // Bright golden core
+//      col += 0.3 * vec3(10.0, 10.8, 10.5) * sun64; // Bright golden core
+        col += 0.5 * vec3(10.0, 10.0, 10.0) * sun512; // Intense white disk
+//      col += 0.5 * vec3(10.0, 10.0, 10.0) * sun512; // Intense white disk
         return col;
 //      return col;
     }
@@ -518,13 +539,8 @@
 //  RayHitResult intersectTriangleClosestHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
         RayHitResult result;
 //      RayHitResult result;
-        result.materialIndex = triangleIndex;
-//      result.materialIndex = triangleIndex;
-
-        result.isHitted = false;
-//      result.isHitted = false;
-        result.triangleIndex = triangleIndex;
-//      result.triangleIndex = triangleIndex;
+        result.triangleIndex = -1;
+//      result.triangleIndex = -1;
         result.minDistance = rayTravelDistanceLimit.max;
 //      result.minDistance = rayTravelDistanceLimit.max;
 
@@ -578,53 +594,12 @@
 
         if (t > EPSILON) {
 //      if (t > EPSILON) {
-            result.isHitted = true;
-//          result.isHitted = true;
             result.minDistance = t;
 //          result.minDistance = t;
             result.triangleIndex = triangleIndex;
 //          result.triangleIndex = triangleIndex;
-            // Interpolate UVs
-//          // Interpolate UVs
-            int uvOffset = triangleIndex * 3;
-//          int uvOffset = triangleIndex * 3;
-            vec2 uv0 = uvs[uvOffset + 0];
-//          vec2 uv0 = uvs[uvOffset + 0];
-            vec2 uv1 = uvs[uvOffset + 1];
-//          vec2 uv1 = uvs[uvOffset + 1];
-            vec2 uv2 = uvs[uvOffset + 2];
-//          vec2 uv2 = uvs[uvOffset + 2];
-            vec2 interpolatedUV = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
-//          vec2 interpolatedUV = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
-            result.uvSurfaceCoordinate = interpolatedUV;
-//          result.uvSurfaceCoordinate = interpolatedUV;
-            // Interpolate Normals
-//          // Interpolate Normals
-            int normalOffsetIdx = triangleIndex * 9;
-//          int normalOffsetIdx = triangleIndex * 9;
-            vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
-//          vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
-            vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
-//          vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
-            vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
-//          vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
-            vec3 interpolatedNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
-//          vec3 interpolatedNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
-            result.hittedSideNormal = interpolatedNormal;
-//          result.hittedSideNormal = interpolatedNormal;
-
-            // Interpolate Tangents
-//          // Interpolate Tangents
-            vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
-//          vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
-            vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
-//          vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
-            vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
-//          vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
-            vec3 interpolatedTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
-//          vec3 interpolatedTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
-            result.hittedSideTangent = interpolatedTangent;
-//          result.hittedSideTangent = interpolatedTangent;
+            result.uvSurfaceCoordinate = vec2(u, v);
+//          result.uvSurfaceCoordinate = vec2(u, v);
 
             return result;
 //          return result;
@@ -730,8 +705,8 @@
 //  RayHitResult traverseBVHClosestHit(Ray ray, Interval rayTravelDistanceLimit) {
         RayHitResult finalResult;
 //      RayHitResult finalResult;
-        finalResult.isHitted = false;
-//      finalResult.isHitted = false;
+        finalResult.triangleIndex = -1;
+//      finalResult.triangleIndex = -1;
         finalResult.minDistance = rayTravelDistanceLimit.max; // Initialize with max
 //      finalResult.minDistance = rayTravelDistanceLimit.max; // Initialize with max
         float maxDist = rayTravelDistanceLimit.max;
@@ -770,8 +745,8 @@
 //              int triIdx = int(node.max_right.w);
                 RayHitResult temp = intersectTriangleClosestHit(ray, triIdx, currentLimit);
 //              RayHitResult temp = intersectTriangleClosestHit(ray, triIdx, currentLimit);
-                if (temp.isHitted && temp.minDistance < maxDist) {
-//              if (temp.isHitted && temp.minDistance < maxDist) {
+                if (temp.triangleIndex != -1) {
+//              if (temp.triangleIndex != -1) {
                     finalResult = temp;
 //                  finalResult = temp;
                     maxDist = temp.minDistance;
@@ -816,6 +791,57 @@
 //              if (distR < maxDist) stack[stackPtr++] = childIndexR;
             }
 //          }
+        }
+//      }
+
+        if (finalResult.triangleIndex != -1) {
+//      if (finalResult.triangleIndex != -1) {
+            float u = finalResult.uvSurfaceCoordinate.x;
+//          float u = finalResult.uvSurfaceCoordinate.x;
+            float v = finalResult.uvSurfaceCoordinate.y;
+//          float v = finalResult.uvSurfaceCoordinate.y;
+            int triangleIndex = finalResult.triangleIndex;
+//          int triangleIndex = finalResult.triangleIndex;
+
+            // Interpolate UVs
+//          // Interpolate UVs
+            int uvOffset = triangleIndex * 3;
+//          int uvOffset = triangleIndex * 3;
+            vec2 uv0 = uvs[uvOffset + 0];
+//          vec2 uv0 = uvs[uvOffset + 0];
+            vec2 uv1 = uvs[uvOffset + 1];
+//          vec2 uv1 = uvs[uvOffset + 1];
+            vec2 uv2 = uvs[uvOffset + 2];
+//          vec2 uv2 = uvs[uvOffset + 2];
+            finalResult.uvSurfaceCoordinate = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
+//          finalResult.uvSurfaceCoordinate = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
+
+            // Interpolate Normals
+//          // Interpolate Normals
+            int normalOffsetIdx = triangleIndex * 9;
+//          int normalOffsetIdx = triangleIndex * 9;
+            vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
+//          vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
+            vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
+//          vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
+            vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
+//          vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
+            finalResult.hittedSideNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
+//          finalResult.hittedSideNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
+
+            // Interpolate Tangents
+//          // Interpolate Tangents
+            vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
+//          vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
+            vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
+//          vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
+            vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
+//          vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
+            finalResult.hittedSideTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
+//          finalResult.hittedSideTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
+
+            finalResult.at = ray.origin + ray.direction * finalResult.minDistance;
+//          finalResult.at = ray.origin + ray.direction * finalResult.minDistance;
         }
 //      }
 
@@ -915,10 +941,24 @@
 //      // Schlick weight for grazing angles
         float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
 //      float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
-        float lightScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotL, 5.0);
-//      float lightScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotL, 5.0);
-        float viewScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotV, 5.0);
-//      float viewScatter = 1.0 + (fd90 - 1.0) * pow(1.0 - NdotV, 5.0);
+        
+        float oNdotL = 1.0 - NdotL;
+//      float oNdotL = 1.0 - NdotL;
+        float oNdotL2 = oNdotL * oNdotL;
+//      float oNdotL2 = oNdotL * oNdotL;
+        float oNdotL5 = oNdotL2 * oNdotL2 * oNdotL;
+//      float oNdotL5 = oNdotL2 * oNdotL2 * oNdotL;
+        float lightScatter = 1.0 + (fd90 - 1.0) * oNdotL5;
+//      float lightScatter = 1.0 + (fd90 - 1.0) * oNdotL5;
+
+        float oNdotV = 1.0 - NdotV;
+//      float oNdotV = 1.0 - NdotV;
+        float oNdotV2 = oNdotV * oNdotV;
+//      float oNdotV2 = oNdotV * oNdotV;
+        float oNdotV5 = oNdotV2 * oNdotV2 * oNdotV;
+//      float oNdotV5 = oNdotV2 * oNdotV2 * oNdotV;
+        float viewScatter = 1.0 + (fd90 - 1.0) * oNdotV5;
+//      float viewScatter = 1.0 + (fd90 - 1.0) * oNdotV5;
 
         return (albedo / PI) * lightScatter * viewScatter;
 //      return (albedo / PI) * lightScatter * viewScatter;
@@ -1105,8 +1145,6 @@
 //      materialLightScatteringResult.attenuation = vec3(0.0);
         materialLightScatteringResult.emission = vec3(0.0);
 //      materialLightScatteringResult.emission = vec3(0.0);
-        materialLightScatteringResult.isScattered = false;
-//      materialLightScatteringResult.isScattered = false;
         materialLightScatteringResult.albedo = vec3(0.0);
 //      materialLightScatteringResult.albedo = vec3(0.0);
         materialLightScatteringResult.roughness = 0.0;
@@ -1230,8 +1268,6 @@
 //      // Early exit for back-facing rays to prevent shading artifacts
         if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
 //      if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
-            materialLightScatteringResult.isScattered = false;
-//          materialLightScatteringResult.isScattered = false;
             return materialLightScatteringResult;
 //          return materialLightScatteringResult;
         }
@@ -1281,8 +1317,6 @@
 //              float cosThetaL = max(dot(shadingNormal, specularReflectedDirection), 0.0);
                 materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
 //              materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
-                materialLightScatteringResult.isScattered = true;
-//              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = roughness < 0.05;
 //              materialLightScatteringResult.isDelta = roughness < 0.05;
                 materialLightScatteringResult.pdf = pdf;
@@ -1291,8 +1325,6 @@
 //          } else {
                 // Current/Recent ray is/was absorbed (next ray is scattering into surface)
 //              // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-                materialLightScatteringResult.isScattered = false;
-//              materialLightScatteringResult.isScattered = false;
             }
 //          }
         } else {
@@ -1350,8 +1382,6 @@
 //                  materialLightScatteringResult.attenuation = vec3(1.0);
                 }
 //              }
-                materialLightScatteringResult.isScattered = true;
-//              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = true; // No NEE for transmission
 //              materialLightScatteringResult.isDelta = true; // No NEE for transmission
                 materialLightScatteringResult.pdf = 1.0;
@@ -1375,8 +1405,6 @@
 //              float cosThetaL = max(dot(shadingNormal, diffuseDirection), 0.0);
                 materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
 //              materialLightScatteringResult.attenuation = bsdf * cosThetaL / max(pdf, EPSILON_MATH);
-                materialLightScatteringResult.isScattered = true;
-//              materialLightScatteringResult.isScattered = true;
                 materialLightScatteringResult.isDelta = false;
 //              materialLightScatteringResult.isDelta = false;
                 materialLightScatteringResult.pdf = pdf;
@@ -1392,8 +1420,6 @@
 
     struct SphereLightHit {
 //  struct SphereLightHit {
-        bool isHitted;
-//      bool isHitted;
         float dist;
 //      float dist;
         int lightIndex;
@@ -1407,8 +1433,6 @@
 //  SphereLightHit intersectSphereLights(Ray ray) {
         SphereLightHit hit;
 //      SphereLightHit hit;
-        hit.isHitted = false;
-//      hit.isHitted = false;
         hit.dist = INF;
 //      hit.dist = INF;
         hit.lightIndex = -1;
@@ -1430,8 +1454,6 @@
 //              float d = -b - sqrt(h);
                 if (d > EPSILON_OFFSET && d < hit.dist) {
 //              if (d > EPSILON_OFFSET && d < hit.dist) {
-                    hit.isHitted = true;
-//                  hit.isHitted = true;
                     hit.dist = d;
 //                  hit.dist = d;
                     hit.lightIndex = i;
@@ -1513,12 +1535,10 @@
 
                 if (sampleGlobalPosition.w == 0.0) {
 //              if (sampleGlobalPosition.w == 0.0) {
-                    rayHitResult.isHitted = false;
-//                  rayHitResult.isHitted = false;
+                    rayHitResult.triangleIndex = -1;
+//                  rayHitResult.triangleIndex = -1;
                 } else {
 //              } else {
-                    rayHitResult.isHitted = true;
-//                  rayHitResult.isHitted = true;
                     rayHitResult.at = sampleGlobalPosition.xyz;
 //                  rayHitResult.at = sampleGlobalPosition.xyz;
                     rayHitResult.hittedSideNormal = normalize(sampleGlobalNormal.xyz);
@@ -1535,8 +1555,6 @@
 //                      rayHitResult.hittedSideNormal = -rayHitResult.hittedSideNormal;
                     }
 //                  }
-                    rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
-//                  rayHitResult.materialIndex = int(sampleGlobalPosition.w) - 1;
                     rayHitResult.triangleIndex = int(sampleGlobalPosition.w) - 1;
 //                  rayHitResult.triangleIndex = int(sampleGlobalPosition.w) - 1;
                     rayHitResult.minDistance = length(rayHitResult.at - currentRay.origin);
@@ -1555,8 +1573,8 @@
                 rayHitResult = traverseBVHClosestHit(currentRay, hitInterval);
 //              rayHitResult = traverseBVHClosestHit(currentRay, hitInterval);
 
-                if (rayHitResult.isHitted) {
-//              if (rayHitResult.isHitted) {
+                if (rayHitResult.triangleIndex != -1) {
+//              if (rayHitResult.triangleIndex != -1) {
                     // Fix front face normal
 //                  // Fix front face normal
                     bool frontFace = dot(currentRay.direction, rayHitResult.hittedSideNormal) < 0.0;
@@ -1579,10 +1597,10 @@
 
             bool hitLight = false;
 //          bool hitLight = false;
-            if (lightHit.isHitted) {
-//          if (lightHit.isHitted) {
-                if (!rayHitResult.isHitted || lightHit.dist < rayHitResult.minDistance) {
-//              if (!rayHitResult.isHitted || lightHit.dist < rayHitResult.minDistance) {
+            if (lightHit.lightIndex != -1) {
+//          if (lightHit.lightIndex != -1) {
+                if (rayHitResult.triangleIndex == -1 || lightHit.dist < rayHitResult.minDistance) {
+//              if (rayHitResult.triangleIndex == -1 || lightHit.dist < rayHitResult.minDistance) {
                     hitLight = true;
 //                  hitLight = true;
                 }
@@ -1641,8 +1659,8 @@
             }
 //          }
 
-            if (!rayHitResult.isHitted) {
-//          if (!rayHitResult.isHitted) {
+            if (rayHitResult.triangleIndex == -1) {
+//          if (rayHitResult.triangleIndex == -1) {
                 // Sky
 //              // Sky
                 vec3 sky = getSkyColor(currentRay.direction);
@@ -1654,8 +1672,10 @@
             }
 //          }
 
-            Material material = materials[rayHitResult.materialIndex];
-//          Material material = materials[rayHitResult.materialIndex];
+            int actualMaterialIndex = materialIndices[rayHitResult.triangleIndex];
+//          int actualMaterialIndex = materialIndices[rayHitResult.triangleIndex];
+            Material material = materials[actualMaterialIndex];
+//          Material material = materials[actualMaterialIndex];
 
             // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
 //          // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
@@ -1779,8 +1799,8 @@
             }
 //          }
 
-            if (!scatterResult.isScattered) {
-//          if (!scatterResult.isScattered) {
+            if (scatterResult.scatteredRay.direction == vec3(0.0)) {
+//          if (scatterResult.scatteredRay.direction == vec3(0.0)) {
                 break;
 //              break;
             }
