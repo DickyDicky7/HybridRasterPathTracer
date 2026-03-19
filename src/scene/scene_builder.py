@@ -966,11 +966,47 @@ class SceneBuilder:
 #       # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
         # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
 #       # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
-        
+
         packed_materials = []
 #       packed_materials = []
         for material in self.materials:
 #       for material in self.materials:
+            # Prepare Material Data for the SSBO
+#           # Prepare Material Data for the SSBO
+            # The layout must match the 'Material' struct definition in the shader (std430 alignment)
+#           # The layout must match the 'Material' struct definition in the shader (std430 alignment)
+            # struct Material {
+#           # struct Material {
+            #     vec4 albedo; // .w is unused/padding
+#           #     vec4 albedo; // .w is unused/padding
+            #     float roughness;
+#           #     float roughness;
+            #     float metallic;
+#           #     float metallic;
+            #     float transmission;
+#           #     float transmission;
+            #     float ior;
+#           #     float ior;
+            #     float texture_index_albedo;
+#           #     float texture_index_albedo;
+            #     float texture_index_roughness;
+#           #     float texture_index_roughness;
+            #     float texture_index_metallic;
+#           #     float texture_index_metallic;
+            #     float texture_index_normal;
+#           #     float texture_index_normal;
+            #     float emissive;
+#           #     float emissive;
+            #     float texture_index_emissive;
+#           #     float texture_index_emissive;
+            #     float padding001;
+#           #     float padding001;
+            #     float padding002;
+#           #     float padding002;
+            # };
+#           # };
+            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
+#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
             albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
 #           albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
             packed_materials.append(np.array([

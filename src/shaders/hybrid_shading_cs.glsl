@@ -917,7 +917,7 @@
 //      // Schlick weight for grazing angles
         float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
 //      float fd90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
-        
+
         float oNdotL = 1.0 - NdotL;
 //      float oNdotL = 1.0 - NdotL;
         float oNdotL2 = oNdotL * oNdotL;
@@ -1212,6 +1212,8 @@
         }
 //      }
 
+        // Store material properties for NEE
+//      // Store material properties for NEE
         outAlbedo = albedo;
 //      outAlbedo = albedo;
         outRoughness = roughness;
@@ -1665,7 +1667,7 @@
 //          float scatterPdf;
             bool scatterIsDelta;
 //          bool scatterIsDelta;
-            
+
             bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
 //          bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
 
