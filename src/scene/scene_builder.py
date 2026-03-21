@@ -13,27 +13,15 @@ from src.scene import bvh
 from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
 from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
 
-class SceneBatch:
-    def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
-#   def __init__(self, vao: mgl.VertexArray, number_of_instances: int, triangle_count_per_instance: int) -> None:
-        self.vao: mgl.VertexArray = vao
-#       self.vao: mgl.VertexArray = vao
-        self.number_of_instances: int = number_of_instances
-#       self.number_of_instances: int = number_of_instances
-        self.triangle_count_per_instance: int = triangle_count_per_instance
-#       self.triangle_count_per_instance: int = triangle_count_per_instance
-        pass
-#       pass
-
 class SceneBuilder:
     # The SceneBuilder is the central coordinator for preparing geometry for the Hybrid Renderer.
 #   # The SceneBuilder is the central coordinator for preparing geometry for the Hybrid Renderer.
     # It has two main outputs:
 #   # It has two main outputs:
-    # 1. Rasterization Resources: VAOs/VBOs for the primary G-Buffer pass (OpenGL state).
-#   # 1. Rasterization Resources: VAOs/VBOs for the primary G-Buffer pass (OpenGL state).
-    # 2. Ray Tracing Resources: Compact packed float arrays (triangles, normals, BVH nodes) for Compute Shaders.
-#   # 2. Ray Tracing Resources: Compact packed float arrays (triangles, normals, BVH nodes) for Compute Shaders.
+    # 1. Rasterization Resources: A unified VBO containing the global interleaved vertex buffer.
+#   # 1. Rasterization Resources: A unified VBO containing the global interleaved vertex buffer.
+    # 2. Ray Tracing Resources: The same VBO bound as an SSBO, plus BVH and Material data.
+#   # 2. Ray Tracing Resources: The same VBO bound as an SSBO, plus BVH and Material data.
     def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
 #   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
         self.ctx = ctx
@@ -56,8 +44,6 @@ class SceneBuilder:
 #       self.scene_normals: list[npt.NDArray[np.float32]] = []
         self.scene_tangents: list[npt.NDArray[np.float32]] = []
 #       self.scene_tangents: list[npt.NDArray[np.float32]] = []
-        self.scene_batches: list[SceneBatch] = []
-#       self.scene_batches: list[SceneBatch] = []
 
     def calculate_triangle_tangent(self, v0: vec3f32, v1: vec3f32, v2: vec3f32, uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> vec3f32:
 #   def calculate_triangle_tangent(self, v0: vec3f32, v1: vec3f32, v2: vec3f32, uv0: vec2f32, uv1: vec2f32, uv2: vec2f32) -> vec3f32:
@@ -114,25 +100,6 @@ class SceneBuilder:
 #           tangent = tangent / norm
         return (tangent[0], tangent[1], tangent[2])
 #       return (tangent[0], tangent[1], tangent[2])
-
-    def face(self, vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32, vertex3: vec3f32, face_normal: vec3f32, face_tangent: vec3f32, uv0: vec2f32 = (0.0, 0.0), uv1: vec2f32 = (1.0, 0.0), uv2: vec2f32 = (1.0, 1.0), uv3: vec2f32 = (0.0, 1.0)) -> npt.NDArray[np.float32]:
-#   def face(self, vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32, vertex3: vec3f32, face_normal: vec3f32, face_tangent: vec3f32, uv0: vec2f32 = (0.0, 0.0), uv1: vec2f32 = (1.0, 0.0), uv2: vec2f32 = (1.0, 1.0), uv3: vec2f32 = (0.0, 1.0)) -> npt.NDArray[np.float32]:
-        return np.array([
-#       return np.array([
-            *vertex0, *face_normal, *face_tangent, *uv0,
-#           *vertex0, *face_normal, *face_tangent, *uv0,
-            *vertex1, *face_normal, *face_tangent, *uv1,
-#           *vertex1, *face_normal, *face_tangent, *uv1,
-            *vertex2, *face_normal, *face_tangent, *uv2,
-#           *vertex2, *face_normal, *face_tangent, *uv2,
-            *vertex2, *face_normal, *face_tangent, *uv2,
-#           *vertex2, *face_normal, *face_tangent, *uv2,
-            *vertex3, *face_normal, *face_tangent, *uv3,
-#           *vertex3, *face_normal, *face_tangent, *uv3,
-            *vertex0, *face_normal, *face_tangent, *uv0,
-#           *vertex0, *face_normal, *face_tangent, *uv0,
-        ], dtype=np.float32)
-#       ], dtype=np.float32)
 
     def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
 #   def add_cube(self, position: vec3f32, rotation: vec3f32, scale: vec3f32, material_index: int) -> None:
@@ -272,15 +239,6 @@ class SceneBuilder:
                             current_material_index = material_indices[0] # Fallback
 #                           current_material_index = material_indices[0] # Fallback
 
-                    # Prepare material data for GPU upload
-#                   # Prepare material data for GPU upload
-                    # This involves packing material properties (albedo, roughness, metallic, etc.) into a float array
-#                   # This involves packing material properties (albedo, roughness, metallic, etc.) into a float array
-                    material: Material = self.materials[current_material_index]
-#                   material: Material = self.materials[current_material_index]
-                    albedo: vec4f32 = (*material["albedo"], 0.0)
-#                   albedo: vec4f32 = (*material["albedo"], 0.0)
-
                     # Flatten the mesh indices for processing
 #                   # Flatten the mesh indices for processing
                     # Assimp might provide indices per face (e.g., list of 3 ints), so we flatten them into a single 1D array
@@ -409,62 +367,6 @@ class SceneBuilder:
                         self.scene_material_indices.append(current_material_index)
 #                       self.scene_material_indices.append(current_material_index)
 
-                    # Create VBOs for the rasterization pass to support hybrid rendering.
-#                   # Create VBOs for the rasterization pass to support hybrid rendering.
-                    # 1. Rasterization: Uses these VBOs for fast primary visibility (G-Buffer).
-#                   # 1. Rasterization: Uses these VBOs for fast primary visibility (G-Buffer).
-                    # 2. Ray Tracing: Uses the SSBOs (built later from self.scene_*) for reflections/GI.
-#                   # 2. Ray Tracing: Uses the SSBOs (built later from self.scene_*) for reflections/GI.
-
-                    # Since SceneBatch is designed for instancing, we treat this merged model as a single-instance batch.
-#                   # Since SceneBatch is designed for instancing, we treat this merged model as a single-instance batch.
-                    # While rasterization typically uses local geometry + instance transforms, we have already baked
-#                   # While rasterization typically uses local geometry + instance transforms, we have already baked
-                    # the transforms into the vertices for the Ray Tracing SSBOs (to simplify BVH construction).
-#                   # the transforms into the vertices for the Ray Tracing SSBOs (to simplify BVH construction).
-                    # To maintain consistency and avoid duplicating geometry buffers, we upload the
-#                   # To maintain consistency and avoid duplicating geometry buffers, we upload the
-                    # Pre-Transformed Geometry as the "local" geometry for the VBO.
-#                   # Pre-Transformed Geometry as the "local" geometry for the VBO.
-                    # Consequently, the Instance Transform passed to the shader will be the Identity Matrix.
-#                   # Consequently, the Instance Transform passed to the shader will be the Identity Matrix.
-
-                    # Prepare VBO data: Interleaved [Position(3), Normal(3), Tangent(3), UV(2)]
-#                   # Prepare VBO data: Interleaved [Position(3), Normal(3), Tangent(3), UV(2)]
-                    # Note: Vertices are already flattened (N, 3) and transformed to World Space.
-#                   # Note: Vertices are already flattened (N, 3) and transformed to World Space.
-
-                    mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype(dtype=np.float32)
-#                   mesh_data = np.hstack([transformed_vertices, transformed_normals, transformed_tangents, uvs]).astype(dtype=np.float32)
-                    vbo_mesh = self.ctx.buffer(mesh_data.tobytes())
-#                   vbo_mesh = self.ctx.buffer(mesh_data.tobytes())
-
-                    # Instance Data: Identity Matrix + Material Index
-#                   # Instance Data: Identity Matrix + Material Index
-                    identity = np.eye(4, dtype=np.float32).flatten()
-#                   identity = np.eye(4, dtype=np.float32).flatten()
-                    inst_data = np.concatenate([identity, albedo[:3], [float(current_material_index)]]).astype(dtype=np.float32)
-#                   inst_data = np.concatenate([identity, albedo[:3], [float(current_material_index)]]).astype(dtype=np.float32)
-                    vbo_instance = self.ctx.buffer(inst_data.tobytes())
-#                   vbo_instance = self.ctx.buffer(inst_data.tobytes())
-
-                    vao = self.ctx.vertex_array(
-#                   vao = self.ctx.vertex_array(
-                        self.program_geometry,
-#                       self.program_geometry,
-                        [
-#                       [
-                            (vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-#                           (vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-                            (vbo_instance, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                           (vbo_instance, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-                        ],
-#                       ],
-                    )
-#                   )
-                    self.scene_batches.append(SceneBatch(vao=vao, number_of_instances=1, triangle_count_per_instance=n_triangles))
-#                   self.scene_batches.append(SceneBatch(vao=vao, number_of_instances=1, triangle_count_per_instance=n_triangles))
-
         except Exception as e:
 #       except Exception as e:
             print(f"Failed to load model {path}: {e}")
@@ -507,11 +409,6 @@ class SceneBuilder:
 #           # Retrieve material parameters using the material index stored in the instance data (float at index 19)
             material_index = int(instance_data[19])
 #           material_index = int(instance_data[19])
-            material: Material = self.materials[material_index]
-#           material: Material = self.materials[material_index]
-
-            albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
-#           albedo: vec4f32 = (*material["albedo"], 0.0) # Pad to vec4
 
             for i, triangle_vertices in enumerate(base_triangles):
 #           for i, triangle_vertices in enumerate(base_triangles):
@@ -595,8 +492,8 @@ class SceneBuilder:
                 self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
 #               self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
 
-    def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
-#   def build(self) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
+    def build(self) -> tuple[int, bytes, bytes, bytes]:
+#   def build(self) -> tuple[int, bytes, bytes, bytes]:
         def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
 #       def get_triangle_vertices(vertex0: vec3f32, vertex1: vec3f32, vertex2: vec3f32) -> npt.NDArray[np.float32]:
             return np.array([vertex0, vertex1, vertex2], dtype=np.float32)
@@ -805,45 +702,6 @@ class SceneBuilder:
             self.append_transformed_triangles(instance_data_list=self.cube_instance_data, base_triangles=cube_base_triangles, base_normals=cube_base_normals, base_uvs=cube_base_uvs, base_tangents=cube_base_tangents)
 #           self.append_transformed_triangles(instance_data_list=self.cube_instance_data, base_triangles=cube_base_triangles, base_normals=cube_base_normals, base_uvs=cube_base_uvs, base_tangents=cube_base_tangents)
 
-            cube_geometries: list[npt.NDArray[np.float32]] = []
-#           cube_geometries: list[npt.NDArray[np.float32]] = []
-            cube_geometries.append(self.face(vertex0=cube_point0, vertex1=cube_point1, vertex2=cube_point2, vertex3=cube_point3, face_normal=(0.0, 0.0, 1.0), face_tangent=(1.0, 0.0, 0.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point0, vertex1=cube_point1, vertex2=cube_point2, vertex3=cube_point3, face_normal=(0.0, 0.0, 1.0), face_tangent=(1.0, 0.0, 0.0)))
-            cube_geometries.append(self.face(vertex0=cube_point5, vertex1=cube_point4, vertex2=cube_point7, vertex3=cube_point6, face_normal=(0.0, 0.0, -1.0), face_tangent=(-1.0, 0.0, 0.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point5, vertex1=cube_point4, vertex2=cube_point7, vertex3=cube_point6, face_normal=(0.0, 0.0, -1.0), face_tangent=(-1.0, 0.0, 0.0)))
-            cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point0, vertex2=cube_point3, vertex3=cube_point7, face_normal=(-1.0, 0.0, 0.0), face_tangent=(0.0, 0.0, 1.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point0, vertex2=cube_point3, vertex3=cube_point7, face_normal=(-1.0, 0.0, 0.0), face_tangent=(0.0, 0.0, 1.0)))
-            cube_geometries.append(self.face(vertex0=cube_point1, vertex1=cube_point5, vertex2=cube_point6, vertex3=cube_point2, face_normal=(1.0, 0.0, 0.0), face_tangent=(0.0, 0.0, -1.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point1, vertex1=cube_point5, vertex2=cube_point6, vertex3=cube_point2, face_normal=(1.0, 0.0, 0.0), face_tangent=(0.0, 0.0, -1.0)))
-            cube_geometries.append(self.face(vertex0=cube_point3, vertex1=cube_point2, vertex2=cube_point6, vertex3=cube_point7, face_normal=(0.0, 1.0, 0.0), face_tangent=(1.0, 0.0, 0.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point3, vertex1=cube_point2, vertex2=cube_point6, vertex3=cube_point7, face_normal=(0.0, 1.0, 0.0), face_tangent=(1.0, 0.0, 0.0)))
-            cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point5, vertex2=cube_point1, vertex3=cube_point0, face_normal=(0.0, -1.0, 0.0), face_tangent=(1.0, 0.0, 0.0)))
-#           cube_geometries.append(self.face(vertex0=cube_point4, vertex1=cube_point5, vertex2=cube_point1, vertex3=cube_point0, face_normal=(0.0, -1.0, 0.0), face_tangent=(1.0, 0.0, 0.0)))
-
-            cube_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(cube_geometries).tobytes())
-#           cube_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(cube_geometries).tobytes())
-            cube_instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
-#           cube_instance_bytes: bytes = np.concatenate(self.cube_instance_data).tobytes()
-            cube_vbo_instances: mgl.Buffer = self.ctx.buffer(cube_instance_bytes)
-#           cube_vbo_instances: mgl.Buffer = self.ctx.buffer(cube_instance_bytes)
-
-            cube_vao: mgl.VertexArray = self.ctx.vertex_array(
-#           cube_vao: mgl.VertexArray = self.ctx.vertex_array(
-                self.program_geometry,
-#               self.program_geometry,
-                [
-#               [
-                    (cube_vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-#                   (cube_vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-                    (cube_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (cube_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-                ],
-#               ],
-            )
-#           )
-            self.scene_batches.append(SceneBatch(vao=cube_vao, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
-#           self.scene_batches.append(SceneBatch(vao=cube_vao, number_of_instances=len(self.cube_instance_data), triangle_count_per_instance=12))
-
         # Create Plane Batch
 #       # Create Plane Batch
         if self.plane_instance_data:
@@ -864,10 +722,8 @@ class SceneBuilder:
             plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
 #           plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
 
-            # Plane UVs (tiled 20x20 since plane is large!)
-#           # Plane UVs (tiled 20x20 since plane is large!)
-            # Or just 1x1. Let's do 10x10 tiling
-#           # Or just 1x1. Let's do 10x10 tiling
+            # Plane UVs (tiled 10x10)
+#           # Plane UVs (tiled 10x10)
             tiling = 10.0
 #           tiling = 10.0
             plane_uv0: vec2f32 = (0.0, 0.0)
@@ -917,35 +773,6 @@ class SceneBuilder:
             self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles, base_normals=plane_base_normals, base_uvs=plane_base_uvs, base_tangents=plane_base_tangents)
 #           self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles, base_normals=plane_base_normals, base_uvs=plane_base_uvs, base_tangents=plane_base_tangents)
 
-            plane_geometries: list[npt.NDArray[np.float32]] = []
-#           plane_geometries: list[npt.NDArray[np.float32]] = []
-            plane_geometries.append(self.face(vertex0=plane_point0, vertex1=plane_point1, vertex2=plane_point2, vertex3=plane_point3, face_normal=(0.0, 1.0, 0.0), face_tangent=(1.0, 0.0, 0.0), uv0=plane_uv0, uv1=plane_uv1, uv2=plane_uv2, uv3=plane_uv3))
-#           plane_geometries.append(self.face(vertex0=plane_point0, vertex1=plane_point1, vertex2=plane_point2, vertex3=plane_point3, face_normal=(0.0, 1.0, 0.0), face_tangent=(1.0, 0.0, 0.0), uv0=plane_uv0, uv1=plane_uv1, uv2=plane_uv2, uv3=plane_uv3))
-
-            plane_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(plane_geometries).tobytes())
-#           plane_vbo_mesh: mgl.Buffer = self.ctx.buffer(np.concatenate(plane_geometries).tobytes())
-            plane_instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
-#           plane_instance_bytes: bytes = np.concatenate(self.plane_instance_data).tobytes()
-            plane_vbo_instances: mgl.Buffer = self.ctx.buffer(plane_instance_bytes)
-#           plane_vbo_instances: mgl.Buffer = self.ctx.buffer(plane_instance_bytes)
-
-            plane_vao: mgl.VertexArray = self.ctx.vertex_array(
-#           plane_vao: mgl.VertexArray = self.ctx.vertex_array(
-                self.program_geometry,
-#               self.program_geometry,
-                [
-#               [
-                    (plane_vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-#                   (plane_vbo_mesh, "3f 3f 3f 2f", "inVertexLocalPosition", "inVertexLocalNormal", "inVertexLocalTangent", "inVertexLocalUV"),
-                    (plane_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-#                   (plane_vbo_instances, "16f 3f 1x4/i", "inInstanceTransformModel", "inInstanceAlbedo"),
-                ],
-#               ],
-            )
-#           )
-            self.scene_batches.append(SceneBatch(vao=plane_vao, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
-#           self.scene_batches.append(SceneBatch(vao=plane_vao, number_of_instances=len(self.plane_instance_data), triangle_count_per_instance=2))
-
         # Consolidate all scene geometry into a single array of triangles in world space
 #       # Consolidate all scene geometry into a single array of triangles in world space
         world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype=np.float32)
@@ -960,12 +787,42 @@ class SceneBuilder:
         bvh_data: bytes = lbvh.simple_build()
 #       bvh_data: bytes = lbvh.simple_build()
 
-        # Flatten and pack all scene data (materials, UVs, normals, tangents) into byte arrays for GPU upload
-#       # Flatten and pack all scene data (materials, UVs, normals, tangents) into byte arrays for GPU upload
-        # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
-#       # These flattened arrays become the content of the readonly SSBOs (Shader Storage Buffer Objects).
-        # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
-#       # The Compute Shader will index into these using 'gl_InstanceID' or BVH leaf references.
+        # Interleave vertices for the unified Global Geometry Buffer
+#       # Interleave vertices for the unified Global Geometry Buffer
+        # Each vertex packs into 3 vec4s to match std430 alignment constraints optimally
+#       # Each vertex packs into 3 vec4s to match std430 alignment constraints optimally
+        # [px, py, pz, u, nx, ny, nz, v, tx, ty, tz, material_index]
+#       # [px, py, pz, u, nx, ny, nz, v, tx, ty, tz, material_index]
+        packed_vertices = []
+#       packed_vertices = []
+        num_triangles = len(self.scene_triangles)
+#       num_triangles = len(self.scene_triangles)
+        for i in range(num_triangles):
+#       for i in range(num_triangles):
+            tri = self.scene_triangles[i]
+#           tri = self.scene_triangles[i]
+            uvs = self.scene_uvs[i]
+#           uvs = self.scene_uvs[i]
+            norms = self.scene_normals[i]
+#           norms = self.scene_normals[i]
+            tans = self.scene_tangents[i]
+#           tans = self.scene_tangents[i]
+            mat_idx = float(self.scene_material_indices[i])
+#           mat_idx = float(self.scene_material_indices[i])
+            for v in range(3):
+#           for v in range(3):
+                packed_vertices.extend([
+#               packed_vertices.extend([
+                    tri[v][0], tri[v][1], tri[v][2], uvs[v][0],
+#                   tri[v][0], tri[v][1], tri[v][2], uvs[v][0],
+                    norms[v][0], norms[v][1], norms[v][2], uvs[v][1],
+#                   norms[v][0], norms[v][1], norms[v][2], uvs[v][1],
+                    tans[v][0], tans[v][1], tans[v][2], mat_idx
+#                   tans[v][0], tans[v][1], tans[v][2], mat_idx
+                ])
+#               ])
+        world_vertices: npt.NDArray[np.float32] = np.array(packed_vertices, dtype=np.float32)
+#       world_vertices: npt.NDArray[np.float32] = np.array(packed_vertices, dtype=np.float32)
 
         packed_materials = []
 #       packed_materials = []
@@ -1043,17 +900,5 @@ class SceneBuilder:
         world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
 #       world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
 
-        world_material_indices: npt.NDArray[np.int32] = np.array(self.scene_material_indices, dtype=np.int32)
-#       world_material_indices: npt.NDArray[np.int32] = np.array(self.scene_material_indices, dtype=np.int32)
-
-        world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
-#       world_uvs: npt.NDArray[np.float32] = np.array(self.scene_uvs, dtype=np.float32)
-
-        world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype=np.float32)
-#       world_normals: npt.NDArray[np.float32] = np.array(self.scene_normals, dtype=np.float32)
-
-        world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
-#       world_tangents: npt.NDArray[np.float32] = np.array(self.scene_tangents, dtype=np.float32)
-
-        return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_material_indices.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
-#       return bvh_data, world_triangles.flatten().tobytes(), world_materials.flatten().tobytes(), world_material_indices.flatten().tobytes(), world_uvs.flatten().tobytes(), world_normals.flatten().tobytes(), world_tangents.flatten().tobytes()
+        return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()
+#       return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()

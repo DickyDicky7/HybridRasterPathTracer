@@ -1,0 +1,85 @@
+Hybrid Renderer Architecture Optimization Summary
+Hybrid Renderer Architecture Optimization Summary
+
+1. Geometry Deduplication and Buffer Aliasing
+1. Geometry Deduplication and Buffer Aliasing
+---------------------------------------------
+---------------------------------------------
+Issue:
+Issue:
+The scene geometry was being allocated twice on the GPU. First, as standard OpenGL VBOs (Vertex Buffer Objects) for the primary G-Buffer rasterization pass. Second, as five distinct massive SSBOs (Shader Storage Buffer Objects) flattened for the Ray Tracing Compute Pass (`ssbo_triangles`, `ssbo_normals`, `ssbo_uvs`, `ssbo_tangents`, `ssbo_material_indices`).
+The scene geometry was being allocated twice on the GPU. First, as standard OpenGL VBOs (Vertex Buffer Objects) for the primary G-Buffer rasterization pass. Second, as five distinct massive SSBOs (Shader Storage Buffer Objects) flattened for the Ray Tracing Compute Pass (`ssbo_triangles`, `ssbo_normals`, `ssbo_uvs`, `ssbo_tangents`, `ssbo_material_indices`).
+
+Resolution:
+Resolution:
+- We refactored `SceneBuilder` to accumulate all raw vertex attributes into a single interleaved float array matching a standardized `vec4` memory layout.
+- We refactored `SceneBuilder` to accumulate all raw vertex attributes into a single interleaved float array matching a standardized `vec4` memory layout.
+- We eliminated the need for `SceneBatch` instances by utilizing a single unified geometric buffer containing the entire pre-transformed scene.
+- We eliminated the need for `SceneBatch` instances by utilizing a single unified geometric buffer containing the entire pre-transformed scene.
+- We leveraged OpenGL Buffer Aliasing: The exact same `buffer_global_vertices` object is bound as an array buffer for rasterization (via `vao_scene`) and simultaneously bound to `binding=7` as a readonly SSBO for the Compute Shader.
+- We leveraged OpenGL Buffer Aliasing: The exact same `buffer_global_vertices` object is bound as an array buffer for rasterization (via `vao_scene`) and simultaneously bound to `binding=7` as a readonly SSBO for the Compute Shader.
+- This immediately cuts the geometry VRAM footprint in half.
+- This immediately cuts the geometry VRAM footprint in half.
+
+2. Compute Cache Locality (Structure of Arrays vs Array of Structures)
+2. Compute Cache Locality (Structure of Arrays vs Array of Structures)
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+Issue:
+Issue:
+In `hybrid_shading_cs.glsl`, the ray intersection routines (Möller-Trumbore) were pulling vertex properties from 5 completely disparate continuous arrays. This "Structure of Arrays" (SoA) layout caused severe cache trashing during BVH traversal, as evaluating a single hit required fetching memory from 5 different areas of VRAM.
+In `hybrid_shading_cs.glsl`, the ray intersection routines (Möller-Trumbore) were pulling vertex properties from 5 completely disparate continuous arrays. This "Structure of Arrays" (SoA) layout caused severe cache trashing during BVH traversal, as evaluating a single hit required fetching memory from 5 different areas of VRAM.
+
+Resolution:
+Resolution:
+- We migrated to an "Array of Structures" (AoS) layout by defining a `VertexData` struct explicitly packed for GLSL `std430` alignment requirements:
+- We migrated to an "Array of Structures" (AoS) layout by defining a `VertexData` struct explicitly packed for GLSL `std430` alignment requirements:
+  ```glsl
+  ```glsl
+  struct VertexData {
+  struct VertexData {
+      vec4 position_u;
+      vec4 position_u;
+      vec4 normal_v;
+      vec4 normal_v;
+      vec4 tangent_mat;
+      vec4 tangent_mat;
+  };
+  };
+  ```
+  ```
+- The triangle intersection code now accesses properties contiguously. Fetching a vertex's position automatically caches its normal and tangent for the subsequent shading logic.
+- The triangle intersection code now accesses properties contiguously. Fetching a vertex's position automatically caches its normal and tangent for the subsequent shading logic.
+- We encoded the UVs inside the `.w` component of the position and normal vectors, and encoded the `material_index` inside the `.w` component of the tangent vector. This mathematically eliminates the need for separate UV and Material Index buffers entirely.
+- We encoded the UVs inside the `.w` component of the position and normal vectors, and encoded the `material_index` inside the `.w` component of the tangent vector. This mathematically eliminates the need for separate UV and Material Index buffers entirely.
+
+3. Rasterization Draw Call Overhead Reduction
+3. Rasterization Draw Call Overhead Reduction
+---------------------------------------------
+---------------------------------------------
+Issue:
+Issue:
+The application was issuing a separate `vao.render()` draw call per model segment. As the scene complexity grows, iterating through Python lists and dispatching dozens of draw calls becomes a severe CPU bottleneck in ModernGL.
+The application was issuing a separate `vao.render()` draw call per model segment. As the scene complexity grows, iterating through Python lists and dispatching dozens of draw calls becomes a severe CPU bottleneck in ModernGL.
+
+Resolution:
+Resolution:
+- By pre-transforming all geometry into global space during the Assimp loading phase, we eliminated the need for per-instance Model Matrix uniforms.
+- By pre-transforming all geometry into global space during the Assimp loading phase, we eliminated the need for per-instance Model Matrix uniforms.
+- The entire scene is now uploaded as a single monolithic Vertex Array Object.
+- The entire scene is now uploaded as a single monolithic Vertex Array Object.
+- The `on_render` loop now executes the primary rasterization pass with a single, highly efficient `self.vao_scene.render(mode=mgl.TRIANGLES)` call.
+- The `on_render` loop now executes the primary rasterization pass with a single, highly efficient `self.vao_scene.render(mode=mgl.TRIANGLES)` call.
+
+4. Next Steps for Further VRAM Reduction
+4. Next Steps for Further VRAM Reduction
+----------------------------------------
+----------------------------------------
+- Convert the 4.29 GB `f4` (32-bit float) Texture Array down to an `f1` (unsigned 8-bit integer) representation to save ~75% texture memory.
+- Convert the 4.29 GB `f4` (32-bit float) Texture Array down to an `f1` (unsigned 8-bit integer) representation to save ~75% texture memory.
+- Implement Octahedral Encoding in the G-Buffer to compress Normal and Tangent data into a single `RGBA16F` texture, freeing up `texture_geometry_global_tangent`.
+- Implement Octahedral Encoding in the G-Buffer to compress Normal and Tangent data into a single `RGBA16F` texture, freeing up `texture_geometry_global_tangent`.
+- Calculate World Space Position algorithmically from the Depth Buffer in the Compute Shader, completely eliminating the need for `texture_geometry_global_position` (saving ~132 MB at 4K).
+- Calculate World Space Position algorithmically from the Depth Buffer in the Compute Shader, completely eliminating the need for `texture_geometry_global_position` (saving ~132 MB at 4K).
+- Alias the denoiser's intermediate ping-pong buffer with one of the idle G-Buffer textures (e.g., Albedo) since its data is no longer required after the first shading pass.
+- Alias the denoiser's intermediate ping-pong buffer with one of the idle G-Buffer textures (e.g., Albedo) since its data is no longer required after the first shading pass.

@@ -26,8 +26,8 @@ import pyoidn     # type: ignore[import-untyped]
 import pyoidn
 from src.renderer.shader_compiler import resolve_includes
 from src.renderer.shader_compiler import resolve_includes
-from src.scene.scene_builder import SceneBuilder, SceneBatch
-from src.scene.scene_builder import SceneBuilder, SceneBatch
+from src.scene.scene_builder import SceneBuilder
+from src.scene.scene_builder import SceneBuilder
 from src.scene.camera import Camera
 from src.scene.camera import Camera
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
@@ -352,8 +352,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (vase_albedo_idx, -1.0, -1.0) if vase_albedo_idx >= 0.0 else (1.0, 0.5, 1.0),
-#           "albedo": (vase_albedo_idx, -1.0, -1.0) if vase_albedo_idx >= 0.0 else (1.0, 0.5, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 0.0,
@@ -404,8 +404,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Material 0: lambert4
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 0.5,
 #           "roughness": 0.5,
             "metallic": 0.0,
@@ -435,8 +435,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Material 1: glock
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_pistol, -1.0, -1.0) if idx_albedo_pistol >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -485,8 +485,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_0, -1.0, -1.0) if idx_albedo_0 >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_0, -1.0, -1.0) if idx_albedo_0 >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0, # Assume metallic
@@ -525,8 +525,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_1, -1.0, -1.0) if idx_albedo_1 >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_1, -1.0, -1.0) if idx_albedo_1 >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -565,8 +565,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_2, -1.0, -1.0) if idx_albedo_2 >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_2, -1.0, -1.0) if idx_albedo_2 >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -605,8 +605,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_3, -1.0, -1.0) if idx_albedo_3 >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_3, -1.0, -1.0) if idx_albedo_3 >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -659,8 +659,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials.append({
 #       self.materials.append({
-            "albedo": (idx_albedo_mp9, -1.0, -1.0) if idx_albedo_mp9 >= 0.0 else (1.0, 1.0, 1.0),
-#           "albedo": (idx_albedo_mp9, -1.0, -1.0) if idx_albedo_mp9 >= 0.0 else (1.0, 1.0, 1.0),
+            "albedo": (1.0, 1.0, 1.0),
+#           "albedo": (1.0, 1.0, 1.0),
             "roughness": 1.0,
 #           "roughness": 1.0,
             "metallic": 1.0,
@@ -694,47 +694,40 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
 
 
-        bvh_data, triangles_data, materials_data, material_indices_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
-#       bvh_data, triangles_data, materials_data, material_indices_data, uvs_data, normals_data, tangents_data = self.scene_builder.build()
-        self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
-#       self.scene_batches: list[SceneBatch] = self.scene_builder.scene_batches
+        self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
+#       self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
 
-        # Upload to SSBOs
-#       # Upload to SSBOs
+        # Upload to buffers
+#       # Upload to buffers
         # 1. Nodes (already bytes)
 #       # 1. Nodes (already bytes)
         self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
 #       self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
 
-        # 2. Triangles (flattened world space)
-#       # 2. Triangles (flattened world space)
-        self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=triangles_data)
-#       self.ssbo_triangles: mgl.Buffer = self.ctx.buffer(data=triangles_data)
+        # 2. Single global geometry buffer serving as both VBO and SSBO
+#       # 2. Single global geometry buffer serving as both VBO and SSBO
+        self.buffer_global_vertices: mgl.Buffer = self.ctx.buffer(data=vertices_data)
+#       self.buffer_global_vertices: mgl.Buffer = self.ctx.buffer(data=vertices_data)
 
-        # 3. Materials (Albedos)
-#       # 3. Materials (Albedos)
+        # 3. Materials
+#       # 3. Materials
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 
-        # 4. Material Indices
-#       # 4. Material Indices
-        self.ssbo_material_indices: mgl.Buffer = self.ctx.buffer(data=material_indices_data)
-#       self.ssbo_material_indices: mgl.Buffer = self.ctx.buffer(data=material_indices_data)
-
-        # 5. UVs (vec2s per vertex per triangle: 6 floats per triangle)
-#       # 5. UVs (vec2s per vertex per triangle: 6 floats per triangle)
-        self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
-#       self.ssbo_uvs: mgl.Buffer = self.ctx.buffer(data=uvs_data)
-
-        # 5. Normals (vec3s per vertex per triangle: 9 floats per triangle)
-#       # 5. Normals (vec3s per vertex per triangle: 9 floats per triangle)
-        self.ssbo_normals: mgl.Buffer = self.ctx.buffer(data=normals_data)
-#       self.ssbo_normals: mgl.Buffer = self.ctx.buffer(data=normals_data)
-
-        # 6. Tangents (vec3s per vertex per triangle: 9 floats per triangle)
-#       # 6. Tangents (vec3s per vertex per triangle: 9 floats per triangle)
-        self.ssbo_tangents: mgl.Buffer = self.ctx.buffer(data=tangents_data)
-#       self.ssbo_tangents: mgl.Buffer = self.ctx.buffer(data=tangents_data)
+        # Single VAO for the entire scene
+#       # Single VAO for the entire scene
+        self.vao_scene: mgl.VertexArray = self.ctx.vertex_array(
+#       self.vao_scene: mgl.VertexArray = self.ctx.vertex_array(
+            self.program_geometry,
+#           self.program_geometry,
+            [
+#           [
+                (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
+#               (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
+            ],
+#           ],
+        )
+#       )
 
         self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
@@ -1255,22 +1248,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
 #       typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
 
-        current_triangle_offset: int = 0
-#       current_triangle_offset: int = 0
-        for scene_batch in self.scene_batches:
-#       for scene_batch in self.scene_batches:
-            if "uBaseTriangleIndexOffset" in self.program_geometry:
-#           if "uBaseTriangleIndexOffset" in self.program_geometry:
-                self.program_geometry["uBaseTriangleIndexOffset"] = current_triangle_offset
-#               self.program_geometry["uBaseTriangleIndexOffset"] = current_triangle_offset
-            if "uTriangleCountPerInstance" in self.program_geometry:
-#           if "uTriangleCountPerInstance" in self.program_geometry:
-                self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
-#               self.program_geometry["uTriangleCountPerInstance"] = scene_batch.triangle_count_per_instance
-            scene_batch.vao.render(instances=scene_batch.number_of_instances)
-#           scene_batch.vao.render(instances=scene_batch.number_of_instances)
-            current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
-#           current_triangle_offset += scene_batch.number_of_instances * scene_batch.triangle_count_per_instance
+        self.ssbo_materials.bind_to_storage_buffer(binding=8)
+#       self.ssbo_materials.bind_to_storage_buffer(binding=8)
+        self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
+#       self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
 
         if "uRenderMode" in self.program_renderer:
 #       if "uRenderMode" in self.program_renderer:
@@ -1322,18 +1303,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Bind BVH buffers
         self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
 #       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
-        self.ssbo_triangles.bind_to_storage_buffer(binding=7)
-#       self.ssbo_triangles.bind_to_storage_buffer(binding=7)
+        self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
+#       self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
         self.ssbo_materials.bind_to_storage_buffer(binding=8)
 #       self.ssbo_materials.bind_to_storage_buffer(binding=8)
-        self.ssbo_uvs.bind_to_storage_buffer(binding=9)
-#       self.ssbo_uvs.bind_to_storage_buffer(binding=9)
-        self.ssbo_normals.bind_to_storage_buffer(binding=10)
-#       self.ssbo_normals.bind_to_storage_buffer(binding=10)
-        self.ssbo_tangents.bind_to_storage_buffer(binding=11)
-#       self.ssbo_tangents.bind_to_storage_buffer(binding=11)
-        self.ssbo_material_indices.bind_to_storage_buffer(binding=12)
-#       self.ssbo_material_indices.bind_to_storage_buffer(binding=12)
 
         self.texture_accum.bind_to_image(5, read=True, write=True)
 #       self.texture_accum.bind_to_image(5, read=True, write=True)

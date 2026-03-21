@@ -18,7 +18,7 @@
 //  layout(binding = 5, rgba32f) uniform image2D textureAccum;
 
     // Bounding Volume Hierarchy (BVH) acceleration structure: Nodes store Axis-Aligned Bounding Box (AABB) extents to rapidly cull empty space. Inner nodes store pointers to child nodes, while leaf nodes store offsets to primitive triangle data, enabling logarithmic time-complexity for ray intersection tests.
-    // Bounding Volume Hierarchy (BVH) acceleration structure: Nodes store Axis-Aligned Bounding Box (AABB) extents to rapidly cull empty space. Inner nodes store pointers to child nodes, while leaf nodes store offsets to primitive triangle data, enabling logarithmic time-complexity for ray intersection tests.
+//  // Bounding Volume Hierarchy (BVH) acceleration structure: Nodes store Axis-Aligned Bounding Box (AABB) extents to rapidly cull empty space. Inner nodes store pointers to child nodes, while leaf nodes store offsets to primitive triangle data, enabling logarithmic time-complexity for ray intersection tests.
     struct Node {
 //  struct Node {
         vec4 min_left; // min.xyz, left_child_index (or -1.0 if leaf)
@@ -35,17 +35,28 @@
     };
 //  };
 
-    // Global Geometry Buffer: A contiguous, tightly-packed flat array of world-space vertex positions (3 floats per vertex, 9 floats per triangle). This linearly mapped buffer minimizes cache misses during the computationally heavy closest-hit and any-hit ray-triangle intersection routines.
-    // Global Geometry Buffer: A contiguous, tightly-packed flat array of world-space vertex positions (3 floats per vertex, 9 floats per triangle). This linearly mapped buffer minimizes cache misses during the computationally heavy closest-hit and any-hit ray-triangle intersection routines.
-    layout(std430, binding = 7) buffer SceneTriangles {
-//  layout(std430, binding = 7) buffer SceneTriangles {
-        float triangles[];
-//      float triangles[];
+    // Global Geometry Buffer: Interleaved vertex data optimized for cache locality and memory reuse with VBOs.
+//  // Global Geometry Buffer: Interleaved vertex data optimized for cache locality and memory reuse with VBOs.
+    struct VertexData {
+//  struct VertexData {
+        vec4 position_u;
+//      vec4 position_u;
+        vec4 normal_v;
+//      vec4 normal_v;
+        vec4 tangent_mat;
+//      vec4 tangent_mat;
+    };
+//  };
+
+    layout(std430, binding = 7) buffer SceneVertices {
+//  layout(std430, binding = 7) buffer SceneVertices {
+        VertexData vertices[];
+//      VertexData vertices[];
     };
 //  };
 
     // Material Properties Buffer: Stores physically-based rendering (PBR) parameters including Base Color/Albedo, perceptual Roughness, Metallic masking, and Transmission coefficients. It also holds indexed pointers to bindless texture arrays for spatially varying material evaluations during shading.
-    // Material Properties Buffer: Stores physically-based rendering (PBR) parameters including Base Color/Albedo, perceptual Roughness, Metallic masking, and Transmission coefficients. It also holds indexed pointers to bindless texture arrays for spatially varying material evaluations during shading.
+//  // Material Properties Buffer: Stores physically-based rendering (PBR) parameters including Base Color/Albedo, perceptual Roughness, Metallic masking, and Transmission coefficients. It also holds indexed pointers to bindless texture arrays for spatially varying material evaluations during shading.
     struct Material {
 //  struct Material {
         vec4 albedo;       // r, g, b, padding
@@ -81,42 +92,6 @@
 //  layout(std430, binding = 8) buffer SceneMaterials {
         Material materials[];
 //      Material materials[];
-    };
-//  };
-
-    // UVs Buffer
-//  // UVs Buffer
-    layout(std430, binding = 9) buffer SceneUVs {
-//  layout(std430, binding = 9) buffer SceneUVs {
-        vec2 uvs[]; // 3 per triangle
-//      vec2 uvs[]; // 3 per triangle
-    };
-//  };
-
-    // Normals Buffer
-//  // Normals Buffer
-    layout(std430, binding = 10) buffer SceneNormals {
-//  layout(std430, binding = 10) buffer SceneNormals {
-        float normals[]; // 3 floats per vertex -> 9 floats per triangle
-//      float normals[]; // 3 floats per vertex -> 9 floats per triangle
-    };
-//  };
-
-    // Tangents Buffer
-//  // Tangents Buffer
-    layout(std430, binding = 11) buffer SceneTangents {
-//  layout(std430, binding = 11) buffer SceneTangents {
-        float tangents[]; // 3 floats per vertex -> 9 floats per triangle
-//      float tangents[]; // 3 floats per vertex -> 9 floats per triangle
-    };
-//  };
-
-    // Material Indices Buffer
-//  // Material Indices Buffer
-    layout(std430, binding = 12) buffer SceneMaterialIndices {
-//  layout(std430, binding = 12) buffer SceneMaterialIndices {
-        int materialIndices[]; // 1 integer per triangle
-//      int materialIndices[]; // 1 integer per triangle
     };
 //  };
 
@@ -232,7 +207,7 @@
 //  const int MAX_BOUNCES = 32;
 
     // Xorshift/Wang Hash Pseudo-Random Number Generator (PRNG): Provides fast, statistically robust uniform random number sequences essential for Monte Carlo integration. This ensures unbiased stochastic sampling across hemisphere distributions, Russian Roulette termination, and Next Event Estimation.
-    // Xorshift/Wang Hash Pseudo-Random Number Generator (PRNG): Provides fast, statistically robust uniform random number sequences essential for Monte Carlo integration. This ensures unbiased stochastic sampling across hemisphere distributions, Russian Roulette termination, and Next Event Estimation.
+//  // Xorshift/Wang Hash Pseudo-Random Number Generator (PRNG): Provides fast, statistically robust uniform random number sequences essential for Monte Carlo integration. This ensures unbiased stochastic sampling across hemisphere distributions, Russian Roulette termination, and Next Event Estimation.
     uint seed;
 //  uint seed;
     uint wang_hash(uint seed) {
@@ -288,13 +263,13 @@
 //  }
 
     // Environment Lighting: Evaluates infinite background illumination by either sampling a High Dynamic Range (HDR) environment map via equirectangular (latitude-longitude) projection, or by falling back to a computationally derived procedural atmospheric scattering sky model.
-    // Environment Lighting: Evaluates infinite background illumination by either sampling a High Dynamic Range (HDR) environment map via equirectangular (latitude-longitude) projection, or by falling back to a computationally derived procedural atmospheric scattering sky model.
+//  // Environment Lighting: Evaluates infinite background illumination by either sampling a High Dynamic Range (HDR) environment map via equirectangular (latitude-longitude) projection, or by falling back to a computationally derived procedural atmospheric scattering sky model.
     vec3 getSkyColor(vec3 dir) {
 //  vec3 getSkyColor(vec3 dir) {
         if (uUseHdri) {
 //      if (uUseHdri) {
             // Equirectangular mapping
-            // Equirectangular mapping
+//          // Equirectangular mapping
             float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
 //          float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
             float phi = atan(-dir.z, dir.x) + PI; // longitude: 0 to 2*PI
@@ -311,7 +286,7 @@
 //      }
         /*
         // Fallback: procedural gradient sky
-        // Fallback: procedural gradient sky
+//      // Fallback: procedural gradient sky
         float t = 0.5 * (dir.y + 1.0);
 //      float t = 0.5 * (dir.y + 1.0);
         return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), t);
@@ -454,14 +429,14 @@
 //  // Ray-Triangle Fast Intersection (Any-Hit): A specialized Möller-Trumbore intersection algorithm optimized for boolean occlusion queries. It terminates immediately upon finding any valid surface within the distance limits, making it highly efficient for evaluating binary shadow rays in Next Event Estimation.
     bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
 //  bool intersectTriangleAnyHit(Ray ray, int triangleIndex, Interval rayTravelDistanceLimit) {
-        int offset = triangleIndex * 9;
-//      int offset = triangleIndex * 9;
-        vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
-//      vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
-        vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
-//      vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
-        vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
-//      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
+        int offset = triangleIndex * 3;
+//      int offset = triangleIndex * 3;
+        vec3 v0 = vertices[offset + 0].position_u.xyz;
+//      vec3 v0 = vertices[offset + 0].position_u.xyz;
+        vec3 v1 = vertices[offset + 1].position_u.xyz;
+//      vec3 v1 = vertices[offset + 1].position_u.xyz;
+        vec3 v2 = vertices[offset + 2].position_u.xyz;
+//      vec3 v2 = vertices[offset + 2].position_u.xyz;
 
         const float EPSILON = EPSILON_INTERSECT;
 //      const float EPSILON = EPSILON_INTERSECT;
@@ -519,14 +494,14 @@
         result.minDistance = rayTravelDistanceLimit.max;
 //      result.minDistance = rayTravelDistanceLimit.max;
 
-        int offset = triangleIndex * 9;
-//      int offset = triangleIndex * 9;
-        vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
-//      vec3 v0 = vec3(triangles[offset + 0], triangles[offset + 1], triangles[offset + 2]);
-        vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
-//      vec3 v1 = vec3(triangles[offset + 3], triangles[offset + 4], triangles[offset + 5]);
-        vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
-//      vec3 v2 = vec3(triangles[offset + 6], triangles[offset + 7], triangles[offset + 8]);
+        int offset = triangleIndex * 3;
+//      int offset = triangleIndex * 3;
+        vec3 v0 = vertices[offset + 0].position_u.xyz;
+//      vec3 v0 = vertices[offset + 0].position_u.xyz;
+        vec3 v1 = vertices[offset + 1].position_u.xyz;
+//      vec3 v1 = vertices[offset + 1].position_u.xyz;
+        vec3 v2 = vertices[offset + 2].position_u.xyz;
+//      vec3 v2 = vertices[offset + 2].position_u.xyz;
 
         const float EPSILON = EPSILON_INTERSECT;
 //      const float EPSILON = EPSILON_INTERSECT;
@@ -781,41 +756,39 @@
 //          float v = finalResult.uvSurfaceCoordinate.y;
             int triangleIndex = finalResult.triangleIndex;
 //          int triangleIndex = finalResult.triangleIndex;
+            int offset = triangleIndex * 3;
+//          int offset = triangleIndex * 3;
 
             // Interpolate UVs
 //          // Interpolate UVs
-            int uvOffset = triangleIndex * 3;
-//          int uvOffset = triangleIndex * 3;
-            vec2 uv0 = uvs[uvOffset + 0];
-//          vec2 uv0 = uvs[uvOffset + 0];
-            vec2 uv1 = uvs[uvOffset + 1];
-//          vec2 uv1 = uvs[uvOffset + 1];
-            vec2 uv2 = uvs[uvOffset + 2];
-//          vec2 uv2 = uvs[uvOffset + 2];
+            vec2 uv0 = vec2(vertices[offset + 0].position_u.w, vertices[offset + 0].normal_v.w);
+//          vec2 uv0 = vec2(vertices[offset + 0].position_u.w, vertices[offset + 0].normal_v.w);
+            vec2 uv1 = vec2(vertices[offset + 1].position_u.w, vertices[offset + 1].normal_v.w);
+//          vec2 uv1 = vec2(vertices[offset + 1].position_u.w, vertices[offset + 1].normal_v.w);
+            vec2 uv2 = vec2(vertices[offset + 2].position_u.w, vertices[offset + 2].normal_v.w);
+//          vec2 uv2 = vec2(vertices[offset + 2].position_u.w, vertices[offset + 2].normal_v.w);
             finalResult.uvSurfaceCoordinate = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
 //          finalResult.uvSurfaceCoordinate = (1.0 - u - v) * uv0 + u * uv1 + v * uv2;
 
             // Interpolate Normals
 //          // Interpolate Normals
-            int normalOffsetIdx = triangleIndex * 9;
-//          int normalOffsetIdx = triangleIndex * 9;
-            vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
-//          vec3 n0 = vec3(normals[normalOffsetIdx + 0], normals[normalOffsetIdx + 1], normals[normalOffsetIdx + 2]);
-            vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
-//          vec3 n1 = vec3(normals[normalOffsetIdx + 3], normals[normalOffsetIdx + 4], normals[normalOffsetIdx + 5]);
-            vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
-//          vec3 n2 = vec3(normals[normalOffsetIdx + 6], normals[normalOffsetIdx + 7], normals[normalOffsetIdx + 8]);
+            vec3 n0 = vertices[offset + 0].normal_v.xyz;
+//          vec3 n0 = vertices[offset + 0].normal_v.xyz;
+            vec3 n1 = vertices[offset + 1].normal_v.xyz;
+//          vec3 n1 = vertices[offset + 1].normal_v.xyz;
+            vec3 n2 = vertices[offset + 2].normal_v.xyz;
+//          vec3 n2 = vertices[offset + 2].normal_v.xyz;
             finalResult.hittedSideNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
 //          finalResult.hittedSideNormal = normalize((1.0 - u - v) * n0 + u * n1 + v * n2);
 
             // Interpolate Tangents
 //          // Interpolate Tangents
-            vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
-//          vec3 t0 = vec3(tangents[normalOffsetIdx + 0], tangents[normalOffsetIdx + 1], tangents[normalOffsetIdx + 2]);
-            vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
-//          vec3 t1 = vec3(tangents[normalOffsetIdx + 3], tangents[normalOffsetIdx + 4], tangents[normalOffsetIdx + 5]);
-            vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
-//          vec3 t2 = vec3(tangents[normalOffsetIdx + 6], tangents[normalOffsetIdx + 7], tangents[normalOffsetIdx + 8]);
+            vec3 t0 = vertices[offset + 0].tangent_mat.xyz;
+//          vec3 t0 = vertices[offset + 0].tangent_mat.xyz;
+            vec3 t1 = vertices[offset + 1].tangent_mat.xyz;
+//          vec3 t1 = vertices[offset + 1].tangent_mat.xyz;
+            vec3 t2 = vertices[offset + 2].tangent_mat.xyz;
+//          vec3 t2 = vertices[offset + 2].tangent_mat.xyz;
             finalResult.hittedSideTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
 //          finalResult.hittedSideTangent = normalize((1.0 - u - v) * t0 + u * t1 + v * t2);
         }
@@ -827,7 +800,7 @@
 //  }
 
     // Principled BSDF Components: A collection of physically-based Bidirectional Scattering Distribution Function routines. Includes Schlick's Fresnel approximation for view-dependent reflectivity, and the GGX (Trowbridge-Reitz) microfacet distribution model for realistic rough surface scattering.
-    // Principled BSDF Components: A collection of physically-based Bidirectional Scattering Distribution Function routines. Includes Schlick's Fresnel approximation for view-dependent reflectivity, and the GGX (Trowbridge-Reitz) microfacet distribution model for realistic rough surface scattering.
+//  // Principled BSDF Components: A collection of physically-based Bidirectional Scattering Distribution Function routines. Includes Schlick's Fresnel approximation for view-dependent reflectivity, and the GGX (Trowbridge-Reitz) microfacet distribution model for realistic rough surface scattering.
     vec3 schlickFresnel(float cosine, vec3 f0) {
 //  vec3 schlickFresnel(float cosine, vec3 f0) {
         float oneMinusCos = 1.0 - cosine;
@@ -1135,8 +1108,8 @@
 //      // Texture Sampling (using textureLod for Compute Shader safety)
         if (material.textureIndexAlbedo > -0.5) {
 //      if (material.textureIndexAlbedo > -0.5) {
-            albedo = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
-//          albedo = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
+            albedo *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
+//          albedo *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), 0.0).rgb;
         }
 //      }
         if (material.textureIndexRoughness > -0.5) {
@@ -1633,8 +1606,10 @@
             }
 //          }
 
-            int actualMaterialIndex = materialIndices[rayHitResult.triangleIndex];
-//          int actualMaterialIndex = materialIndices[rayHitResult.triangleIndex];
+            // Retrieve actual material index from the packed vertex buffer (stored in tangent w-component of the first vertex of the triangle)
+//          // Retrieve actual material index from the packed vertex buffer (stored in tangent w-component of the first vertex of the triangle)
+            int actualMaterialIndex = int(vertices[rayHitResult.triangleIndex * 3].tangent_mat.w);
+//          int actualMaterialIndex = int(vertices[rayHitResult.triangleIndex * 3].tangent_mat.w);
             Material material = materials[actualMaterialIndex];
 //          Material material = materials[actualMaterialIndex];
 
@@ -1673,6 +1648,13 @@
 
             accumulatedColor += attenuation * emission;
 //          accumulatedColor += attenuation * emission;
+
+            if (!isScattered) {
+//          if (!isScattered) {
+                break;
+//              break;
+            }
+//          }
 
             // Direct Illumination (Next Event Estimation) with MIS
 //          // Direct Illumination (Next Event Estimation) with MIS
@@ -1779,12 +1761,14 @@
             }
 //          }
 
+            /*
             if (!isScattered) {
 //          if (!isScattered) {
                 break;
 //              break;
             }
 //          }
+            */
 
             attenuation *= scatterAttenuation;
 //          attenuation *= scatterAttenuation;
@@ -1853,6 +1837,6 @@
 //      imageStore(textureAccum, pixelCoordinates, vec4(newAverage, 1.0));
 
         // Note: Tone mapping and output moved to hybrid_denoise_cs.glsl
-        // Note: Tone mapping and output moved to hybrid_denoise_cs.glsl
+//      // Note: Tone mapping and output moved to hybrid_denoise_cs.glsl
     }
 //  }
