@@ -872,14 +872,14 @@ class SceneBuilder:
 #           #     float emissive;
             #     float texture_index_emissive;
 #           #     float texture_index_emissive;
-            #     float padding001;
-#           #     float padding001;
+            #     float texture_index_transmission;
+#           #     float texture_index_transmission;
             #     float padding002;
 #           #     float padding002;
             # };
 #           # };
-            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
-#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, pad, pad]
+            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad]
+#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad]
             albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
 #           albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
             packed_materials.append(np.array([
@@ -906,8 +906,8 @@ class SceneBuilder:
 #               material["emissive"],
                 material["texture_index_emissive"],
 #               material["texture_index_emissive"],
-                0.0,
-#               0.0,
+                material["texture_index_transmission"],
+#               material["texture_index_transmission"],
                 0.0,
 #               0.0,
             ], dtype=np.float32))

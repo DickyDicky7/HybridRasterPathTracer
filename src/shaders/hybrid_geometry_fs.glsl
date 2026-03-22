@@ -45,8 +45,8 @@
 //      float emissive;
         float textureIndexEmissive;
 //      float textureIndexEmissive;
-        float padding001;
-//      float padding001;
+        float textureIndexTransmission;
+//      float textureIndexTransmission;
         float padding002;
 //      float padding002;
     };

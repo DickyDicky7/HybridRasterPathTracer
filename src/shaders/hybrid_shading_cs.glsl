@@ -81,8 +81,8 @@
 //      float emissive;
         float textureIndexEmissive;
 //      float textureIndexEmissive;
-        float padding001;
-//      float padding001;
+        float textureIndexTransmission;
+//      float textureIndexTransmission;
         float padding002;
 //      float padding002;
     };
@@ -1126,6 +1126,15 @@
 //          // Assume metallic is in R channel or grayscale
             metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
 //          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), 0.0).r;
+        }
+//      }
+
+        if (material.textureIndexTransmission > -0.5) {
+//      if (material.textureIndexTransmission > -0.5) {
+            // Assume transmission is in R channel or grayscale
+//          // Assume transmission is in R channel or grayscale
+            material.transmission *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexTransmission), 0.0).r;
+//          material.transmission *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexTransmission), 0.0).r;
         }
 //      }
 

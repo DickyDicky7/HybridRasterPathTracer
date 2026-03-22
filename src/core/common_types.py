@@ -108,6 +108,8 @@ class Material(typing.TypedDict):
 #   emissive: float
     texture_index_emissive: float
 #   texture_index_emissive: float
+    texture_index_transmission: float
+#   texture_index_transmission: float
 
 class PointLight(typing.TypedDict):
     # Defines the CPU-side structure for a Point Light.
