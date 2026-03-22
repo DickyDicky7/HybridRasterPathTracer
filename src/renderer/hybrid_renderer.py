@@ -788,6 +788,9 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "UP": False, "DOWN": False, "LEFT": False, "RIGHT": False,
         }
 #       }
+
+        self.texture_array.build_mipmaps()
+#       self.texture_array.build_mipmaps()
         pass
 #       pass
 
@@ -828,17 +831,21 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         layer_index = self.next_texture_layer
 #       layer_index = self.next_texture_layer
-        self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-#       self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-        self.texture_cache[path_str] = float(layer_index)
-#       self.texture_cache[path_str] = float(layer_index)
-        self.next_texture_layer += 1
-#       self.next_texture_layer += 1
-        return float(layer_index)
-#       return float(layer_index)
+        success = self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+#       success = self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+        if success:
+#       if success:
+            self.texture_cache[path_str] = float(layer_index)
+#           self.texture_cache[path_str] = float(layer_index)
+            self.next_texture_layer += 1
+#           self.next_texture_layer += 1
+            return float(layer_index)
+#           return float(layer_index)
+        return -1.0
+#       return -1.0
 
-    def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
-#   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> None:
+    def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
+#   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
         # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
 #       # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
         # Texture Arrays allow the shader to access many different textures using a single sampler + index.
@@ -847,8 +854,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if not path.exists():
             print(f"Warning: Texture not found: {path}")
 #           print(f"Warning: Texture not found: {path}")
-            return
-#           return
+            return False
+#           return False
 
         loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
 #       loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
@@ -856,8 +863,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if loaded_data is None:
             print(f"Warning: Failed to load texture: {path}")
 #           print(f"Warning: Failed to load texture: {path}")
-            return
-#           return
+            return False
+#           return False
 
         # Ensure RGBA
         # Ensure RGBA
@@ -912,8 +919,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if is_srgb:
             # Approximate Gamma 2.2
 #           # Approximate Gamma 2.2
-            data_float = np.power(data_float, 2.2)
-#           data_float = np.power(data_float, 2.2)
+            data_float[..., :3] = np.power(data_float[..., :3], 2.2)
+#           data_float[..., :3] = np.power(data_float[..., :3], 2.2)
 
         data_bytes = data_float.tobytes()
 #       data_bytes = data_float.tobytes()
@@ -930,8 +937,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Generate mipmaps if needed (requires creating whole array though! or per layer!)
         # Generate mipmaps if needed (requires creating whole array though! or per layer!)
-        self.texture_array.build_mipmaps()
-#       self.texture_array.build_mipmaps()
+        return True
+#       return True
 
 
     """
@@ -1013,8 +1020,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Albedo
         albedo_data: bytes = self.texture_geometry_albedo.read()
 #       albedo_data: bytes = self.texture_geometry_albedo.read()
-        albedo_arr: npt.NDArray[np.float32] = np.frombuffer(albedo_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
-#       albedo_arr: npt.NDArray[np.float32] = np.frombuffer(albedo_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+        albedo_arr_uint8: npt.NDArray[np.uint8] = np.frombuffer(albedo_data, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
+#       albedo_arr_uint8: npt.NDArray[np.uint8] = np.frombuffer(albedo_data, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
+        albedo_arr: npt.NDArray[np.float32] = albedo_arr_uint8.astype(np.float32) / 255.0
+#       albedo_arr: npt.NDArray[np.float32] = albedo_arr_uint8.astype(np.float32) / 255.0
         albedo_arr = np.ascontiguousarray(albedo_arr)
 #       albedo_arr = np.ascontiguousarray(albedo_arr)
 
@@ -1022,8 +1031,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Normal
         normal_data: bytes = self.texture_geometry_global_normal.read()
 #       normal_data: bytes = self.texture_geometry_global_normal.read()
-        normal_arr: npt.NDArray[np.float32] = np.frombuffer(normal_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
-#       normal_arr: npt.NDArray[np.float32] = np.frombuffer(normal_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
+        normal_arr_f16: npt.NDArray[np.float16] = np.frombuffer(normal_data, dtype=np.float16).reshape((h, w, 4))[:, :, :3]
+#       normal_arr_f16: npt.NDArray[np.float16] = np.frombuffer(normal_data, dtype=np.float16).reshape((h, w, 4))[:, :, :3]
+        normal_arr: npt.NDArray[np.float32] = normal_arr_f16.astype(np.float32)
+#       normal_arr: npt.NDArray[np.float32] = normal_arr_f16.astype(np.float32)
         normal_arr = np.ascontiguousarray(normal_arr)
 #       normal_arr = np.ascontiguousarray(normal_arr)
 
@@ -1109,16 +1120,18 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         d = 1.0 - start_compression
 #       d = 1.0 - start_compression
-        new_peak = 1.0 - d * d / (np.maximum(peak, 1e-6) + d - start_compression)
-#       new_peak = 1.0 - d * d / (np.maximum(peak, 1e-6) + d - start_compression)
+        safe_peak = np.maximum(peak, start_compression)
+#       safe_peak = np.maximum(peak, start_compression)
+        new_peak = 1.0 - d * d / (safe_peak + d - start_compression)
+#       new_peak = 1.0 - d * d / (safe_peak + d - start_compression)
 
         # Mask for peaks that need compression
 #       # Mask for peaks that need compression
         mask = peak >= start_compression
 #       mask = peak >= start_compression
 
-        output_arr = np.where(mask, output_arr * (new_peak / np.maximum(peak, 1e-6)), output_arr)
-#       output_arr = np.where(mask, output_arr * (new_peak / np.maximum(peak, 1e-6)), output_arr)
+        output_arr = np.where(mask, output_arr * (new_peak / safe_peak), output_arr)
+#       output_arr = np.where(mask, output_arr * (new_peak / safe_peak), output_arr)
 
         current_peak = np.where(mask, new_peak, peak)
 #       current_peak = np.where(mask, new_peak, peak)

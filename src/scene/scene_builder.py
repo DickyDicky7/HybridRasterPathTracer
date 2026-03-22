@@ -98,6 +98,10 @@ class SceneBuilder:
 #       if norm > 1e-6:
             tangent = tangent / norm
 #           tangent = tangent / norm
+        else:
+#       else:
+            tangent = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+#           tangent = np.array([1.0, 0.0, 0.0], dtype=np.float32)
         return (tangent[0], tangent[1], tangent[2])
 #       return (tangent[0], tangent[1], tangent[2])
 
@@ -320,6 +324,8 @@ class SceneBuilder:
 #                   valid_norms = norms > 1e-6
                     transformed_normals[valid_norms.flatten()] /= norms[valid_norms.flatten()]
 #                   transformed_normals[valid_norms.flatten()] /= norms[valid_norms.flatten()]
+                    transformed_normals[(~valid_norms).flatten()] = [0.0, 1.0, 0.0]
+#                   transformed_normals[(~valid_norms).flatten()] = [0.0, 1.0, 0.0]
 
                     # Transform Tangents
 #                   # Transform Tangents
@@ -339,6 +345,8 @@ class SceneBuilder:
 #                   valid_tan_norms = tan_norms > 1e-6
                     transformed_tangents[valid_tan_norms.flatten()] /= tan_norms[valid_tan_norms.flatten()]
 #                   transformed_tangents[valid_tan_norms.flatten()] /= tan_norms[valid_tan_norms.flatten()]
+                    transformed_tangents[(~valid_tan_norms).flatten()] = [1.0, 0.0, 0.0]
+#                   transformed_tangents[(~valid_tan_norms).flatten()] = [1.0, 0.0, 0.0]
 
                     # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) for easy appending
 #                   # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) for easy appending
@@ -464,6 +472,10 @@ class SceneBuilder:
 #                   if norm > 1e-6:
                         Tn = Tn / norm
 #                       Tn = Tn / norm
+                    else:
+#                   else:
+                        Tn = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+#                       Tn = np.array([0.0, 1.0, 0.0], dtype=np.float32)
                     transformed_normals.append(Tn)
 #                   transformed_normals.append(Tn)
                 self.scene_normals.append(np.array(transformed_normals, dtype=np.float32))
@@ -487,6 +499,10 @@ class SceneBuilder:
 #                   if norm > 1e-6:
                         Tt = Tt / norm
 #                       Tt = Tt / norm
+                    else:
+#                   else:
+                        Tt = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+#                       Tt = np.array([1.0, 0.0, 0.0], dtype=np.float32)
                     transformed_tangents.append(Tt)
 #                   transformed_tangents.append(Tt)
                 self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
