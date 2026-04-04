@@ -10,21 +10,33 @@
 
 <div align="center">
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t001.png?raw=true)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
+[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/maxresdefault.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/hwP4Qbc7ths)
+[![Demo Video](https://img.youtube.com/vi/hwP4Qbc7ths/maxresdefault.jpg)](https://www.youtube.com/watch?v=hwP4Qbc7ths)
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/NZQR-cDmdLo)
+[![Demo Video](https://img.youtube.com/vi/NZQR-cDmdLo/maxresdefault.jpg)](https://www.youtube.com/watch?v=NZQR-cDmdLo)
+
+[![Demo Video](https://img.youtube.com/vi/ZeWaznWu4kk/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZeWaznWu4kk)
+
+[![Demo Video](https://img.youtube.com/vi/Hsf3Nuc_vFw/maxresdefault.jpg)](https://www.youtube.com/watch?v=Hsf3Nuc_vFw)
+
+[![Demo Video](https://img.youtube.com/vi/KTGqz3egw4k/maxresdefault.jpg)](https://www.youtube.com/watch?v=KTGqz3egw4k)
 
 </div>
 <!--
 <div align="center">
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t001.png?raw=true)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
+[![Demo Video](https://img.youtube.com/vi/lNo-WZ8jKRc/maxresdefault.jpg)](https://www.youtube.com/watch?v=lNo-WZ8jKRc)
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/hwP4Qbc7ths)
+[![Demo Video](https://img.youtube.com/vi/hwP4Qbc7ths/maxresdefault.jpg)](https://www.youtube.com/watch?v=hwP4Qbc7ths)
 
-[![Demo Video](https://github.com/DickyDicky7/HybridRasterPathTracer/blob/main/gallery/t002.png?raw=true)](https://youtu.be/NZQR-cDmdLo)
+[![Demo Video](https://img.youtube.com/vi/NZQR-cDmdLo/maxresdefault.jpg)](https://www.youtube.com/watch?v=NZQR-cDmdLo)
+
+[![Demo Video](https://img.youtube.com/vi/ZeWaznWu4kk/maxresdefault.jpg)](https://www.youtube.com/watch?v=ZeWaznWu4kk)
+
+[![Demo Video](https://img.youtube.com/vi/Hsf3Nuc_vFw/maxresdefault.jpg)](https://www.youtube.com/watch?v=Hsf3Nuc_vFw)
+
+[![Demo Video](https://img.youtube.com/vi/KTGqz3egw4k/maxresdefault.jpg)](https://www.youtube.com/watch?v=KTGqz3egw4k)
 
 </div>
 -->
