@@ -230,8 +230,8 @@
 //  float rand() {
         seed = wang_hash(seed);
 //      seed = wang_hash(seed);
-        return float(seed) / 4294967296.0;
-//      return float(seed) / 4294967296.0;
+        return min(float(seed) / 4294967296.0, EPSILON_RAND);
+//      return min(float(seed) / 4294967296.0, EPSILON_RAND);
     }
 //  }
     void initRNG(vec2 pixel) {
@@ -1741,6 +1741,17 @@
             Material material = materials[actualMaterialIndex];
 //          Material material = materials[actualMaterialIndex];
 
+            // Optimize first-hit albedo by using the pre-evaluated G-Buffer, bypassing a redundant texture fetch
+//          // Optimize first-hit albedo by using the pre-evaluated G-Buffer, bypassing a redundant texture fetch
+            if (depth == 0) {
+//          if (depth == 0) {
+                material.albedo = imageLoad(textureGeometryAlbedo, pixelCoordinates);
+//              material.albedo = imageLoad(textureGeometryAlbedo, pixelCoordinates);
+                material.textureIndexAlbedo = -1.0;
+//              material.textureIndexAlbedo = -1.0;
+            }
+//          }
+
             // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
 //          // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
             if (depth > 0) {
@@ -1792,8 +1803,8 @@
 //          if (uPointLightCount > 0 && !skipNEE) {
                 float rnd = rand();
 //              float rnd = rand();
-                int lightIdx = 0;
-//              int lightIdx = 0;
+                int lightIdx = max(0, uPointLightCount - 1);
+//              int lightIdx = max(0, uPointLightCount - 1);
                 for (int i = 0; i < uPointLightCount; i++) {
 //              for (int i = 0; i < uPointLightCount; i++) {
                     if (rnd <= uPointLights[i].cdf) {
@@ -1842,15 +1853,15 @@
 //                  cosThetaLight = max(cosThetaLight, 1.0e-5);
                     Ray shadowRay;
 //                  Ray shadowRay;
-                    shadowRay.origin = hitPoint + rayHitResult.hittedSideNormal * EPSILON_OFFSET;
-//                  shadowRay.origin = hitPoint + rayHitResult.hittedSideNormal * EPSILON_OFFSET;
+                    shadowRay.origin = hitPoint;
+//                  shadowRay.origin = hitPoint;
                     shadowRay.direction = shadowDir;
 //                  shadowRay.direction = shadowDir;
 
                     Interval shadowInterval;
 //                  Interval shadowInterval;
-                    shadowInterval.min = 0.0;
-//                  shadowInterval.min = 0.0;
+                    shadowInterval.min = EPSILON_OFFSET;
+//                  shadowInterval.min = EPSILON_OFFSET;
                     shadowInterval.max = actualDistLight - EPSILON_OFFSET;
 //                  shadowInterval.max = actualDistLight - EPSILON_OFFSET;
 
