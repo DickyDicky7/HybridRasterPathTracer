@@ -107,17 +107,17 @@
 //      // Albedo Demodulation: Factor out surface reflectance to filter core illumination (low variance)
         if (uStepSize == 1) {
 //      if (uStepSize == 1) {
+            // Outlier Clamping: Suppress HDR 'fireflies' produced by extreme path contributions to stabilize the filter
+//          // Outlier Clamping: Suppress HDR 'fireflies' produced by extreme path contributions to stabilize the filter
+            // Clamp extremely high values to prevent fireflies from exploding the filter.
+//          // Clamp extremely high values to prevent fireflies from exploding the filter.
+            centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
+//          centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
+
             centerColor.rgb /= max(centerAlbedo, vec3(ALBEDO_EPSILON));
 //          centerColor.rgb /= max(centerAlbedo, vec3(ALBEDO_EPSILON));
         }
 //      }
-
-        // Outlier Clamping: Suppress HDR 'fireflies' produced by extreme path contributions to stabilize the filter
-//      // Outlier Clamping: Suppress HDR 'fireflies' produced by extreme path contributions to stabilize the filter
-        // Clamp extremely high values to prevent fireflies from exploding the filter.
-//      // Clamp extremely high values to prevent fireflies from exploding the filter.
-        centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
-//      centerColor.rgb = min(centerColor.rgb, vec3(MAX_RADIANCE));
 
 //      // Calculate center luminance and tonemap to reduce firefly weight (Karis Average)
         // Calculate center luminance and tonemap to reduce firefly weight (Karis Average)
@@ -177,15 +177,15 @@
 //              // Demodulation (Pass 1 only)
                 if (uStepSize == 1) {
 //              if (uStepSize == 1) {
+                    // Firefly Clamping for Tap
+//                  // Firefly Clamping for Tap
+                    tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
+//                  tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
+
                     tapColor.rgb /= max(tapAlbedo, vec3(ALBEDO_EPSILON));
 //                  tapColor.rgb /= max(tapAlbedo, vec3(ALBEDO_EPSILON));
                 }
 //              }
-
-                // Firefly Clamping for Tap
-//              // Firefly Clamping for Tap
-                tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
-//              tapColor.rgb = min(tapColor.rgb, vec3(MAX_RADIANCE));
 
 //              float tapLuma = dot(tapColor.rgb, LUMA_WEIGHTS);
                 float tapLuma = dot(tapColor.rgb, LUMA_WEIGHTS);
