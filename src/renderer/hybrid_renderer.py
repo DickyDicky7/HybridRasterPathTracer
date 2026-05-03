@@ -786,14 +786,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Pipeline of active post-processing shaders
         self.post_processing_pipeline: list[mgl.ComputeShader] = [
 #       self.post_processing_pipeline: list[mgl.ComputeShader] = [
-            # self.program_post_chromatic_aberration,
-#           # self.program_post_chromatic_aberration,
-            # self.program_post_vignette,
-#           # self.program_post_vignette,
             self.program_post_tonemap,
 #           self.program_post_tonemap,
             self.program_post_fxaa,
 #           self.program_post_fxaa,
+            self.program_post_chromatic_aberration,
+#           self.program_post_chromatic_aberration,
+            self.program_post_vignette,
+#           self.program_post_vignette,
         ]
 #       ]
 

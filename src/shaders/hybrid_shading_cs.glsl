@@ -1295,12 +1295,12 @@
         vec3 f0 = mix(vec3(F0_DEFAULT), albedo, metallic);
 //      vec3 f0 = mix(vec3(F0_DEFAULT), albedo, metallic);
 
-        // Early exit for back-facing rays to prevent shading artifacts
-//      // Early exit for back-facing rays to prevent shading artifacts
+        // Fix normal map pointing away from incoming ray to prevent black fringes
+//      // Fix normal map pointing away from incoming ray to prevent black fringes
         if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
 //      if (dot(shadingNormal, -incomingRay.direction) <= 0.0) {
-            return false;
-//          return false;
+            shadingNormal = recentRayHitResult.hittedSideNormal;
+//          shadingNormal = recentRayHitResult.hittedSideNormal;
         }
 //      }
 
@@ -1436,6 +1436,13 @@
 //              } else {
                     diffuseDirection = shadingNormal;
 //                  diffuseDirection = shadingNormal;
+                }
+//              }
+
+                if (dot(diffuseDirection, recentRayHitResult.hittedSideNormal) <= 0.0) {
+//              if (dot(diffuseDirection, recentRayHitResult.hittedSideNormal) <= 0.0) {
+                    diffuseDirection = recentRayHitResult.hittedSideNormal;
+//                  diffuseDirection = recentRayHitResult.hittedSideNormal;
                 }
 //              }
 
@@ -1700,8 +1707,16 @@
 //                  if (pdfLightW > 0.0) {
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightBrdf
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightBrdf
-                        weightBrdf = (lastPdfW * lastPdfW) / max(lastPdfW * lastPdfW + pdfLightW * pdfLightW, 1e-8);
-//                      weightBrdf = (lastPdfW * lastPdfW) / max(lastPdfW * lastPdfW + pdfLightW * pdfLightW, 1e-8);
+                        float sumSqrBrdf = lastPdfW * lastPdfW + pdfLightW * pdfLightW;
+//                      float sumSqrBrdf = lastPdfW * lastPdfW + pdfLightW * pdfLightW;
+                        weightBrdf = 0.0;
+//                      weightBrdf = 0.0;
+                        if (sumSqrBrdf > 0.0) {
+//                      if (sumSqrBrdf > 0.0) {
+                            weightBrdf = (lastPdfW * lastPdfW) / sumSqrBrdf;
+//                          weightBrdf = (lastPdfW * lastPdfW) / sumSqrBrdf;
+                        }
+//                      }
                     }
 //                  }
 
@@ -1879,8 +1894,16 @@
 
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating weightNee
-                        float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
-//                      float weightNee = (pdfLightW * pdfLightW) / max(pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW, 1e-8);
+                        float sumSqrNee = pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW;
+//                      float sumSqrNee = pdfLightW * pdfLightW + pdfBrdfW * pdfBrdfW;
+                        float weightNee = 0.0;
+//                      float weightNee = 0.0;
+                        if (sumSqrNee > 0.0) {
+//                      if (sumSqrNee > 0.0) {
+                            weightNee = (pdfLightW * pdfLightW) / sumSqrNee;
+//                          weightNee = (pdfLightW * pdfLightW) / sumSqrNee;
+                        }
+//                      }
 
                         vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, shadingNormal, albedo, roughness, metallic, material.transmission);
 //                      vec3 bsdf = evalPrincipledBSDF(currentRay.direction, shadowDir, shadingNormal, albedo, roughness, metallic, material.transmission);
