@@ -1518,8 +1518,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       gx, gy = (w + 15) // 16, (h + 15) // 16
         self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 
         # 3. Denoise (Multi-Pass A-Trous)
 #       # 3. Denoise (Multi-Pass A-Trous)
@@ -1543,8 +1543,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.program_denoise["uFinalPass"] = 0
         self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 
         # Pass 2: Ping -> Output (Step 2)
 #       # Pass 2: Ping -> Output (Step 2)
@@ -1559,8 +1559,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.program_denoise["uFinalPass"] = 0
         self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 
         # Pass 3: Output -> Ping (Step 4)
 #       # Pass 3: Output -> Ping (Step 4)
@@ -1575,9 +1575,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.program_denoise["uFinalPass"] = 0
         self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
         # Pass 4: Ping -> Output (Step 8, Final Tone Map)
 #       # Pass 4: Ping -> Output (Step 8, Final Tone Map)
         self.texture_output.bind_to_image(0, read=False, write=True) # Output
@@ -1591,9 +1590,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.program_denoise["uFinalPass"] = 1
         self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
         # 4. Post Processing Pipeline
 #       # 4. Post Processing Pipeline
         current_read_texture: mgl.Texture = self.texture_output
@@ -1612,8 +1610,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
             post_program.run(group_x=gx, group_y=gy, group_z=1)
 #           post_program.run(group_x=gx, group_y=gy, group_z=1)
-            self.ctx.memory_barrier() # Ensure all barriers including TEXTURE_FETCH
-#           self.ctx.memory_barrier() # Ensure all barriers including TEXTURE_FETCH
+            self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#           self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 
             # Swap textures
 #           # Swap textures
