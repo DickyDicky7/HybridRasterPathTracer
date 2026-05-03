@@ -127,8 +127,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-        self.texture_output.filter = (mgl.NEAREST, mgl.NEAREST)
-#       self.texture_output.filter = (mgl.NEAREST, mgl.NEAREST)
+        self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
+#       self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
 
         self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
@@ -137,8 +137,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-        self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
-#       self.texture_ping.filter = (mgl.NEAREST, mgl.NEAREST)
+        self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
+#       self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
 
         # OIDN Setup
 #       # OIDN Setup
@@ -768,14 +768,32 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
 #       self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
 
+        post_tonemap_cs_path: pl.Path = self.resource_dir / "../shaders/post_tonemap_cs.glsl"
+#       post_tonemap_cs_path: pl.Path = self.resource_dir / "../shaders/post_tonemap_cs.glsl"
+        post_tonemap_cs_code: str = resolve_includes(post_tonemap_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       post_tonemap_cs_code: str = resolve_includes(post_tonemap_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_post_tonemap: mgl.ComputeShader = self.ctx.compute_shader(source=post_tonemap_cs_code)
+#       self.program_post_tonemap: mgl.ComputeShader = self.ctx.compute_shader(source=post_tonemap_cs_code)
+
+        post_fxaa_cs_path: pl.Path = self.resource_dir / "../shaders/post_fxaa_cs.glsl"
+#       post_fxaa_cs_path: pl.Path = self.resource_dir / "../shaders/post_fxaa_cs.glsl"
+        post_fxaa_cs_code: str = resolve_includes(post_fxaa_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       post_fxaa_cs_code: str = resolve_includes(post_fxaa_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_post_fxaa: mgl.ComputeShader = self.ctx.compute_shader(source=post_fxaa_cs_code)
+#       self.program_post_fxaa: mgl.ComputeShader = self.ctx.compute_shader(source=post_fxaa_cs_code)
+
         # Pipeline of active post-processing shaders
 #       # Pipeline of active post-processing shaders
         self.post_processing_pipeline: list[mgl.ComputeShader] = [
 #       self.post_processing_pipeline: list[mgl.ComputeShader] = [
-            self.program_post_chromatic_aberration,
-#           self.program_post_chromatic_aberration,
-            self.program_post_vignette,
-#           self.program_post_vignette,
+            # self.program_post_chromatic_aberration,
+#           # self.program_post_chromatic_aberration,
+            # self.program_post_vignette,
+#           # self.program_post_vignette,
+            self.program_post_tonemap,
+#           self.program_post_tonemap,
+            self.program_post_fxaa,
+#           self.program_post_fxaa,
         ]
 #       ]
 
@@ -1589,11 +1607,13 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           current_write_texture.bind_to_image(0, read=False, write=True)  # Output
             current_read_texture.bind_to_image(1, read=True, write=False)   # Input
 #           current_read_texture.bind_to_image(1, read=True, write=False)   # Input
+            current_read_texture.use(location=1) # Bind for sampler2D access
+#           current_read_texture.use(location=1) # Bind for sampler2D access
 
             post_program.run(group_x=gx, group_y=gy, group_z=1)
 #           post_program.run(group_x=gx, group_y=gy, group_z=1)
-            self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#           self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+            self.ctx.memory_barrier() # Ensure all barriers including TEXTURE_FETCH
+#           self.ctx.memory_barrier() # Ensure all barriers including TEXTURE_FETCH
 
             # Swap textures
 #           # Swap textures
