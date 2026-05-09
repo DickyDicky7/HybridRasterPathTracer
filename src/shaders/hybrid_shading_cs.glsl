@@ -270,8 +270,8 @@
 //      if (uUseHdri) {
             // Equirectangular mapping
 //          // Equirectangular mapping
-            float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
-//          float theta = acos(-dir.y);           // latitude: 0 at top, PI at bottom
+            float theta = acos(clamp(-dir.y, -1.0, 1.0)); // latitude: 0 at top, PI at bottom
+//          float theta = acos(clamp(-dir.y, -1.0, 1.0)); // latitude: 0 at top, PI at bottom
             float phi = atan(-dir.z, dir.x) + PI; // longitude: 0 to 2*PI
 //          float phi = atan(-dir.z, dir.x) + PI; // longitude: 0 to 2*PI
             float u = clamp(phi / (2.0 * PI), 0.0, 1.0);
@@ -1334,8 +1334,8 @@
             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 //          vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
-            if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
-//          if (dot(specularReflectedDirection, shadingNormal) > 0.0) {
+            if (dot(specularReflectedDirection, shadingNormal) > 0.0 && dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
+//          if (dot(specularReflectedDirection, shadingNormal) > 0.0 && dot(specularReflectedDirection, recentRayHitResult.hittedSideNormal) > 0.0) {
                 outScatteredDirection = specularReflectedDirection;
 //              outScatteredDirection = specularReflectedDirection;
                 vec3 bsdf = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
@@ -1441,8 +1441,8 @@
 
                 if (dot(diffuseDirection, recentRayHitResult.hittedSideNormal) <= 0.0) {
 //              if (dot(diffuseDirection, recentRayHitResult.hittedSideNormal) <= 0.0) {
-                    diffuseDirection = recentRayHitResult.hittedSideNormal;
-//                  diffuseDirection = recentRayHitResult.hittedSideNormal;
+                    return false;
+//                  return false;
                 }
 //              }
 
