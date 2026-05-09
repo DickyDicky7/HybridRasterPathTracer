@@ -738,10 +738,10 @@ class SceneBuilder:
             plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
 #           plane_base_triangles.append(get_triangle_vertices(plane_point0, plane_point2, plane_point3))
 
-            # Plane UVs (tiled 10x10)
-#           # Plane UVs (tiled 10x10)
-            tiling = 10.0
-#           tiling = 10.0
+            # Plane UVs (tiled 1x1, controlled by material now)
+#           # Plane UVs (tiled 1x1, controlled by material now)
+            tiling = 1.0
+#           tiling = 1.0
             plane_uv0: vec2f32 = (0.0, 0.0)
 #           plane_uv0: vec2f32 = (0.0, 0.0)
             plane_uv1: vec2f32 = (tiling, 0.0)
@@ -876,10 +876,14 @@ class SceneBuilder:
 #           #     float texture_index_transmission;
             #     float padding002;
 #           #     float padding002;
+            #     vec2 uvScale;
+#           #     vec2 uvScale;
+            #     vec2 padding003;
+#           #     vec2 padding003;
             # };
 #           # };
-            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad]
-#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad]
+            # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad, uvScale_u, uvScale_v, pad, pad]
+#           # Data Layout: [r, g, b, pad, roughness, metallic, transmission, ior, texture_index_albedo, texture_index_roughness, texture_index_metallic, texture_index_normal, emissive, texture_index_emissive, texture_index_transmission, pad, uvScale_u, uvScale_v, pad, pad]
             albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
 #           albedo = (*material["albedo"], 0.0) if len(material["albedo"]) == 3 else material["albedo"]
             packed_materials.append(np.array([
@@ -910,11 +914,19 @@ class SceneBuilder:
 #               material["texture_index_transmission"],
                 0.0,
 #               0.0,
+                material["uv_scale"][0],
+#               material["uv_scale"][0],
+                material["uv_scale"][1],
+#               material["uv_scale"][1],
+                0.0,
+#               0.0,
+                0.0,
+#               0.0,
             ], dtype=np.float32))
 #           ], dtype=np.float32))
 
-        world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
-#       world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 16), dtype=np.float32)
+        world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 20), dtype=np.float32)
+#       world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 20), dtype=np.float32)
 
         return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()
 #       return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()

@@ -110,6 +110,8 @@ class Material(typing.TypedDict):
 #   texture_index_emissive: float
     texture_index_transmission: float
 #   texture_index_transmission: float
+    uv_scale: vec2f32
+#   uv_scale: vec2f32
 
 class PointLight(typing.TypedDict):
     # Defines the CPU-side structure for a Point Light.

@@ -85,6 +85,10 @@
 //      float textureIndexTransmission;
         float padding002;
 //      float padding002;
+        vec2 uvScale;
+//      vec2 uvScale;
+        vec2 padding003;
+//      vec2 padding003;
     };
 //  };
 
@@ -1167,26 +1171,29 @@
 //      // Texture Sampling (using textureLod for Compute Shader safety)
         float lod = max(0.0, log2(recentRayHitResult.minDistance * 0.1));
 //      float lod = max(0.0, log2(recentRayHitResult.minDistance * 0.1));
+        vec2 scaledUV = recentRayHitResult.uvSurfaceCoordinate * material.uvScale;
+//      vec2 scaledUV = recentRayHitResult.uvSurfaceCoordinate * material.uvScale;
+
         if (material.textureIndexAlbedo > -0.5) {
 //      if (material.textureIndexAlbedo > -0.5) {
-            albedo *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), lod).rgb;
-//          albedo *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexAlbedo), lod).rgb;
+            albedo *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb;
+//          albedo *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb;
         }
 //      }
         if (material.textureIndexRoughness > -0.5) {
 //      if (material.textureIndexRoughness > -0.5) {
             // Assume roughness is in R channel or grayscale
 //          // Assume roughness is in R channel or grayscale
-            roughness = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexRoughness), lod).r;
-//          roughness = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexRoughness), lod).r;
+            roughness = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexRoughness), lod).r;
+//          roughness = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexRoughness), lod).r;
         }
 //      }
         if (material.textureIndexMetallic > -0.5) {
 //      if (material.textureIndexMetallic > -0.5) {
             // Assume metallic is in R channel or grayscale
 //          // Assume metallic is in R channel or grayscale
-            metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), lod).r;
-//          metallic = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexMetallic), lod).r;
+            metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).r;
+//          metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).r;
         }
 //      }
 
@@ -1194,8 +1201,8 @@
 //      if (material.textureIndexTransmission > -0.5) {
             // Assume transmission is in R channel or grayscale
 //          // Assume transmission is in R channel or grayscale
-            material.transmission *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexTransmission), lod).r;
-//          material.transmission *= textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexTransmission), lod).r;
+            material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).r;
+//          material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).r;
         }
 //      }
 
@@ -1206,8 +1213,8 @@
 
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
-            outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), lod).rgb;
-//          outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexEmissive), lod).rgb;
+            outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb;
+//          outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb;
         } else {
 //      } else {
             outEmission = material.emissive * albedo;
@@ -1232,8 +1239,8 @@
 
         if (material.textureIndexNormal > -0.5) {
 //      if (material.textureIndexNormal > -0.5) {
-            vec3 mapN = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexNormal), lod).rgb;
-//          vec3 mapN = textureLod(uSceneTextureArray, vec3(recentRayHitResult.uvSurfaceCoordinate, material.textureIndexNormal), lod).rgb;
+            vec3 mapN = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexNormal), lod).rgb;
+//          vec3 mapN = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexNormal), lod).rgb;
             mapN = mapN * 2.0 - 1.0;
 //          mapN = mapN * 2.0 - 1.0;
 

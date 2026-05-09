@@ -313,14 +313,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.materials: list[Material] = [
 #       self.materials: list[Material] = [
-            {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-#           {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
-#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1},
+            {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+#           {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
+            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (10.0, 10.0)},
+#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (10.0, 10.0)},
         ]
 #       ]
 
@@ -376,6 +376,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         vase_material_index = len(self.materials) - 1
@@ -430,6 +432,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         pistol_material_indices.append(len(self.materials) - 1)
@@ -463,6 +467,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         pistol_material_indices.append(len(self.materials) - 1)
@@ -515,6 +521,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         rifle_material_indices.append(len(self.materials) - 1)
@@ -557,6 +565,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         rifle_material_indices.append(len(self.materials) - 1)
@@ -599,6 +609,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         rifle_material_indices.append(len(self.materials) - 1)
@@ -641,6 +653,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": -1.0,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         rifle_material_indices.append(len(self.materials) - 1)
@@ -697,6 +711,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           "texture_index_emissive": idx_emissive_mp9,
             "texture_index_transmission": -1.0,
 #           "texture_index_transmission": -1.0,
+            "uv_scale": (1.0, 1.0),
+#           "uv_scale": (1.0, 1.0),
         })
 #       })
         mp9_material_indices.append(len(self.materials) - 1)

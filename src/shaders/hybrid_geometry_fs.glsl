@@ -49,6 +49,10 @@
 //      float textureIndexTransmission;
         float padding002;
 //      float padding002;
+        vec2 uvScale;
+//      vec2 uvScale;
+        vec2 padding003;
+//      vec2 padding003;
     };
 //  };
 
@@ -80,8 +84,8 @@
 //      vec3 finalAlbedo = mat.albedo.rgb;
         if (mat.textureIndexAlbedo > -0.5) {
 //      if (mat.textureIndexAlbedo > -0.5) {
-            finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV, mat.textureIndexAlbedo)).rgb;
-//          finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV, mat.textureIndexAlbedo)).rgb;
+            finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb;
+//          finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb;
         }
 //      }
         outGeometryAlbedo = vec4(finalAlbedo, 1.0);
