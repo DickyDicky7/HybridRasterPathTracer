@@ -78,6 +78,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.frame_count: int = 0
 #       self.frame_count: int = 0
+        self.cache_frame_counter: int = 0
+#       self.cache_frame_counter: int = 0
         self.last_view_matrix: rr.Matrix44 = None
 #       self.last_view_matrix: rr.Matrix44 = None
         self.render_mode: RenderMode = RenderMode.PATH_TRACE
@@ -746,6 +748,13 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 
+        cache_entry_count: int = 131072
+#       cache_entry_count: int = 131072
+        cache_floats_per_entry: int = 16
+#       cache_floats_per_entry: int = 16
+        self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+#       self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+
         # Single VAO for the entire scene
 #       # Single VAO for the entire scene
         self.vao_scene: mgl.VertexArray = self.ctx.vertex_array(
@@ -1370,6 +1379,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
         self.ssbo_materials.bind_to_storage_buffer(binding=8)
 #       self.ssbo_materials.bind_to_storage_buffer(binding=8)
+        self.ssbo_radiance_cache.bind_to_storage_buffer(binding=9)
+#       self.ssbo_radiance_cache.bind_to_storage_buffer(binding=9)
 
         self.texture_accum.bind_to_image(5, read=True, write=True)
 #       self.texture_accum.bind_to_image(5, read=True, write=True)
@@ -1463,6 +1474,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uFrameCount" in self.program_shading:
             self.program_shading["uFrameCount"] = self.frame_count
 #           self.program_shading["uFrameCount"] = self.frame_count
+        self.cache_frame_counter += 1
+#       self.cache_frame_counter += 1
+        if "uCacheFrameCounter" in self.program_shading:
+#       if "uCacheFrameCounter" in self.program_shading:
+            self.program_shading["uCacheFrameCounter"] = self.cache_frame_counter
+#           self.program_shading["uCacheFrameCounter"] = self.cache_frame_counter
+        if "uCacheBlendFactor" in self.program_shading:
+#       if "uCacheBlendFactor" in self.program_shading:
+            self.program_shading["uCacheBlendFactor"] = 0.5
+#           self.program_shading["uCacheBlendFactor"] = 0.5
 
         # HDRI Texture
 #       # HDRI Texture
@@ -1534,8 +1555,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       gx, gy = (w + 15) // 16, (h + 15) // 16
         self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
 #       self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
 
         # 3. Denoise (Multi-Pass A-Trous)
 #       # 3. Denoise (Multi-Pass A-Trous)

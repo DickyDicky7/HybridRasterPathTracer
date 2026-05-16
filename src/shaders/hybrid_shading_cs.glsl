@@ -99,6 +99,26 @@
     };
 //  };
 
+    struct RadianceCacheEntry {
+//  struct RadianceCacheEntry {
+        vec4 radiance_sampleCount;
+//      vec4 radiance_sampleCount;
+        vec4 position_hashKey;
+//      vec4 position_hashKey;
+        vec4 normal_age;
+//      vec4 normal_age;
+        vec4 reserved;
+//      vec4 reserved;
+    };
+//  };
+
+    layout(std430, binding = 9) buffer RadianceCache {
+//  layout(std430, binding = 9) buffer RadianceCache {
+        RadianceCacheEntry cacheEntries[];
+//      RadianceCacheEntry cacheEntries[];
+    };
+//  };
+
     struct Ray {
 //  struct Ray {
         vec3 origin;
@@ -166,6 +186,10 @@
 //  uniform vec3 uPixelDeltaV;
     uniform vec2 uJitter;
 //  uniform vec2 uJitter;
+    uniform uint uCacheFrameCounter;
+//  uniform uint uCacheFrameCounter;
+    uniform float uCacheBlendFactor;
+//  uniform float uCacheBlendFactor;
 
     const float PI = 3.14159265359;
 //  const float PI = 3.14159265359;
@@ -198,6 +222,20 @@
 //  const float EPSILON_OFFSET = 0.001;
     const float MISS_DISTANCE = INF;
 //  const float MISS_DISTANCE = INF;
+    const uint CACHE_SIZE = 131072u;
+//  const uint CACHE_SIZE = 131072u;
+    const float CACHE_CELL_SIZE = 0.5;
+//  const float CACHE_CELL_SIZE = 0.5;
+    const float CACHE_NORMAL_THRESHOLD = 0.7;
+//  const float CACHE_NORMAL_THRESHOLD = 0.7;
+    const float CACHE_MIN_SAMPLES = 4.0;
+//  const float CACHE_MIN_SAMPLES = 4.0;
+    const float CACHE_MAX_SAMPLES = 256.0;
+//  const float CACHE_MAX_SAMPLES = 256.0;
+    const float CACHE_EVICTION_AGE = 30.0;
+//  const float CACHE_EVICTION_AGE = 30.0;
+    const float CACHE_ROUGHNESS_GATE = 0.3;
+//  const float CACHE_ROUGHNESS_GATE = 0.3;
 
     // Hardcoded Math Constants
 //  // Hardcoded Math Constants
@@ -246,6 +284,102 @@
 //      seed = uint(pixel.x * 1973.0 + pixel.y * 9277.0) + uint(uFrameCount) * 26699u;
         seed = wang_hash(seed);
 //      seed = wang_hash(seed);
+    }
+//  }
+
+    uint hashCacheKey(vec3 worldPos, vec3 normal) {
+//  uint hashCacheKey(vec3 worldPos, vec3 normal) {
+        ivec3 cell = ivec3(floor(worldPos / CACHE_CELL_SIZE));
+//      ivec3 cell = ivec3(floor(worldPos / CACHE_CELL_SIZE));
+        uint normalIdx = 0u;
+//      uint normalIdx = 0u;
+        vec3 absN = abs(normal);
+//      vec3 absN = abs(normal);
+        if (absN.x >= absN.y && absN.x >= absN.z) normalIdx = normal.x > 0.0 ? 0u : 1u;
+//      if (absN.x >= absN.y && absN.x >= absN.z) normalIdx = normal.x > 0.0 ? 0u : 1u;
+        else if (absN.y >= absN.z) normalIdx = normal.y > 0.0 ? 2u : 3u;
+//      else if (absN.y >= absN.z) normalIdx = normal.y > 0.0 ? 2u : 3u;
+        else normalIdx = normal.z > 0.0 ? 4u : 5u;
+//      else normalIdx = normal.z > 0.0 ? 4u : 5u;
+        uint h = uint(cell.x) * 73856093u ^ uint(cell.y) * 19349663u ^ uint(cell.z) * 83492791u ^ normalIdx * 6291469u;
+//      uint h = uint(cell.x) * 73856093u ^ uint(cell.y) * 19349663u ^ uint(cell.z) * 83492791u ^ normalIdx * 6291469u;
+        return wang_hash(h);
+//      return wang_hash(h);
+    }
+//  }
+
+    uint cacheSlot(uint hashKey) {
+//  uint cacheSlot(uint hashKey) {
+        return hashKey & (CACHE_SIZE - 1u);
+//      return hashKey & (CACHE_SIZE - 1u);
+    }
+//  }
+
+    bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance) {
+//  bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance) {
+        uint key = hashCacheKey(worldPos, normal);
+//      uint key = hashCacheKey(worldPos, normal);
+        uint slot = cacheSlot(key);
+//      uint slot = cacheSlot(key);
+        RadianceCacheEntry entry = cacheEntries[slot];
+//      RadianceCacheEntry entry = cacheEntries[slot];
+        if (floatBitsToUint(entry.position_hashKey.w) != key) return false;
+//      if (floatBitsToUint(entry.position_hashKey.w) != key) return false;
+        if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) return false;
+//      if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) return false;
+        float dist = length(entry.position_hashKey.xyz - worldPos);
+//      float dist = length(entry.position_hashKey.xyz - worldPos);
+        if (dist > CACHE_CELL_SIZE * 1.5) return false;
+//      if (dist > CACHE_CELL_SIZE * 1.5) return false;
+        if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) return false;
+//      if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) return false;
+        outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
+//      outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
+        return true;
+//      return true;
+    }
+//  }
+
+    void writeCache(vec3 worldPos, vec3 normal, vec3 radiance) {
+//  void writeCache(vec3 worldPos, vec3 normal, vec3 radiance) {
+        uint key = hashCacheKey(worldPos, normal);
+//      uint key = hashCacheKey(worldPos, normal);
+        uint slot = cacheSlot(key);
+//      uint slot = cacheSlot(key);
+        RadianceCacheEntry entry = cacheEntries[slot];
+//      RadianceCacheEntry entry = cacheEntries[slot];
+        uint existingKey = floatBitsToUint(entry.position_hashKey.w);
+//      uint existingKey = floatBitsToUint(entry.position_hashKey.w);
+        if (existingKey == key) {
+//      if (existingKey == key) {
+            float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
+//          float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
+            float alpha = 1.0 / count;
+//          float alpha = 1.0 / count;
+            vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
+//          vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
+            cacheEntries[slot].radiance_sampleCount = vec4(mix(oldAvg, radiance, alpha) * count, count);
+//          cacheEntries[slot].radiance_sampleCount = vec4(mix(oldAvg, radiance, alpha) * count, count);
+            cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
+//          cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
+        } else {
+//      } else {
+            float age = float(uCacheFrameCounter) - entry.normal_age.w;
+//          float age = float(uCacheFrameCounter) - entry.normal_age.w;
+            if (existingKey == 0u || age > CACHE_EVICTION_AGE || entry.radiance_sampleCount.w < 1.0) {
+//          if (existingKey == 0u || age > CACHE_EVICTION_AGE || entry.radiance_sampleCount.w < 1.0) {
+                cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
+//              cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
+                cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
+//              cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
+                cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
+//              cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
+                cacheEntries[slot].reserved = vec4(0.0);
+//              cacheEntries[slot].reserved = vec4(0.0);
+            }
+//          }
+        }
+//      }
     }
 //  }
 
@@ -1785,6 +1919,29 @@
             pathRoughness = max(pathRoughness, material.roughness);
 //          pathRoughness = max(pathRoughness, material.roughness);
 
+            if (depth >= 1 && uCacheBlendFactor > 0.0 && material.roughness > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
+//          if (depth >= 1 && uCacheBlendFactor > 0.0 && material.roughness > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
+                vec3 cachedRadiance;
+//              vec3 cachedRadiance;
+                if (readCache(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance)) {
+//              if (readCache(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance)) {
+                    float depthFactor = clamp(float(depth - 1) / 3.0, 0.0, 1.0);
+//                  float depthFactor = clamp(float(depth - 1) / 3.0, 0.0, 1.0);
+                    float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor);
+//                  float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor);
+                    if (rand() < blendWeight) {
+//                  if (rand() < blendWeight) {
+                        accumulatedColor += attenuation * cachedRadiance;
+//                      accumulatedColor += attenuation * cachedRadiance;
+                        break;
+//                      break;
+                    }
+//                  }
+                }
+//              }
+            }
+//          }
+
             vec3 albedo;
 //          vec3 albedo;
             float roughness;
@@ -1809,6 +1966,8 @@
 
             accumulatedColor += attenuation * emission;
 //          accumulatedColor += attenuation * emission;
+            vec3 bounceDirect = emission;
+//          vec3 bounceDirect = emission;
 
             if (!isScattered) {
 //          if (!isScattered) {
@@ -1925,10 +2084,19 @@
 //                      directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
                         accumulatedColor += attenuation * directLight * weightNee;
 //                      accumulatedColor += attenuation * directLight * weightNee;
+                        bounceDirect += directLight * weightNee;
+//                      bounceDirect += directLight * weightNee;
                     }
 //                  }
                 }
 //              }
+            }
+//          }
+
+            if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
+//          if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
+                writeCache(hitPoint, shadingNormal, bounceDirect);
+//              writeCache(hitPoint, shadingNormal, bounceDirect);
             }
 //          }
 
