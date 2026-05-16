@@ -9,14 +9,20 @@
     layout(binding = 1) uniform sampler2D textureInput;
 //  layout(binding = 1) uniform sampler2D textureInput;
 
-    // Fast Approximate Anti-Aliasing (FXAA) Configuration
-//  // Fast Approximate Anti-Aliasing (FXAA) Configuration
-    #define FXAA_SPAN_MAX 8.0
-//  #define FXAA_SPAN_MAX 8.0
-    #define FXAA_REDUCE_MUL (1.0 / 8.0)
-//  #define FXAA_REDUCE_MUL (1.0 / 8.0)
-    #define FXAA_REDUCE_MIN (1.0 / 128.0)
-//  #define FXAA_REDUCE_MIN (1.0 / 128.0)
+    // High-Fidelity FXAA Configuration
+//  // High-Fidelity FXAA Configuration
+    #define FXAA_SPAN_MAX 16.0
+//  #define FXAA_SPAN_MAX 16.0
+    #define FXAA_REDUCE_MUL (1.0 / 16.0)
+//  #define FXAA_REDUCE_MUL (1.0 / 16.0)
+    #define FXAA_REDUCE_MIN (1.0 / 256.0)
+//  #define FXAA_REDUCE_MIN (1.0 / 256.0)
+    #define FXAA_EDGE_THRESHOLD (1.0 / 8.0)
+//  #define FXAA_EDGE_THRESHOLD (1.0 / 8.0)
+    #define FXAA_EDGE_THRESHOLD_MIN (1.0 / 32.0)
+//  #define FXAA_EDGE_THRESHOLD_MIN (1.0 / 32.0)
+    #define FXAA_SUBPIX_QUALITY 0.75
+//  #define FXAA_SUBPIX_QUALITY 0.75
 
     const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
 //  const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
@@ -42,33 +48,59 @@
 
         vec3 luma = LUMA_WEIGHTS;
 //      vec3 luma = LUMA_WEIGHTS;
-        float lumaTL = dot(luma, texture(textureInput, uv + (vec2(-1.0, -1.0) * texCoordOffset)).rgb);
-//      float lumaTL = dot(luma, texture(textureInput, uv + (vec2(-1.0, -1.0) * texCoordOffset)).rgb);
-        float lumaTR = dot(luma, texture(textureInput, uv + (vec2( 1.0, -1.0) * texCoordOffset)).rgb);
-//      float lumaTR = dot(luma, texture(textureInput, uv + (vec2( 1.0, -1.0) * texCoordOffset)).rgb);
-        float lumaBL = dot(luma, texture(textureInput, uv + (vec2(-1.0,  1.0) * texCoordOffset)).rgb);
-//      float lumaBL = dot(luma, texture(textureInput, uv + (vec2(-1.0,  1.0) * texCoordOffset)).rgb);
-        float lumaBR = dot(luma, texture(textureInput, uv + (vec2( 1.0,  1.0) * texCoordOffset)).rgb);
-//      float lumaBR = dot(luma, texture(textureInput, uv + (vec2( 1.0,  1.0) * texCoordOffset)).rgb);
         float lumaM  = dot(luma, texture(textureInput, uv).rgb);
 //      float lumaM  = dot(luma, texture(textureInput, uv).rgb);
+        float lumaN  = dot(luma, texture(textureInput, uv + vec2( 0.0, -1.0) * texCoordOffset).rgb);
+//      float lumaN  = dot(luma, texture(textureInput, uv + vec2( 0.0, -1.0) * texCoordOffset).rgb);
+        float lumaS  = dot(luma, texture(textureInput, uv + vec2( 0.0,  1.0) * texCoordOffset).rgb);
+//      float lumaS  = dot(luma, texture(textureInput, uv + vec2( 0.0,  1.0) * texCoordOffset).rgb);
+        float lumaW  = dot(luma, texture(textureInput, uv + vec2(-1.0,  0.0) * texCoordOffset).rgb);
+//      float lumaW  = dot(luma, texture(textureInput, uv + vec2(-1.0,  0.0) * texCoordOffset).rgb);
+        float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
+//      float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
+        float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+        float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+        float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+        float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
 
-        float lumaMin = min(lumaM, min(min(lumaTL, lumaTR), min(lumaBL, lumaBR)));
-//      float lumaMin = min(lumaM, min(min(lumaTL, lumaTR), min(lumaBL, lumaBR)));
-        float lumaMax = max(lumaM, max(max(lumaTL, lumaTR), max(lumaBL, lumaBR)));
-//      float lumaMax = max(lumaM, max(max(lumaTL, lumaTR), max(lumaBL, lumaBR)));
+        float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
+//      float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
+        float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaW, lumaE)));
+//      float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaW, lumaE)));
+        float lumaRange = lumaMax - lumaMin;
+//      float lumaRange = lumaMax - lumaMin;
+
+        if (lumaRange < max(FXAA_EDGE_THRESHOLD_MIN, lumaMax * FXAA_EDGE_THRESHOLD)) {
+//      if (lumaRange < max(FXAA_EDGE_THRESHOLD_MIN, lumaMax * FXAA_EDGE_THRESHOLD)) {
+            imageStore(textureOutput, coord, texture(textureInput, uv));
+//          imageStore(textureOutput, coord, texture(textureInput, uv));
+            return;
+//          return;
+        }
+//      }
+
+        float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
+//      float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
+        float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
+//      float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
+        float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
+//      float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 
         vec2 dir;
 //      vec2 dir;
-        dir.x = -((lumaTL + lumaTR) - (lumaBL + lumaBR));
-//      dir.x = -((lumaTL + lumaTR) - (lumaBL + lumaBR));
-        dir.y =  ((lumaTL + lumaBL) - (lumaTR + lumaBR));
-//      dir.y =  ((lumaTL + lumaBL) - (lumaTR + lumaBR));
+        dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+//      dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+        dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+//      dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
 
         float dirReduce = max(
 //      float dirReduce = max(
-            (lumaTL + lumaTR + lumaBL + lumaBR) * (0.25 * FXAA_REDUCE_MUL),
-//          (lumaTL + lumaTR + lumaBL + lumaBR) * (0.25 * FXAA_REDUCE_MUL),
+            (lumaN + lumaS + lumaW + lumaE) * (0.25 * FXAA_REDUCE_MUL),
+//          (lumaN + lumaS + lumaW + lumaE) * (0.25 * FXAA_REDUCE_MUL),
             FXAA_REDUCE_MIN);
 //          FXAA_REDUCE_MIN);
 
@@ -97,15 +129,22 @@
         float lumaB = dot(rgbB, luma);
 //      float lumaB = dot(rgbB, luma);
 
+        vec3 edgeResult;
+//      vec3 edgeResult;
         if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
 //      if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
-            imageStore(textureOutput, coord, vec4(rgbA, 1.0));
-//          imageStore(textureOutput, coord, vec4(rgbA, 1.0));
+            edgeResult = rgbA;
+//          edgeResult = rgbA;
         } else {
 //      } else {
-            imageStore(textureOutput, coord, vec4(rgbB, 1.0));
-//          imageStore(textureOutput, coord, vec4(rgbB, 1.0));
+            edgeResult = rgbB;
+//          edgeResult = rgbB;
         }
 //      }
+
+        vec3 finalColor = mix(edgeResult, texture(textureInput, uv).rgb, subpixBlend);
+//      vec3 finalColor = mix(edgeResult, texture(textureInput, uv).rgb, subpixBlend);
+        imageStore(textureOutput, coord, vec4(finalColor, 1.0));
+//      imageStore(textureOutput, coord, vec4(finalColor, 1.0));
     }
 //  }
