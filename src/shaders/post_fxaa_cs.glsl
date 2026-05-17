@@ -144,8 +144,8 @@
         }
 //      }
 
-        float edgeBlend = lumaRange / lumaMax;
-//      float edgeBlend = lumaRange / lumaMax;
+        float edgeBlend = lumaRange / max(lumaMax, 1e-6);
+//      float edgeBlend = lumaRange / max(lumaMax, 1e-6);
         float finalBlend = max(edgeBlend, subpixBlend);
 //      float finalBlend = max(edgeBlend, subpixBlend);
         vec3 finalColor = mix(rgbM, edgeResult, finalBlend);
