@@ -107,8 +107,8 @@
 //      vec4 position_hashKey;
         vec4 normal_age;
 //      vec4 normal_age;
-        vec4 reserved;
-//      vec4 reserved;
+        vec4 variance_confidence;
+//      vec4 variance_confidence;
     };
 //  };
 
@@ -236,6 +236,8 @@
 //  const float CACHE_EVICTION_AGE = 30.0;
     const float CACHE_ROUGHNESS_GATE = 0.3;
 //  const float CACHE_ROUGHNESS_GATE = 0.3;
+    const uint CACHE_PROBE_LENGTH = 4u;
+//  const uint CACHE_PROBE_LENGTH = 4u;
 
     // Hardcoded Math Constants
 //  // Hardcoded Math Constants
@@ -315,26 +317,107 @@
     }
 //  }
 
-    bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance) {
-//  bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance) {
+    bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
+//  bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
         uint key = hashCacheKey(worldPos, normal);
 //      uint key = hashCacheKey(worldPos, normal);
-        uint slot = cacheSlot(key);
-//      uint slot = cacheSlot(key);
-        RadianceCacheEntry entry = cacheEntries[slot];
-//      RadianceCacheEntry entry = cacheEntries[slot];
-        if (floatBitsToUint(entry.position_hashKey.w) != key) return false;
-//      if (floatBitsToUint(entry.position_hashKey.w) != key) return false;
-        if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) return false;
-//      if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) return false;
-        float dist = length(entry.position_hashKey.xyz - worldPos);
-//      float dist = length(entry.position_hashKey.xyz - worldPos);
-        if (dist > CACHE_CELL_SIZE * 1.5) return false;
-//      if (dist > CACHE_CELL_SIZE * 1.5) return false;
-        if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) return false;
-//      if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) return false;
-        outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
-//      outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
+        uint baseSlot = cacheSlot(key);
+//      uint baseSlot = cacheSlot(key);
+        for (uint i = 0u; i < CACHE_PROBE_LENGTH; i++) {
+//      for (uint i = 0u; i < CACHE_PROBE_LENGTH; i++) {
+            uint slot = (baseSlot + i) & (CACHE_SIZE - 1u);
+//          uint slot = (baseSlot + i) & (CACHE_SIZE - 1u);
+            RadianceCacheEntry entry = cacheEntries[slot];
+//          RadianceCacheEntry entry = cacheEntries[slot];
+            if (floatBitsToUint(entry.position_hashKey.w) != key) continue;
+//          if (floatBitsToUint(entry.position_hashKey.w) != key) continue;
+            if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) continue;
+//          if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) continue;
+            float dist = length(entry.position_hashKey.xyz - worldPos);
+//          float dist = length(entry.position_hashKey.xyz - worldPos);
+            if (dist > CACHE_CELL_SIZE * 1.5) continue;
+//          if (dist > CACHE_CELL_SIZE * 1.5) continue;
+            if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) continue;
+//          if (dot(entry.normal_age.xyz, normal) < CACHE_NORMAL_THRESHOLD) continue;
+            outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
+//          outRadiance = entry.radiance_sampleCount.rgb / entry.radiance_sampleCount.w;
+            outConfidence = entry.variance_confidence.w;
+//          outConfidence = entry.variance_confidence.w;
+            return true;
+//          return true;
+        }
+//      }
+        return false;
+//      return false;
+    }
+//  }
+
+    bool readCacheBilinear(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
+//  bool readCacheBilinear(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
+        vec3 cellPos = worldPos / CACHE_CELL_SIZE;
+//      vec3 cellPos = worldPos / CACHE_CELL_SIZE;
+        vec3 cellFloor = floor(cellPos);
+//      vec3 cellFloor = floor(cellPos);
+        vec3 frac = cellPos - cellFloor;
+//      vec3 frac = cellPos - cellFloor;
+        vec3 absN = abs(normal);
+//      vec3 absN = abs(normal);
+        int axisA, axisB;
+//      int axisA, axisB;
+        if (absN.x >= absN.y && absN.x >= absN.z) { axisA = 1; axisB = 2; }
+//      if (absN.x >= absN.y && absN.x >= absN.z) { axisA = 1; axisB = 2; }
+        else if (absN.y >= absN.z) { axisA = 0; axisB = 2; }
+//      else if (absN.y >= absN.z) { axisA = 0; axisB = 2; }
+        else { axisA = 0; axisB = 1; }
+//      else { axisA = 0; axisB = 1; }
+        vec3 totalRadiance = vec3(0.0);
+//      vec3 totalRadiance = vec3(0.0);
+        float totalWeight = 0.0;
+//      float totalWeight = 0.0;
+        float totalConfidence = 0.0;
+//      float totalConfidence = 0.0;
+        for (int ib = 0; ib <= 1; ib++) {
+//      for (int ib = 0; ib <= 1; ib++) {
+            for (int ia = 0; ia <= 1; ia++) {
+//          for (int ia = 0; ia <= 1; ia++) {
+                vec3 offset = vec3(0.0);
+//              vec3 offset = vec3(0.0);
+                offset[axisA] = float(ia);
+//              offset[axisA] = float(ia);
+                offset[axisB] = float(ib);
+//              offset[axisB] = float(ib);
+                vec3 cornerWorld = (cellFloor + offset) * CACHE_CELL_SIZE + CACHE_CELL_SIZE * 0.5;
+//              vec3 cornerWorld = (cellFloor + offset) * CACHE_CELL_SIZE + CACHE_CELL_SIZE * 0.5;
+                vec3 rad;
+//              vec3 rad;
+                float conf;
+//              float conf;
+                if (readCache(cornerWorld, normal, rad, conf)) {
+//              if (readCache(cornerWorld, normal, rad, conf)) {
+                    float wa = ia == 1 ? frac[axisA] : 1.0 - frac[axisA];
+//                  float wa = ia == 1 ? frac[axisA] : 1.0 - frac[axisA];
+                    float wb = ib == 1 ? frac[axisB] : 1.0 - frac[axisB];
+//                  float wb = ib == 1 ? frac[axisB] : 1.0 - frac[axisB];
+                    float w = wa * wb;
+//                  float w = wa * wb;
+                    totalRadiance += rad * w;
+//                  totalRadiance += rad * w;
+                    totalWeight += w;
+//                  totalWeight += w;
+                    totalConfidence += conf * w;
+//                  totalConfidence += conf * w;
+                }
+//              }
+            }
+//          }
+        }
+//      }
+        if (totalWeight < 0.01) return false;
+//      if (totalWeight < 0.01) return false;
+        outRadiance = totalRadiance / totalWeight;
+//      outRadiance = totalRadiance / totalWeight;
+        outConfidence = totalConfidence / totalWeight;
+//      outConfidence = totalConfidence / totalWeight;
         return true;
 //      return true;
     }
@@ -344,40 +427,86 @@
 //  void writeCache(vec3 worldPos, vec3 normal, vec3 radiance) {
         uint key = hashCacheKey(worldPos, normal);
 //      uint key = hashCacheKey(worldPos, normal);
-        uint slot = cacheSlot(key);
-//      uint slot = cacheSlot(key);
-        RadianceCacheEntry entry = cacheEntries[slot];
-//      RadianceCacheEntry entry = cacheEntries[slot];
-        uint existingKey = floatBitsToUint(entry.position_hashKey.w);
-//      uint existingKey = floatBitsToUint(entry.position_hashKey.w);
-        if (existingKey == key) {
-//      if (existingKey == key) {
-            float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
-//          float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
-            float alpha = 1.0 / count;
-//          float alpha = 1.0 / count;
-            vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
-//          vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
-            cacheEntries[slot].radiance_sampleCount = vec4(mix(oldAvg, radiance, alpha) * count, count);
-//          cacheEntries[slot].radiance_sampleCount = vec4(mix(oldAvg, radiance, alpha) * count, count);
-            cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
-//          cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
-        } else {
-//      } else {
-            float age = float(uCacheFrameCounter) - entry.normal_age.w;
-//          float age = float(uCacheFrameCounter) - entry.normal_age.w;
-            if (existingKey == 0u || age > CACHE_EVICTION_AGE || entry.radiance_sampleCount.w < 1.0) {
-//          if (existingKey == 0u || age > CACHE_EVICTION_AGE || entry.radiance_sampleCount.w < 1.0) {
-                cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
-//              cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
-                cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
-//              cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
-                cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
-//              cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
-                cacheEntries[slot].reserved = vec4(0.0);
-//              cacheEntries[slot].reserved = vec4(0.0);
+        uint baseSlot = cacheSlot(key);
+//      uint baseSlot = cacheSlot(key);
+        int bestEvictIdx = -1;
+//      int bestEvictIdx = -1;
+        float bestEvictAge = -1.0;
+//      float bestEvictAge = -1.0;
+        for (uint i = 0u; i < CACHE_PROBE_LENGTH; i++) {
+//      for (uint i = 0u; i < CACHE_PROBE_LENGTH; i++) {
+            uint slot = (baseSlot + i) & (CACHE_SIZE - 1u);
+//          uint slot = (baseSlot + i) & (CACHE_SIZE - 1u);
+            RadianceCacheEntry entry = cacheEntries[slot];
+//          RadianceCacheEntry entry = cacheEntries[slot];
+            uint existingKey = floatBitsToUint(entry.position_hashKey.w);
+//          uint existingKey = floatBitsToUint(entry.position_hashKey.w);
+            if (existingKey == key) {
+//          if (existingKey == key) {
+                float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
+//              float count = min(entry.radiance_sampleCount.w + 1.0, CACHE_MAX_SAMPLES);
+                float alpha = 1.0 / count;
+//              float alpha = 1.0 / count;
+                vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
+//              vec3 oldAvg = entry.radiance_sampleCount.rgb / max(entry.radiance_sampleCount.w, 1.0);
+                vec3 newAvg = mix(oldAvg, radiance, alpha);
+//              vec3 newAvg = mix(oldAvg, radiance, alpha);
+                cacheEntries[slot].radiance_sampleCount = vec4(newAvg * count, count);
+//              cacheEntries[slot].radiance_sampleCount = vec4(newAvg * count, count);
+                vec3 delta = radiance - oldAvg;
+//              vec3 delta = radiance - oldAvg;
+                vec3 delta2 = radiance - newAvg;
+//              vec3 delta2 = radiance - newAvg;
+                vec3 newM2 = entry.variance_confidence.rgb + delta * delta2;
+//              vec3 newM2 = entry.variance_confidence.rgb + delta * delta2;
+                float variance = dot(newM2 / max(count, 2.0), vec3(1.0 / 3.0));
+//              float variance = dot(newM2 / max(count, 2.0), vec3(1.0 / 3.0));
+                float avgLum = dot(newAvg, vec3(1.0 / 3.0));
+//              float avgLum = dot(newAvg, vec3(1.0 / 3.0));
+                float confidence = clamp(1.0 - sqrt(max(variance, 0.0)) / max(avgLum, 0.001), 0.0, 1.0);
+//              float confidence = clamp(1.0 - sqrt(max(variance, 0.0)) / max(avgLum, 0.001), 0.0, 1.0);
+                cacheEntries[slot].variance_confidence = vec4(newM2, confidence);
+//              cacheEntries[slot].variance_confidence = vec4(newM2, confidence);
+                cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
+//              cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
+                return;
+//              return;
             }
 //          }
+            if (existingKey == 0u) {
+//          if (existingKey == 0u) {
+                bestEvictIdx = int(slot);
+//              bestEvictIdx = int(slot);
+                bestEvictAge = 1e10;
+//              bestEvictAge = 1e10;
+                break;
+//              break;
+            }
+//          }
+            float age = float(uCacheFrameCounter) - entry.normal_age.w;
+//          float age = float(uCacheFrameCounter) - entry.normal_age.w;
+            if (age > bestEvictAge) {
+//          if (age > bestEvictAge) {
+                bestEvictAge = age;
+//              bestEvictAge = age;
+                bestEvictIdx = int(slot);
+//              bestEvictIdx = int(slot);
+            }
+//          }
+        }
+//      }
+        if (bestEvictIdx >= 0 && bestEvictAge > CACHE_EVICTION_AGE) {
+//      if (bestEvictIdx >= 0 && bestEvictAge > CACHE_EVICTION_AGE) {
+            uint slot = uint(bestEvictIdx);
+//          uint slot = uint(bestEvictIdx);
+            cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
+//          cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
+            cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
+//          cacheEntries[slot].position_hashKey = vec4(worldPos, uintBitsToFloat(key));
+            cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
+//          cacheEntries[slot].normal_age = vec4(normal, float(uCacheFrameCounter));
+            cacheEntries[slot].variance_confidence = vec4(0.0);
+//          cacheEntries[slot].variance_confidence = vec4(0.0);
         }
 //      }
     }
@@ -1715,6 +1844,21 @@
         bool lastSkippedNEE = false;
 //      bool lastSkippedNEE = false;
 
+        vec3 deferredWritePos = vec3(0.0);
+//      vec3 deferredWritePos = vec3(0.0);
+        vec3 deferredWriteNormal = vec3(0.0);
+//      vec3 deferredWriteNormal = vec3(0.0);
+        vec3 deferredWriteDirect = vec3(0.0);
+//      vec3 deferredWriteDirect = vec3(0.0);
+        bool hasDeferredWrite = false;
+//      bool hasDeferredWrite = false;
+        bool pathUsedCache = false;
+//      bool pathUsedCache = false;
+        vec3 cachedIndirectForWrite = vec3(0.0);
+//      vec3 cachedIndirectForWrite = vec3(0.0);
+        vec3 attenSinceLastWrite = vec3(1.0);
+//      vec3 attenSinceLastWrite = vec3(1.0);
+
         for (int depth = 0; depth < maxDepth; depth++) {
 //      for (int depth = 0; depth < maxDepth; depth++) {
             RayHitResult rayHitResult;
@@ -1923,16 +2067,22 @@
 //          if (depth >= 1 && uCacheBlendFactor > 0.0 && material.roughness > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
                 vec3 cachedRadiance;
 //              vec3 cachedRadiance;
-                if (readCache(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance)) {
-//              if (readCache(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance)) {
+                float cacheConfidence;
+//              float cacheConfidence;
+                if (readCacheBilinear(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance, cacheConfidence)) {
+//              if (readCacheBilinear(hitPoint, rayHitResult.hittedSideNormal, cachedRadiance, cacheConfidence)) {
                     float depthFactor = clamp(float(depth - 1) / 3.0, 0.0, 1.0);
 //                  float depthFactor = clamp(float(depth - 1) / 3.0, 0.0, 1.0);
-                    float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor);
-//                  float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor);
+                    float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor) * max(cacheConfidence, 0.1);
+//                  float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor) * max(cacheConfidence, 0.1);
                     if (rand() < blendWeight) {
 //                  if (rand() < blendWeight) {
                         accumulatedColor += attenuation * cachedRadiance;
 //                      accumulatedColor += attenuation * cachedRadiance;
+                        cachedIndirectForWrite = attenSinceLastWrite * cachedRadiance;
+//                      cachedIndirectForWrite = attenSinceLastWrite * cachedRadiance;
+                        pathUsedCache = true;
+//                      pathUsedCache = true;
                         break;
 //                      break;
                     }
@@ -2095,8 +2245,16 @@
 
             if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
 //          if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
-                writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
-//              writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
+                deferredWritePos = hitPoint;
+//              deferredWritePos = hitPoint;
+                deferredWriteNormal = rayHitResult.hittedSideNormal;
+//              deferredWriteNormal = rayHitResult.hittedSideNormal;
+                deferredWriteDirect = bounceDirect;
+//              deferredWriteDirect = bounceDirect;
+                hasDeferredWrite = true;
+//              hasDeferredWrite = true;
+                attenSinceLastWrite = vec3(1.0);
+//              attenSinceLastWrite = vec3(1.0);
             }
 //          }
 
@@ -2111,6 +2269,8 @@
 
             attenuation *= scatterAttenuation;
 //          attenuation *= scatterAttenuation;
+            attenSinceLastWrite *= scatterAttenuation;
+//          attenSinceLastWrite *= scatterAttenuation;
 
             // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
 //          // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
@@ -2139,6 +2299,23 @@
 //          lastWasDelta = scatterIsDelta;
             lastSkippedNEE = skipNEE;
 //          lastSkippedNEE = skipNEE;
+        }
+//      }
+
+        if (hasDeferredWrite) {
+//      if (hasDeferredWrite) {
+            vec3 writeRadiance = deferredWriteDirect;
+//          vec3 writeRadiance = deferredWriteDirect;
+            if (pathUsedCache) {
+//          if (pathUsedCache) {
+                writeRadiance += cachedIndirectForWrite;
+//              writeRadiance += cachedIndirectForWrite;
+            }
+//          }
+            writeRadiance = min(writeRadiance, vec3(ACCUM_CLAMP));
+//          writeRadiance = min(writeRadiance, vec3(ACCUM_CLAMP));
+            writeCache(deferredWritePos, deferredWriteNormal, writeRadiance);
+//          writeCache(deferredWritePos, deferredWriteNormal, writeRadiance);
         }
 //      }
 
