@@ -23,10 +23,6 @@
 //  #define FXAA_EDGE_THRESHOLD_MIN (1.0 / 32.0)
     #define FXAA_SUBPIX_QUALITY 0.75
 //  #define FXAA_SUBPIX_QUALITY 0.75
-    #define FXAA_SEARCH_STEPS 6
-//  #define FXAA_SEARCH_STEPS 6
-    #define FXAA_SEARCH_THRESHOLD (1.0 / 4.0)
-//  #define FXAA_SEARCH_THRESHOLD (1.0 / 4.0)
 
     const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
 //  const vec3 LUMA_WEIGHTS = vec3(0.299, 0.587, 0.114);
@@ -64,6 +60,14 @@
 //      float lumaW  = dot(luma, texture(textureInput, uv + vec2(-1.0,  0.0) * texCoordOffset).rgb);
         float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
 //      float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
+        float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+        float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+        float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+        float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
 
         float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
 //      float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
@@ -81,33 +85,19 @@
         }
 //      }
 
-        float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
-//      float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
-        float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
-//      float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
-        float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
-//      float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
-        float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
-//      float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
-
-        float lumaAvg = (lumaN + lumaS + lumaW + lumaE + 2.0 * lumaM) / 6.0;
-//      float lumaAvg = (lumaN + lumaS + lumaW + lumaE + 2.0 * lumaM) / 6.0;
+        float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
+//      float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
         float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
 //      float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
         float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 //      float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 
-        float lumaMinFull = min(lumaMin, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
-//      float lumaMinFull = min(lumaMin, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
-        float lumaMaxFull = max(lumaMax, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
-//      float lumaMaxFull = max(lumaMax, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
-
         vec2 dir;
 //      vec2 dir;
-        dir.x = -((lumaNW + 2.0 * lumaN + lumaNE) - (lumaSW + 2.0 * lumaS + lumaSE));
-//      dir.x = -((lumaNW + 2.0 * lumaN + lumaNE) - (lumaSW + 2.0 * lumaS + lumaSE));
-        dir.y =  ((lumaNW + 2.0 * lumaW + lumaSW) - (lumaNE + 2.0 * lumaE + lumaSE));
-//      dir.y =  ((lumaNW + 2.0 * lumaW + lumaSW) - (lumaNE + 2.0 * lumaE + lumaSE));
+        dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+//      dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+        dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+//      dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
 
         float dirReduce = max(
 //      float dirReduce = max(
@@ -143,8 +133,8 @@
 
         vec3 edgeResult;
 //      vec3 edgeResult;
-        if ((lumaB < lumaMinFull) || (lumaB > lumaMaxFull)) {
-//      if ((lumaB < lumaMinFull) || (lumaB > lumaMaxFull)) {
+        if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
+//      if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
             edgeResult = rgbA;
 //          edgeResult = rgbA;
         } else {
@@ -154,69 +144,8 @@
         }
 //      }
 
-        bool horzEdge = abs(lumaN + lumaS - 2.0 * lumaM) >= abs(lumaE + lumaW - 2.0 * lumaM);
-//      bool horzEdge = abs(lumaN + lumaS - 2.0 * lumaM) >= abs(lumaE + lumaW - 2.0 * lumaM);
-        vec2 stepDir = horzEdge ? vec2(texCoordOffset.x, 0.0) : vec2(0.0, texCoordOffset.y);
-//      vec2 stepDir = horzEdge ? vec2(texCoordOffset.x, 0.0) : vec2(0.0, texCoordOffset.y);
-        float lumaEdge = horzEdge ? 0.5 * (lumaN + lumaS) : 0.5 * (lumaE + lumaW);
-//      float lumaEdge = horzEdge ? 0.5 * (lumaN + lumaS) : 0.5 * (lumaE + lumaW);
-        float gradientThreshold = lumaRange * FXAA_SEARCH_THRESHOLD;
-//      float gradientThreshold = lumaRange * FXAA_SEARCH_THRESHOLD;
-
-        float endLumaP = lumaEdge;
-//      float endLumaP = lumaEdge;
-        float endLumaN = lumaEdge;
-//      float endLumaN = lumaEdge;
-        vec2 posP = uv + stepDir;
-//      vec2 posP = uv + stepDir;
-        vec2 posN = uv - stepDir;
-//      vec2 posN = uv - stepDir;
-        bool doneP = false;
-//      bool doneP = false;
-        bool doneN = false;
-//      bool doneN = false;
-        for (int i = 0; i < FXAA_SEARCH_STEPS; i++) {
-//      for (int i = 0; i < FXAA_SEARCH_STEPS; i++) {
-            if (!doneP) {
-//          if (!doneP) {
-                endLumaP = dot(luma, texture(textureInput, posP).rgb) - lumaEdge;
-//              endLumaP = dot(luma, texture(textureInput, posP).rgb) - lumaEdge;
-                doneP = abs(endLumaP) >= gradientThreshold;
-//              doneP = abs(endLumaP) >= gradientThreshold;
-                posP += stepDir;
-//              posP += stepDir;
-            }
-//          }
-            if (!doneN) {
-//          if (!doneN) {
-                endLumaN = dot(luma, texture(textureInput, posN).rgb) - lumaEdge;
-//              endLumaN = dot(luma, texture(textureInput, posN).rgb) - lumaEdge;
-                doneN = abs(endLumaN) >= gradientThreshold;
-//              doneN = abs(endLumaN) >= gradientThreshold;
-                posN -= stepDir;
-//              posN -= stepDir;
-            }
-//          }
-            if (doneP && doneN) break;
-//          if (doneP && doneN) break;
-        }
-//      }
-
-        float distP = horzEdge ? (posP.x - uv.x) : (posP.y - uv.y);
-//      float distP = horzEdge ? (posP.x - uv.x) : (posP.y - uv.y);
-        float distN = horzEdge ? (uv.x - posN.x) : (uv.y - posN.y);
-//      float distN = horzEdge ? (uv.x - posN.x) : (uv.y - posN.y);
-        float edgeDist = min(distP, distN);
-//      float edgeDist = min(distP, distN);
-        float totalDist = distP + distN;
-//      float totalDist = distP + distN;
-        float searchBlend = 0.5 - edgeDist / totalDist;
-//      float searchBlend = 0.5 - edgeDist / totalDist;
-
-        bool centerSameSign = (lumaM - lumaEdge) >= 0.0 == (((distP < distN) ? endLumaP : endLumaN) >= 0.0);
-//      bool centerSameSign = (lumaM - lumaEdge) >= 0.0 == (((distP < distN) ? endLumaP : endLumaN) >= 0.0);
-        float edgeBlend = centerSameSign ? 0.0 : clamp(searchBlend, 0.0, FXAA_SUBPIX_QUALITY);
-//      float edgeBlend = centerSameSign ? 0.0 : clamp(searchBlend, 0.0, FXAA_SUBPIX_QUALITY);
+        float edgeBlend = lumaRange / max(lumaMax, 1e-6);
+//      float edgeBlend = lumaRange / max(lumaMax, 1e-6);
         float finalBlend = max(edgeBlend, subpixBlend);
 //      float finalBlend = max(edgeBlend, subpixBlend);
         vec3 finalColor = mix(rgbM, edgeResult, finalBlend);
