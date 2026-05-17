@@ -459,8 +459,10 @@
 //              vec3 delta2 = radiance - newAvg;
                 vec3 newM2 = entry.variance_confidence.rgb + delta * delta2;
 //              vec3 newM2 = entry.variance_confidence.rgb + delta * delta2;
-                float variance = dot(newM2 / max(count, 2.0), vec3(1.0 / 3.0));
-//              float variance = dot(newM2 / max(count, 2.0), vec3(1.0 / 3.0));
+                vec3 perChannelVar = newM2 / max(count, 2.0);
+//              vec3 perChannelVar = newM2 / max(count, 2.0);
+                float variance = max(perChannelVar.r, max(perChannelVar.g, perChannelVar.b));
+//              float variance = max(perChannelVar.r, max(perChannelVar.g, perChannelVar.b));
                 float avgLum = dot(newAvg, vec3(1.0 / 3.0));
 //              float avgLum = dot(newAvg, vec3(1.0 / 3.0));
                 float confidence = clamp(1.0 - sqrt(max(variance, 0.0)) / max(avgLum, 0.001), 0.0, 1.0);
@@ -1844,21 +1846,6 @@
         bool lastSkippedNEE = false;
 //      bool lastSkippedNEE = false;
 
-        vec3 deferredWritePos = vec3(0.0);
-//      vec3 deferredWritePos = vec3(0.0);
-        vec3 deferredWriteNormal = vec3(0.0);
-//      vec3 deferredWriteNormal = vec3(0.0);
-        vec3 deferredWriteDirect = vec3(0.0);
-//      vec3 deferredWriteDirect = vec3(0.0);
-        bool hasDeferredWrite = false;
-//      bool hasDeferredWrite = false;
-        bool pathUsedCache = false;
-//      bool pathUsedCache = false;
-        vec3 cachedIndirectForWrite = vec3(0.0);
-//      vec3 cachedIndirectForWrite = vec3(0.0);
-        vec3 attenSinceLastWrite = vec3(1.0);
-//      vec3 attenSinceLastWrite = vec3(1.0);
-
         for (int depth = 0; depth < maxDepth; depth++) {
 //      for (int depth = 0; depth < maxDepth; depth++) {
             RayHitResult rayHitResult;
@@ -2079,10 +2066,6 @@
 //                  if (rand() < blendWeight) {
                         accumulatedColor += attenuation * cachedRadiance;
 //                      accumulatedColor += attenuation * cachedRadiance;
-                        cachedIndirectForWrite = attenSinceLastWrite * cachedRadiance;
-//                      cachedIndirectForWrite = attenSinceLastWrite * cachedRadiance;
-                        pathUsedCache = true;
-//                      pathUsedCache = true;
                         break;
 //                      break;
                     }
@@ -2245,16 +2228,8 @@
 
             if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
 //          if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
-                deferredWritePos = hitPoint;
-//              deferredWritePos = hitPoint;
-                deferredWriteNormal = rayHitResult.hittedSideNormal;
-//              deferredWriteNormal = rayHitResult.hittedSideNormal;
-                deferredWriteDirect = bounceDirect;
-//              deferredWriteDirect = bounceDirect;
-                hasDeferredWrite = true;
-//              hasDeferredWrite = true;
-                attenSinceLastWrite = vec3(1.0);
-//              attenSinceLastWrite = vec3(1.0);
+                writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
+//              writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
             }
 //          }
 
@@ -2269,8 +2244,6 @@
 
             attenuation *= scatterAttenuation;
 //          attenuation *= scatterAttenuation;
-            attenSinceLastWrite *= scatterAttenuation;
-//          attenSinceLastWrite *= scatterAttenuation;
 
             // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
 //          // Russian Roulette: Stochastically terminate low-contribution paths to improve performance
@@ -2299,23 +2272,6 @@
 //          lastWasDelta = scatterIsDelta;
             lastSkippedNEE = skipNEE;
 //          lastSkippedNEE = skipNEE;
-        }
-//      }
-
-        if (hasDeferredWrite) {
-//      if (hasDeferredWrite) {
-            vec3 writeRadiance = deferredWriteDirect;
-//          vec3 writeRadiance = deferredWriteDirect;
-            if (pathUsedCache) {
-//          if (pathUsedCache) {
-                writeRadiance += cachedIndirectForWrite;
-//              writeRadiance += cachedIndirectForWrite;
-            }
-//          }
-            writeRadiance = min(writeRadiance, vec3(ACCUM_CLAMP));
-//          writeRadiance = min(writeRadiance, vec3(ACCUM_CLAMP));
-            writeCache(deferredWritePos, deferredWriteNormal, writeRadiance);
-//          writeCache(deferredWritePos, deferredWriteNormal, writeRadiance);
         }
 //      }
 
