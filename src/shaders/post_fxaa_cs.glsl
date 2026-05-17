@@ -89,8 +89,8 @@
 //      float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
         float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
 //      float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
-        float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
-//      float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
+        float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
+//      float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 
         vec2 dir;
 //      vec2 dir;
@@ -144,8 +144,12 @@
         }
 //      }
 
-        vec3 finalColor = mix(rgbM, edgeResult, subpixBlend);
-//      vec3 finalColor = mix(rgbM, edgeResult, subpixBlend);
+        float edgeBlend = lumaRange / lumaMax;
+//      float edgeBlend = lumaRange / lumaMax;
+        float finalBlend = max(edgeBlend, subpixBlend);
+//      float finalBlend = max(edgeBlend, subpixBlend);
+        vec3 finalColor = mix(rgbM, edgeResult, finalBlend);
+//      vec3 finalColor = mix(rgbM, edgeResult, finalBlend);
         imageStore(textureOutput, coord, vec4(finalColor, 1.0));
 //      imageStore(textureOutput, coord, vec4(finalColor, 1.0));
     }
