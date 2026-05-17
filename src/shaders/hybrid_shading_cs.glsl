@@ -317,6 +317,8 @@
     }
 //  }
 
+    // SSBO cache has no memory barriers — concurrent read/write is technically UB but tolerated as a soft cache (torn reads yield stale data, not corruption on most desktop GPUs)
+//  // SSBO cache has no memory barriers — concurrent read/write is technically UB but tolerated as a soft cache (torn reads yield stale data, not corruption on most desktop GPUs)
     bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
 //  bool readCache(vec3 worldPos, vec3 normal, out vec3 outRadiance, out float outConfidence) {
         uint key = hashCacheKey(worldPos, normal);
@@ -331,6 +333,8 @@
 //          RadianceCacheEntry entry = cacheEntries[slot];
             if (floatBitsToUint(entry.position_hashKey.w) != key) continue;
 //          if (floatBitsToUint(entry.position_hashKey.w) != key) continue;
+            // CACHE_MIN_SAMPLES >= 4 required: Welford variance produces artificially high confidence (1.0) before sample 3
+//          // CACHE_MIN_SAMPLES >= 4 required: Welford variance produces artificially high confidence (1.0) before sample 3
             if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) continue;
 //          if (entry.radiance_sampleCount.w < CACHE_MIN_SAMPLES) continue;
             float dist = length(entry.position_hashKey.xyz - worldPos);
@@ -412,8 +416,8 @@
 //          }
         }
 //      }
-        if (totalWeight < 0.01) return false;
-//      if (totalWeight < 0.01) return false;
+        if (totalWeight < 0.25) return false;
+//      if (totalWeight < 0.25) return false;
         outRadiance = totalRadiance / totalWeight;
 //      outRadiance = totalRadiance / totalWeight;
         outConfidence = totalConfidence / totalWeight;
@@ -465,8 +469,10 @@
 //              float variance = max(perChannelVar.r, max(perChannelVar.g, perChannelVar.b));
                 float avgLum = dot(newAvg, vec3(1.0 / 3.0));
 //              float avgLum = dot(newAvg, vec3(1.0 / 3.0));
-                float confidence = clamp(1.0 - sqrt(max(variance, 0.0)) / max(avgLum, 0.001), 0.0, 1.0);
-//              float confidence = clamp(1.0 - sqrt(max(variance, 0.0)) / max(avgLum, 0.001), 0.0, 1.0);
+                // SNR-based confidence: stable at all luminance scales including near-black surfaces
+//              // SNR-based confidence: stable at all luminance scales including near-black surfaces
+                float confidence = clamp(avgLum / (avgLum + sqrt(max(variance, 0.0)) + 1e-5), 0.0, 1.0);
+//              float confidence = clamp(avgLum / (avgLum + sqrt(max(variance, 0.0)) + 1e-5), 0.0, 1.0);
                 cacheEntries[slot].variance_confidence = vec4(newM2, confidence);
 //              cacheEntries[slot].variance_confidence = vec4(newM2, confidence);
                 cacheEntries[slot].normal_age.w = float(uCacheFrameCounter);
@@ -497,8 +503,10 @@
 //          }
         }
 //      }
-        if (bestEvictIdx >= 0 && bestEvictAge > CACHE_EVICTION_AGE) {
-//      if (bestEvictIdx >= 0 && bestEvictAge > CACHE_EVICTION_AGE) {
+        // Evict if age exceeds threshold, or fall back to oldest entry to prevent cache starvation
+//      // Evict if age exceeds threshold, or fall back to oldest entry to prevent cache starvation
+        if (bestEvictIdx >= 0 && (bestEvictAge > CACHE_EVICTION_AGE || bestEvictAge >= 0.0)) {
+//      if (bestEvictIdx >= 0 && (bestEvictAge > CACHE_EVICTION_AGE || bestEvictAge >= 0.0)) {
             uint slot = uint(bestEvictIdx);
 //          uint slot = uint(bestEvictIdx);
             cacheEntries[slot].radiance_sampleCount = vec4(radiance, 1.0);
@@ -2064,8 +2072,10 @@
 //                  float blendWeight = uCacheBlendFactor * mix(0.3, 0.9, depthFactor) * max(cacheConfidence, 0.1);
                     if (rand() < blendWeight) {
 //                  if (rand() < blendWeight) {
-                        accumulatedColor += attenuation * cachedRadiance;
-//                      accumulatedColor += attenuation * cachedRadiance;
+                        // Divide by blendWeight to compensate for stochastic termination (importance sampling)
+//                      // Divide by blendWeight to compensate for stochastic termination (importance sampling)
+                        accumulatedColor += attenuation * cachedRadiance / blendWeight;
+//                      accumulatedColor += attenuation * cachedRadiance / blendWeight;
                         break;
 //                      break;
                     }
