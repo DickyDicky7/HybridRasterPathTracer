@@ -60,14 +60,6 @@
 //      float lumaW  = dot(luma, texture(textureInput, uv + vec2(-1.0,  0.0) * texCoordOffset).rgb);
         float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
 //      float lumaE  = dot(luma, texture(textureInput, uv + vec2( 1.0,  0.0) * texCoordOffset).rgb);
-        float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
-//      float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
-        float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
-//      float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
-        float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
-//      float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
-        float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
-//      float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
 
         float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
 //      float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
@@ -85,19 +77,33 @@
         }
 //      }
 
-        float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
-//      float lumaAvg = (lumaN + lumaS + lumaW + lumaE) * 0.25;
+        float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNW = dot(luma, texture(textureInput, uv + vec2(-1.0, -1.0) * texCoordOffset).rgb);
+        float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+//      float lumaNE = dot(luma, texture(textureInput, uv + vec2( 1.0, -1.0) * texCoordOffset).rgb);
+        float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSW = dot(luma, texture(textureInput, uv + vec2(-1.0,  1.0) * texCoordOffset).rgb);
+        float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
+//      float lumaSE = dot(luma, texture(textureInput, uv + vec2( 1.0,  1.0) * texCoordOffset).rgb);
+
+        float lumaAvg = (lumaN + lumaS + lumaW + lumaE + 2.0 * lumaM) / 6.0;
+//      float lumaAvg = (lumaN + lumaS + lumaW + lumaE + 2.0 * lumaM) / 6.0;
         float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
 //      float subpixAlias = clamp(abs(lumaAvg - lumaM) / lumaRange, 0.0, 1.0);
         float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 //      float subpixBlend = smoothstep(0.0, 1.0, subpixAlias) * FXAA_SUBPIX_QUALITY;
 
+        float lumaMinFull = min(lumaMin, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+//      float lumaMinFull = min(lumaMin, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+        float lumaMaxFull = max(lumaMax, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+//      float lumaMaxFull = max(lumaMax, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
         vec2 dir;
 //      vec2 dir;
-        dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
-//      dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
-        dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
-//      dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+        dir.x = -((lumaNW + 2.0 * lumaN + lumaNE) - (lumaSW + 2.0 * lumaS + lumaSE));
+//      dir.x = -((lumaNW + 2.0 * lumaN + lumaNE) - (lumaSW + 2.0 * lumaS + lumaSE));
+        dir.y =  ((lumaNW + 2.0 * lumaW + lumaSW) - (lumaNE + 2.0 * lumaE + lumaSE));
+//      dir.y =  ((lumaNW + 2.0 * lumaW + lumaSW) - (lumaNE + 2.0 * lumaE + lumaSE));
 
         float dirReduce = max(
 //      float dirReduce = max(
@@ -133,8 +139,8 @@
 
         vec3 edgeResult;
 //      vec3 edgeResult;
-        if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
-//      if ((lumaB < lumaMin) || (lumaB > lumaMax)) {
+        if ((lumaB < lumaMinFull) || (lumaB > lumaMaxFull)) {
+//      if ((lumaB < lumaMinFull) || (lumaB > lumaMaxFull)) {
             edgeResult = rgbA;
 //          edgeResult = rgbA;
         } else {
