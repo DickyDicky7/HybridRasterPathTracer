@@ -48,8 +48,10 @@
 
         vec3 luma = LUMA_WEIGHTS;
 //      vec3 luma = LUMA_WEIGHTS;
-        float lumaM  = dot(luma, texture(textureInput, uv).rgb);
-//      float lumaM  = dot(luma, texture(textureInput, uv).rgb);
+        vec3 rgbM = texture(textureInput, uv).rgb;
+//      vec3 rgbM = texture(textureInput, uv).rgb;
+        float lumaM  = dot(luma, rgbM);
+//      float lumaM  = dot(luma, rgbM);
         float lumaN  = dot(luma, texture(textureInput, uv + vec2( 0.0, -1.0) * texCoordOffset).rgb);
 //      float lumaN  = dot(luma, texture(textureInput, uv + vec2( 0.0, -1.0) * texCoordOffset).rgb);
         float lumaS  = dot(luma, texture(textureInput, uv + vec2( 0.0,  1.0) * texCoordOffset).rgb);
@@ -76,8 +78,8 @@
 
         if (lumaRange < max(FXAA_EDGE_THRESHOLD_MIN, lumaMax * FXAA_EDGE_THRESHOLD)) {
 //      if (lumaRange < max(FXAA_EDGE_THRESHOLD_MIN, lumaMax * FXAA_EDGE_THRESHOLD)) {
-            imageStore(textureOutput, coord, texture(textureInput, uv));
-//          imageStore(textureOutput, coord, texture(textureInput, uv));
+            imageStore(textureOutput, coord, vec4(rgbM, 1.0));
+//          imageStore(textureOutput, coord, vec4(rgbM, 1.0));
             return;
 //          return;
         }
@@ -99,8 +101,8 @@
 
         float dirReduce = max(
 //      float dirReduce = max(
-            (lumaN + lumaS + lumaW + lumaE) * (0.25 * FXAA_REDUCE_MUL),
-//          (lumaN + lumaS + lumaW + lumaE) * (0.25 * FXAA_REDUCE_MUL),
+            (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
+//          (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
             FXAA_REDUCE_MIN);
 //          FXAA_REDUCE_MIN);
 
@@ -142,8 +144,8 @@
         }
 //      }
 
-        vec3 finalColor = mix(edgeResult, texture(textureInput, uv).rgb, subpixBlend);
-//      vec3 finalColor = mix(edgeResult, texture(textureInput, uv).rgb, subpixBlend);
+        vec3 finalColor = mix(rgbM, edgeResult, subpixBlend);
+//      vec3 finalColor = mix(rgbM, edgeResult, subpixBlend);
         imageStore(textureOutput, coord, vec4(finalColor, 1.0));
 //      imageStore(textureOutput, coord, vec4(finalColor, 1.0));
     }
