@@ -2095,8 +2095,8 @@
 
             if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
 //          if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
-                writeCache(hitPoint, shadingNormal, bounceDirect);
-//              writeCache(hitPoint, shadingNormal, bounceDirect);
+                writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
+//              writeCache(hitPoint, rayHitResult.hittedSideNormal, bounceDirect);
             }
 //          }
 
