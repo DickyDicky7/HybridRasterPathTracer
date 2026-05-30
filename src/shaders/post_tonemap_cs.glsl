@@ -8,6 +8,9 @@
     layout(binding = 1, rgba32f) uniform image2D textureInput;
 //  layout(binding = 1, rgba32f) uniform image2D textureInput;
 
+    const float EXPOSURE = 0.5;
+//  const float EXPOSURE = 0.5;
+
     #include "tonemap.glsl"
 
     const float DISPLAY_GAMMA = 2.2;
@@ -30,6 +33,8 @@
         vec4 color = imageLoad(textureInput, coord);
 //      vec4 color = imageLoad(textureInput, coord);
 
+        color.rgb *= EXPOSURE;
+//      color.rgb *= EXPOSURE;
         color.rgb = pbrNeutral(color.rgb);
 //      color.rgb = pbrNeutral(color.rgb);
         color.rgb = pow(color.rgb, vec3(1.0 / DISPLAY_GAMMA));

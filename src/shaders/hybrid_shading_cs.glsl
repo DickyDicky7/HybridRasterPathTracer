@@ -1428,9 +1428,6 @@
 //      outRoughness = roughness;
         outMetallic = metallic;
 //      outMetallic = metallic;
-        outShadingNormal = shadingNormal;
-//      outShadingNormal = shadingNormal;
-
         // F0 calculation: 0.04 for dielectrics, albedo for metals
 //      // F0 calculation: 0.04 for dielectrics, albedo for metals
         vec3 f0 = mix(vec3(F0_DEFAULT), albedo, metallic);
@@ -1444,6 +1441,9 @@
 //          shadingNormal = recentRayHitResult.hittedSideNormal;
         }
 //      }
+
+        outShadingNormal = shadingNormal;
+//      outShadingNormal = shadingNormal;
 
         // Schlick's fresnel approximation at incident angle
 //      // Schlick's fresnel approximation at incident angle
@@ -1522,8 +1522,8 @@
                 }
 //              }
 
-                vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
-//              vec3 microfacetNormal = sampleGGX(shadingNormal, material.roughness);
+                vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
+//              vec3 microfacetNormal = sampleGGX(shadingNormal, roughness);
 
                 float cosThetaIncidence = dot(-incomingRay.direction, microfacetNormal);
 //              float cosThetaIncidence = dot(-incomingRay.direction, microfacetNormal);
@@ -1540,6 +1540,24 @@
                 // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
 //              // When [ sinThetaTransmission <= 1.0 ] then Refraction happened else Total Internal Reflection happened
 
+                // Fresnel evaluated at the sampled microfacet angle (not the macro shading normal)
+//              // Fresnel evaluated at the sampled microfacet angle (not the macro shading normal)
+                vec3 fresnelMicro = schlickFresnel(cosThetaIncidence, f0);
+//              vec3 fresnelMicro = schlickFresnel(cosThetaIncidence, f0);
+
+                // NDF-sampled microfacet weight: G * |V.Hm| / (|N.V| * |N.Hm|), with the same Smith
+                // convention as the reflection BSDF (k = roughness^2 / 2). Degrades to ~1.0 at MIN_ROUGHNESS.
+//              // NDF-sampled microfacet weight: G * |V.Hm| / (|N.V| * |N.Hm|), with the same Smith
+//              // convention as the reflection BSDF (k = roughness^2 / 2). Degrades to ~1.0 at MIN_ROUGHNESS.
+                float kSmith = (roughness * roughness) / 2.0;
+//              float kSmith = (roughness * roughness) / 2.0;
+                float NdotVm = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
+//              float NdotVm = max(dot(shadingNormal, -incomingRay.direction), EPSILON_DOT);
+                float NdotHm = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
+//              float NdotHm = max(dot(shadingNormal, microfacetNormal), EPSILON_DOT);
+                float G1Vm = NdotVm / (NdotVm * (1.0 - kSmith) + kSmith);
+//              float G1Vm = NdotVm / (NdotVm * (1.0 - kSmith) + kSmith);
+
                 float branchProb = (1.0 - specularProbability) * material.transmission;
 //              float branchProb = (1.0 - specularProbability) * material.transmission;
 
@@ -1547,14 +1565,32 @@
 //              if (sinThetaTransmission <= 1.0) {
                     outScatteredDirection = refractedDirection;
 //                  outScatteredDirection = refractedDirection;
-                    outAttenuation = (vec3(1.0) - fresnel) * albedo / max(branchProb, EPSILON_MATH);
-//                  outAttenuation = (vec3(1.0) - fresnel) * albedo / max(branchProb, EPSILON_MATH);
+                    // Reflection-form weight is exact for refraction too: Walter 2007's eta_t^2, D(Hm)
+//                  // Reflection-form weight is exact for refraction too: Walter 2007's eta_t^2, D(Hm)
+                    // and the transmission half-vector Jacobian all cancel against the full-NDF sampling
+//                  // and the transmission half-vector Jacobian all cancel against the full-NDF sampling
+                    // pdf, leaving G*|V.Hm|/(|N.V|*|N.Hm|). NdotLm uses abs() since transmitted L is far-side.
+//                  // pdf, leaving G*|V.Hm|/(|N.V|*|N.Hm|). NdotLm uses abs() since transmitted L is far-side.
+                    float NdotLm = max(abs(dot(shadingNormal, refractedDirection)), EPSILON_DOT);
+//                  float NdotLm = max(abs(dot(shadingNormal, refractedDirection)), EPSILON_DOT);
+                    float G1Lm = NdotLm / (NdotLm * (1.0 - kSmith) + kSmith);
+//                  float G1Lm = NdotLm / (NdotLm * (1.0 - kSmith) + kSmith);
+                    float microWeight = (G1Vm * G1Lm) * cosThetaIncidence / (NdotVm * NdotHm);
+//                  float microWeight = (G1Vm * G1Lm) * cosThetaIncidence / (NdotVm * NdotHm);
+                    outAttenuation = (vec3(1.0) - fresnelMicro) * albedo * microWeight / max(branchProb, EPSILON_MATH);
+//                  outAttenuation = (vec3(1.0) - fresnelMicro) * albedo * microWeight / max(branchProb, EPSILON_MATH);
                 } else {
 //              } else {
                     outScatteredDirection = reflectedDirection;
 //                  outScatteredDirection = reflectedDirection;
-                    outAttenuation = (vec3(1.0) - fresnel) / max(branchProb, EPSILON_MATH);
-//                  outAttenuation = (vec3(1.0) - fresnel) / max(branchProb, EPSILON_MATH);
+                    float NdotLm = max(dot(shadingNormal, reflectedDirection), EPSILON_DOT);
+//                  float NdotLm = max(dot(shadingNormal, reflectedDirection), EPSILON_DOT);
+                    float G1Lm = NdotLm / (NdotLm * (1.0 - kSmith) + kSmith);
+//                  float G1Lm = NdotLm / (NdotLm * (1.0 - kSmith) + kSmith);
+                    float microWeight = (G1Vm * G1Lm) * cosThetaIncidence / (NdotVm * NdotHm);
+//                  float microWeight = (G1Vm * G1Lm) * cosThetaIncidence / (NdotVm * NdotHm);
+                    outAttenuation = vec3(microWeight) / max(branchProb, EPSILON_MATH);
+//                  outAttenuation = vec3(microWeight) / max(branchProb, EPSILON_MATH);
                 }
 //              }
                 outIsDelta = true; // No NEE for transmission
@@ -1828,8 +1864,10 @@
 //                  float r = uPointLights[lightHit.lightIndex].radius;
                     float lightPdf = uPointLights[lightHit.lightIndex].pdf;
 //                  float lightPdf = uPointLights[lightHit.lightIndex].pdf;
-                    float area = 4.0 * PI * r * r;
-//                  float area = 4.0 * PI * r * r;
+                    // NEE samples only the hemisphere facing the shading point, so the light area is 2*PI*r*r
+//                  // NEE samples only the hemisphere facing the shading point, so the light area is 2*PI*r*r
+                    float area = 2.0 * PI * r * r;
+//                  float area = 2.0 * PI * r * r;
                     float pdfLightArea = lightPdf / area;
 //                  float pdfLightArea = lightPdf / area;
 
@@ -2005,8 +2043,16 @@
 //              float r = uPointLights[lightIdx].radius;
                 float lightPdf = uPointLights[lightIdx].pdf;
 //              float lightPdf = uPointLights[lightIdx].pdf;
-                vec3 sampledPoint = lightPos + randomUnitVector() * r;
-//              vec3 sampledPoint = lightPos + randomUnitVector() * r;
+                // Sample only the hemisphere of the light sphere facing the shading point to halve wasted (culled) samples
+//              // Sample only the hemisphere of the light sphere facing the shading point to halve wasted (culled) samples
+                vec3 toSurface = normalize(hitPoint - lightPos);
+//              vec3 toSurface = normalize(hitPoint - lightPos);
+                vec3 lightSampleN = randomUnitVector();
+//              vec3 lightSampleN = randomUnitVector();
+                if (dot(lightSampleN, toSurface) < 0.0) lightSampleN = -lightSampleN;
+//              if (dot(lightSampleN, toSurface) < 0.0) lightSampleN = -lightSampleN;
+                vec3 sampledPoint = lightPos + lightSampleN * r;
+//              vec3 sampledPoint = lightPos + lightSampleN * r;
 
                 vec3 shadowDir = sampledPoint - hitPoint;
 //              vec3 shadowDir = sampledPoint - hitPoint;
@@ -2048,8 +2094,10 @@
 
                     if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
 //                  if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
-                        float area = 4.0 * PI * r * r;
-//                      float area = 4.0 * PI * r * r;
+                        // Hemisphere sampling (see above): the sampleable light area is 2*PI*r*r, matching the BRDF-hit MIS area
+//                      // Hemisphere sampling (see above): the sampleable light area is 2*PI*r*r, matching the BRDF-hit MIS area
+                        float area = 2.0 * PI * r * r;
+//                      float area = 2.0 * PI * r * r;
                         float pdfLightArea = lightPdf / area;
 //                      float pdfLightArea = lightPdf / area;
                         float pdfLightW = (pdfLightArea * distLight * distLight) / cosThetaLight;
