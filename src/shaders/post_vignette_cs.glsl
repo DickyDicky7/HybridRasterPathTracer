@@ -24,6 +24,17 @@
     const float VIGNETTE_CURVE = 1.2;
 //  const float VIGNETTE_CURVE = 1.2;
 
+    // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low bit-depth output would expose across the gentle gradient.
+    // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low bit-depth output would expose across the gentle gradient.
+    float ditherValue(vec2 p) {
+//  float ditherValue(vec2 p) {
+        float noise = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+//      float noise = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+        return (noise - 0.5) / 255.0;
+//      return (noise - 0.5) / 255.0;
+    }
+//  }
+
     void main() {
 //  void main() {
         ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -66,6 +77,11 @@
         // Color Blending Integration: Transitions smoothly between the custom vignette color value and the underlying rendered fragment color utilizing the calculated attenuation mask as a linear interpolant, avoiding the muddy results typical of rudimentary multiplicative darkening methods.
         color.rgb = mix(uColor, color.rgb, vignette);
 //      color.rgb = mix(uColor, color.rgb, vignette);
+
+        // Dither Injection: Add a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
+        // Dither Injection: Add a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
+        color.rgb += ditherValue(vec2(coord));
+//      color.rgb += ditherValue(vec2(coord));
 
         imageStore(textureOutput, coord, vec4(color.rgb, 1.0));
 //      imageStore(textureOutput, coord, vec4(color.rgb, 1.0));

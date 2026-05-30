@@ -52,12 +52,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #   # 1. Rasterization Pass: Renders scene geometry to G-Buffer (Position, Normal, Albedo, etc.).
     # 2. Compute Pass (Ray Tracing): Uses G-Buffer + Ray Tracing (BVH) to calculate lighting/reflections.
 #   # 2. Compute Pass (Ray Tracing): Uses G-Buffer + Ray Tracing (BVH) to calculate lighting/reflections.
-    # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
-#   # 3. Denoise Pass: Cleans up the noisy ray-traced output (using A-Trous filter or OIDN).
-    # 4. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
-#   # 4. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
-    # 5. Composite Pass: Displays the final result to the screen.
-#   # 5. Composite Pass: Displays the final result to the screen.
+    # 3. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
+#   # 3. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
+    # 4. Composite Pass: Displays the final result to the screen.
+#   # 4. Composite Pass: Displays the final result to the screen.
     gl_version: vec2i32 = (4, 3)
 #   gl_version: vec2i32 = (4, 3)
     title: str = "Hybrid Rendering: Rasterization + Path Tracing"
@@ -245,15 +243,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
         self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 #       self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
-
-        # Denoise Shader
-#       # Denoise Shader
-        hybrid_denoise_cs_path: pl.Path = self.resource_dir / "../shaders/hybrid_denoise_cs.glsl"
-#       hybrid_denoise_cs_path: pl.Path = self.resource_dir / "../shaders/hybrid_denoise_cs.glsl"
-        hybrid_denoise_cs_code: str = resolve_includes(hybrid_denoise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_denoise_cs_code: str = resolve_includes(hybrid_denoise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_denoise: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_denoise_cs_code)
-#       self.program_denoise: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_denoise_cs_code)
 
         # -----------------------------
 #       # -----------------------------
@@ -1160,6 +1149,13 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
         """
 
+        # Apply Exposure (matches EXPOSURE in post_tonemap_cs.glsl)
+#       # Apply Exposure (matches EXPOSURE in post_tonemap_cs.glsl)
+        EXPOSURE = 0.5
+#       EXPOSURE = 0.5
+        output_arr = output_arr * EXPOSURE
+#       output_arr = output_arr * EXPOSURE
+
         # Apply Khronos PBR Neutral Tonemap
 #       # Apply Khronos PBR Neutral Tonemap
         start_compression = 0.8 - 0.04
@@ -1558,83 +1554,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
 
-        # 3. Denoise (Multi-Pass A-Trous)
-#       # 3. Denoise (Multi-Pass A-Trous)
-
-        # Pass 1: Accum -> Ping (Step 1)
-#       # Pass 1: Accum -> Ping (Step 1)
-        self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
-#       self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
-        self.texture_accum.bind_to_image(5, read=True, write=False)  # Input
-#       self.texture_accum.bind_to_image(5, read=True, write=False)  # Input
-        self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-#       self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-        self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-#       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-        self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-#       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-
-        self.program_denoise["uStepSize"] = 1
-#       self.program_denoise["uStepSize"] = 1
-        self.program_denoise["uFinalPass"] = 0
-#       self.program_denoise["uFinalPass"] = 0
-        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-
-        # Pass 2: Ping -> Output (Step 2)
-#       # Pass 2: Ping -> Output (Step 2)
-        self.texture_output.bind_to_image(0, read=False, write=True) # Output
-#       self.texture_output.bind_to_image(0, read=False, write=True) # Output
-        self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
-#       self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
-
-        self.program_denoise["uStepSize"] = 2
-#       self.program_denoise["uStepSize"] = 2
-        self.program_denoise["uFinalPass"] = 0
-#       self.program_denoise["uFinalPass"] = 0
-        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-
-        # Pass 3: Output -> Ping (Step 4)
-#       # Pass 3: Output -> Ping (Step 4)
-        self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
-#       self.texture_ping.bind_to_image(0, read=False, write=True)   # Output
-        self.texture_output.bind_to_image(5, read=True, write=False) # Input
-#       self.texture_output.bind_to_image(5, read=True, write=False) # Input
-
-        self.program_denoise["uStepSize"] = 4
-#       self.program_denoise["uStepSize"] = 4
-        self.program_denoise["uFinalPass"] = 0
-#       self.program_denoise["uFinalPass"] = 0
-        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-
-        # Pass 4: Ping -> Output (Step 8, Final Tone Map)
-#       # Pass 4: Ping -> Output (Step 8, Final Tone Map)
-        self.texture_output.bind_to_image(0, read=False, write=True) # Output
-#       self.texture_output.bind_to_image(0, read=False, write=True) # Output
-        self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
-#       self.texture_ping.bind_to_image(5, read=True, write=False)   # Input
-
-        self.program_denoise["uStepSize"] = 8
-#       self.program_denoise["uStepSize"] = 8
-        self.program_denoise["uFinalPass"] = 1
-#       self.program_denoise["uFinalPass"] = 1
-        self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-#       self.program_denoise.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-
-        # 4. Post Processing Pipeline
-#       # 4. Post Processing Pipeline
-        current_read_texture: mgl.Texture = self.texture_output
-#       current_read_texture: mgl.Texture = self.texture_output
+        # 3. Post Processing Pipeline
+#       # 3. Post Processing Pipeline
+        # The shading pass leaves its result in texture_accum (the temporal history buffer).
+#       # The shading pass leaves its result in texture_accum (the temporal history buffer).
+        # Feed it in as a read-only input and ping-pong between ping/output so the
+#       # Feed it in as a read-only input and ping-pong between ping/output so the
+        # accumulation buffer is never overwritten by a post-processing pass.
+#       # accumulation buffer is never overwritten by a post-processing pass.
+        current_read_texture: mgl.Texture = self.texture_accum
+#       current_read_texture: mgl.Texture = self.texture_accum
         current_write_texture: mgl.Texture = self.texture_ping
 #       current_write_texture: mgl.Texture = self.texture_ping
 
@@ -1657,8 +1586,17 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             current_read_texture, current_write_texture = current_write_texture, current_read_texture
 #           current_read_texture, current_write_texture = current_write_texture, current_read_texture
 
-        # 5. Display Result to Screen
-#       # 5. Display Result to Screen
+            # texture_accum is read-only outside the shading pass; once the first pass has
+#           # texture_accum is read-only outside the shading pass; once the first pass has
+            # consumed it, keep ping-ponging between ping and output only.
+#           # consumed it, keep ping-ponging between ping and output only.
+            if current_write_texture is self.texture_accum:
+#           if current_write_texture is self.texture_accum:
+                current_write_texture = self.texture_output
+#               current_write_texture = self.texture_output
+
+        # 4. Display Result to Screen
+#       # 4. Display Result to Screen
         self.ctx.screen.use()
 #       self.ctx.screen.use()
         self.ctx.clear()

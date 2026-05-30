@@ -20,6 +20,33 @@
     const int CHROMA_TAPS = 8;
 //  const int CHROMA_TAPS = 8;
 
+    // Bilinear Texel Gather: The input is bound as a raw storage image rather than a hardware-filtered sampler, so fractional sample positions must be resolved manually by fetching the four surrounding texels and blending them along both axes. This upgrades the previous nearest-neighbour integer reads to sub-pixel accurate fetches, eliminating the stair-step aliasing that otherwise crawls along the chromatic fringes.
+    // Bilinear Texel Gather: The input is bound as a raw storage image rather than a hardware-filtered sampler, so fractional sample positions must be resolved manually by fetching the four surrounding texels and blending them along both axes. This upgrades the previous nearest-neighbour integer reads to sub-pixel accurate fetches, eliminating the stair-step aliasing that otherwise crawls along the chromatic fringes.
+    vec3 sampleBilinear(vec2 pixel, ivec2 size) {
+//  vec3 sampleBilinear(vec2 pixel, ivec2 size) {
+        vec2 frac = fract(pixel);
+//      vec2 frac = fract(pixel);
+        ivec2 base = ivec2(floor(pixel));
+//      ivec2 base = ivec2(floor(pixel));
+
+        ivec2 c00 = clamp(base, ivec2(0), size - ivec2(1));
+//      ivec2 c00 = clamp(base, ivec2(0), size - ivec2(1));
+        ivec2 c10 = clamp(base + ivec2(1, 0), ivec2(0), size - ivec2(1));
+//      ivec2 c10 = clamp(base + ivec2(1, 0), ivec2(0), size - ivec2(1));
+        ivec2 c01 = clamp(base + ivec2(0, 1), ivec2(0), size - ivec2(1));
+//      ivec2 c01 = clamp(base + ivec2(0, 1), ivec2(0), size - ivec2(1));
+        ivec2 c11 = clamp(base + ivec2(1, 1), ivec2(0), size - ivec2(1));
+//      ivec2 c11 = clamp(base + ivec2(1, 1), ivec2(0), size - ivec2(1));
+
+        vec3 top = mix(imageLoad(textureInput, c00).rgb, imageLoad(textureInput, c10).rgb, frac.x);
+//      vec3 top = mix(imageLoad(textureInput, c00).rgb, imageLoad(textureInput, c10).rgb, frac.x);
+        vec3 bottom = mix(imageLoad(textureInput, c01).rgb, imageLoad(textureInput, c11).rgb, frac.x);
+//      vec3 bottom = mix(imageLoad(textureInput, c01).rgb, imageLoad(textureInput, c11).rgb, frac.x);
+        return mix(top, bottom, frac.y);
+//      return mix(top, bottom, frac.y);
+    }
+//  }
+
     void main() {
 //  void main() {
         ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
@@ -58,10 +85,10 @@
             float shift = (t - 0.5) * 2.0;
 //          float shift = (t - 0.5) * 2.0;
 
-            ivec2 c = clamp(ivec2((uv + offset * shift) * vec2(size)), ivec2(0), size - ivec2(1));
-//          ivec2 c = clamp(ivec2((uv + offset * shift) * vec2(size)), ivec2(0), size - ivec2(1));
-            vec3 smp = imageLoad(textureInput, c).rgb;
-//          vec3 smp = imageLoad(textureInput, c).rgb;
+            vec2 samplePixel = (uv + offset * shift) * vec2(size);
+//          vec2 samplePixel = (uv + offset * shift) * vec2(size);
+            vec3 smp = sampleBilinear(samplePixel, size);
+//          vec3 smp = sampleBilinear(samplePixel, size);
 
             vec3 w = vec3(max(0.0, 1.0 - abs(shift - 1.0)), max(0.0, 1.0 - abs(shift)), max(0.0, 1.0 - abs(shift + 1.0)));
 //          vec3 w = vec3(max(0.0, 1.0 - abs(shift - 1.0)), max(0.0, 1.0 - abs(shift)), max(0.0, 1.0 - abs(shift + 1.0)));
