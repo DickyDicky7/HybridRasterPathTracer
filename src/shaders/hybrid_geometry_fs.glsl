@@ -84,8 +84,10 @@
 //      vec3 finalAlbedo = mat.albedo.rgb;
         if (mat.textureIndexAlbedo > -0.5) {
 //      if (mat.textureIndexAlbedo > -0.5) {
-            finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb;
-//          finalAlbedo *= texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb;
+            // Albedo is stored sRGB-encoded in 8-bit; decode to linear here
+//          // Albedo is stored sRGB-encoded in 8-bit; decode to linear here
+            finalAlbedo *= pow(texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb, vec3(2.2));
+//          finalAlbedo *= pow(texture(uSceneTextureArray, vec3(inGeometryUV * mat.uvScale, mat.textureIndexAlbedo)).rgb, vec3(2.2));
         }
 //      }
         outGeometryAlbedo = vec4(finalAlbedo, 1.0);

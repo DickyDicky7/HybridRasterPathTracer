@@ -1310,33 +1310,35 @@
 
         if (material.textureIndexAlbedo > -0.5) {
 //      if (material.textureIndexAlbedo > -0.5) {
-            albedo *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb;
-//          albedo *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb;
+            // Albedo is stored sRGB-encoded in 8-bit; decode to linear here
+//          // Albedo is stored sRGB-encoded in 8-bit; decode to linear here
+            albedo *= pow(textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb, vec3(2.2));
+//          albedo *= pow(textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexAlbedo), lod).rgb, vec3(2.2));
         }
 //      }
         if (material.textureIndexRoughness > -0.5) {
 //      if (material.textureIndexRoughness > -0.5) {
-            // Assume roughness is in R channel or grayscale
-//          // Assume roughness is in R channel or grayscale
+            // Packed ORM layer: roughness is in the R channel
+//          // Packed ORM layer: roughness is in the R channel
             roughness = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexRoughness), lod).r;
 //          roughness = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexRoughness), lod).r;
         }
 //      }
         if (material.textureIndexMetallic > -0.5) {
 //      if (material.textureIndexMetallic > -0.5) {
-            // Assume metallic is in R channel or grayscale
-//          // Assume metallic is in R channel or grayscale
-            metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).r;
-//          metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).r;
+            // Packed ORM layer: metallic is in the G channel
+//          // Packed ORM layer: metallic is in the G channel
+            metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).g;
+//          metallic = textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexMetallic), lod).g;
         }
 //      }
 
         if (material.textureIndexTransmission > -0.5) {
 //      if (material.textureIndexTransmission > -0.5) {
-            // Assume transmission is in R channel or grayscale
-//          // Assume transmission is in R channel or grayscale
-            material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).r;
-//          material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).r;
+            // Packed ORM layer: transmission is in the B channel
+//          // Packed ORM layer: transmission is in the B channel
+            material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).b;
+//          material.transmission *= textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexTransmission), lod).b;
         }
 //      }
 
@@ -1347,8 +1349,10 @@
 
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
-            outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb;
-//          outEmission = material.emissive * textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb;
+            // Emissive is stored sRGB-encoded in 8-bit; decode to linear here
+//          // Emissive is stored sRGB-encoded in 8-bit; decode to linear here
+            outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb, vec3(2.2));
+//          outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledUV, material.textureIndexEmissive), lod).rgb, vec3(2.2));
         } else {
 //      } else {
             outEmission = material.emissive * albedo;

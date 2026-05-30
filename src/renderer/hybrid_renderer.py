@@ -186,23 +186,27 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Texture Array for Scene Materials
 #       # Texture Array for Scene Materials
+        # The array is created lazily in upload_pending_textures() once we know exactly
+#       # The array is created lazily in upload_pending_textures() once we know exactly
+        # how many layers are needed, so no VRAM is wasted on unused layers.
+#       # how many layers are needed, so no VRAM is wasted on unused layers.
         self.texture_array_size: int = 2048
 #       self.texture_array_size: int = 2048
-        self.texture_array_layers: int = 64
-#       self.texture_array_layers: int = 64
-        self.texture_array: mgl.TextureArray = self.ctx.texture_array(
-#       self.texture_array: mgl.TextureArray = self.ctx.texture_array(
-            size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
-#           size=(self.texture_array_size, self.texture_array_size, self.texture_array_layers), components=4, dtype="f4"
-        )
-#       )
-        self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
-#       self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+        self.texture_array: mgl.TextureArray = None
+#       self.texture_array: mgl.TextureArray = None
 
         self.texture_cache: dict[str, float] = {}
 #       self.texture_cache: dict[str, float] = {}
         self.next_texture_layer: int = 0
 #       self.next_texture_layer: int = 0
+        # Deferred uploads: (path, layer_index, is_srgb) registered by load_texture()
+#       # Deferred uploads: (path, layer_index, is_srgb) registered by load_texture()
+        self.pending_textures: list[tuple[pl.Path, int, bool]] = []
+#       self.pending_textures: list[tuple[pl.Path, int, bool]] = []
+        # Deferred packed uploads: (layer_index, roughness_path, metallic_path, transmission_path)
+#       # Deferred packed uploads: (layer_index, roughness_path, metallic_path, transmission_path)
+        self.pending_packed_textures: list[tuple[int, pl.Path | None, pl.Path | None, pl.Path | None]] = []
+#       self.pending_packed_textures: list[tuple[int, pl.Path | None, pl.Path | None, pl.Path | None]] = []
 
         # -----------------------------
 #       # -----------------------------
@@ -392,8 +396,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_pistol = self.load_texture(pistol_base_path / "pistol_albedo.png", is_srgb=True)
         idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
 #       idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
-        idx_met_sm_pistol = self.load_texture(pistol_base_path / "pistol_metallic_smoothness.png")
-#       idx_met_sm_pistol = self.load_texture(pistol_base_path / "pistol_metallic_smoothness.png")
+        _, idx_met_sm_pistol, _ = self.load_packed_orm(metallic_path=pistol_base_path / "pistol_metallic_smoothness.png")
+#       _, idx_met_sm_pistol, _ = self.load_packed_orm(metallic_path=pistol_base_path / "pistol_metallic_smoothness.png")
 
         # Material 0: lambert4
 #       # Material 0: lambert4
@@ -483,8 +487,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_0 = self.load_texture(rifle_base_path / "low_UpperReciever_BaseColor.jpg", is_srgb=True)
         idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
 #       idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
-        idx_roughness_0 = self.load_texture(rifle_base_path / "UR_R.jpg")
-#       idx_roughness_0 = self.load_texture(rifle_base_path / "UR_R.jpg")
+        idx_roughness_0, _, _ = self.load_packed_orm(roughness_path=rifle_base_path / "UR_R.jpg")
+#       idx_roughness_0, _, _ = self.load_packed_orm(roughness_path=rifle_base_path / "UR_R.jpg")
 
         self.materials.append({
 #       self.materials.append({
@@ -525,10 +529,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_1 = self.load_texture(rifle_base_path / "low_LowerReciever_BaseColor.jpg", is_srgb=True)
         idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
 #       idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
-        idx_roughness_1 = self.load_texture(rifle_base_path / "LR_R.png")
-#       idx_roughness_1 = self.load_texture(rifle_base_path / "LR_R.png")
-        idx_metallic_1 = self.load_texture(rifle_base_path / "LR_M.png")
-#       idx_metallic_1 = self.load_texture(rifle_base_path / "LR_M.png")
+        idx_roughness_1, idx_metallic_1, _ = self.load_packed_orm(roughness_path=rifle_base_path / "LR_R.png", metallic_path=rifle_base_path / "LR_M.png")
+#       idx_roughness_1, idx_metallic_1, _ = self.load_packed_orm(roughness_path=rifle_base_path / "LR_R.png", metallic_path=rifle_base_path / "LR_M.png")
 
         self.materials.append({
 #       self.materials.append({
@@ -569,10 +571,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_2 = self.load_texture(rifle_base_path / "low_Magazine_BaseColor.jpg", is_srgb=True)
         idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
 #       idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
-        idx_roughness_2 = self.load_texture(rifle_base_path / "M_R.png")
-#       idx_roughness_2 = self.load_texture(rifle_base_path / "M_R.png")
-        idx_metallic_2 = self.load_texture(rifle_base_path / "M_M.png")
-#       idx_metallic_2 = self.load_texture(rifle_base_path / "M_M.png")
+        idx_roughness_2, idx_metallic_2, _ = self.load_packed_orm(roughness_path=rifle_base_path / "M_R.png", metallic_path=rifle_base_path / "M_M.png")
+#       idx_roughness_2, idx_metallic_2, _ = self.load_packed_orm(roughness_path=rifle_base_path / "M_R.png", metallic_path=rifle_base_path / "M_M.png")
 
         self.materials.append({
 #       self.materials.append({
@@ -613,10 +613,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_BaseColor.jpg", is_srgb=True)
         idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
 #       idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
-        idx_roughness_3 = self.load_texture(rifle_base_path / "T_R.png")
-#       idx_roughness_3 = self.load_texture(rifle_base_path / "T_R.png")
-        idx_metallic_3 = self.load_texture(rifle_base_path / "T_M.png")
-#       idx_metallic_3 = self.load_texture(rifle_base_path / "T_M.png")
+        idx_roughness_3, idx_metallic_3, _ = self.load_packed_orm(roughness_path=rifle_base_path / "T_R.png", metallic_path=rifle_base_path / "T_M.png")
+#       idx_roughness_3, idx_metallic_3, _ = self.load_packed_orm(roughness_path=rifle_base_path / "T_R.png", metallic_path=rifle_base_path / "T_M.png")
 
         self.materials.append({
 #       self.materials.append({
@@ -669,10 +667,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_albedo_mp9 = self.load_texture(mp9_base_path / "M_MP9_Base_color.png", is_srgb=True)
         idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
 #       idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
-        idx_roughness_mp9 = self.load_texture(mp9_base_path / "M_MP9_Roughness.png")
-#       idx_roughness_mp9 = self.load_texture(mp9_base_path / "M_MP9_Roughness.png")
-        idx_metallic_mp9 = self.load_texture(mp9_base_path / "M_MP9_Metallic.png")
-#       idx_metallic_mp9 = self.load_texture(mp9_base_path / "M_MP9_Metallic.png")
+        idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
+#       idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
         idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
 #       idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
 
@@ -837,8 +833,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         }
 #       }
 
-        self.texture_array.build_mipmaps()
-#       self.texture_array.build_mipmaps()
+        self.upload_pending_textures()
+#       self.upload_pending_textures()
         pass
 #       pass
 
@@ -863,6 +859,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
     def load_texture(self, path: pl.Path, is_srgb: bool = False) -> float:
 #   def load_texture(self, path: pl.Path, is_srgb: bool = False) -> float:
+        # Registers a texture for deferred upload and returns its layer index.
+#       # Registers a texture for deferred upload and returns its layer index.
+        # The actual GPU upload happens later in upload_pending_textures().
+#       # The actual GPU upload happens later in upload_pending_textures().
         path_str = str(path.resolve())
 #       path_str = str(path.resolve())
         if path_str in self.texture_cache:
@@ -870,27 +870,188 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             return self.texture_cache[path_str]
 #           return self.texture_cache[path_str]
 
-        if self.next_texture_layer >= self.texture_array_layers:
-#       if self.next_texture_layer >= self.texture_array_layers:
-            print(f"Warning: Texture array full. Cannot load {path}")
-#           print(f"Warning: Texture array full. Cannot load {path}")
+        if not path.exists():
+#       if not path.exists():
+            print(f"Warning: Texture not found: {path}")
+#           print(f"Warning: Texture not found: {path}")
             return -1.0
 #           return -1.0
 
         layer_index = self.next_texture_layer
 #       layer_index = self.next_texture_layer
-        success = self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-#       success = self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-        if success:
-#       if success:
-            self.texture_cache[path_str] = float(layer_index)
-#           self.texture_cache[path_str] = float(layer_index)
+        self.texture_cache[path_str] = float(layer_index)
+#       self.texture_cache[path_str] = float(layer_index)
+        self.next_texture_layer += 1
+#       self.next_texture_layer += 1
+        self.pending_textures.append((path, layer_index, is_srgb))
+#       self.pending_textures.append((path, layer_index, is_srgb))
+        return float(layer_index)
+#       return float(layer_index)
+
+    def load_packed_orm(self, roughness_path: pl.Path | None = None, metallic_path: pl.Path | None = None, transmission_path: pl.Path | None = None) -> tuple[float, float, float]:
+#   def load_packed_orm(self, roughness_path: pl.Path | None = None, metallic_path: pl.Path | None = None, transmission_path: pl.Path | None = None) -> tuple[float, float, float]:
+        # Packs up to three single-channel data maps into ONE layer: roughness->R, metallic->G, transmission->B.
+#       # Packs up to three single-channel data maps into ONE layer: roughness->R, metallic->G, transmission->B.
+        # Returns (roughness_index, metallic_index, transmission_index): each is the shared layer index if that
+#       # Returns (roughness_index, metallic_index, transmission_index): each is the shared layer index if that
+        # map is present, else -1.0. Saves up to two layers per material vs. one layer per map.
+#       # map is present, else -1.0. Saves up to two layers per material vs. one layer per map.
+        def _present(p: pl.Path | None) -> pl.Path | None:
+#       def _present(p: pl.Path | None) -> pl.Path | None:
+            if p is None:
+#           if p is None:
+                return None
+#               return None
+            if not p.exists():
+#           if not p.exists():
+                print(f"Warning: Texture not found: {p}")
+#               print(f"Warning: Texture not found: {p}")
+                return None
+#               return None
+            return p
+#           return p
+
+        roughness_path = _present(roughness_path)
+#       roughness_path = _present(roughness_path)
+        metallic_path = _present(metallic_path)
+#       metallic_path = _present(metallic_path)
+        transmission_path = _present(transmission_path)
+#       transmission_path = _present(transmission_path)
+        if roughness_path is None and metallic_path is None and transmission_path is None:
+#       if roughness_path is None and metallic_path is None and transmission_path is None:
+            return (-1.0, -1.0, -1.0)
+#           return (-1.0, -1.0, -1.0)
+
+        cache_key = "orm:" + "|".join(str(p.resolve()) if p is not None else "-" for p in (roughness_path, metallic_path, transmission_path))
+#       cache_key = "orm:" + "|".join(str(p.resolve()) if p is not None else "-" for p in (roughness_path, metallic_path, transmission_path))
+        if cache_key in self.texture_cache:
+#       if cache_key in self.texture_cache:
+            shared = self.texture_cache[cache_key]
+#           shared = self.texture_cache[cache_key]
+        else:
+#       else:
+            shared = float(self.next_texture_layer)
+#           shared = float(self.next_texture_layer)
+            self.texture_cache[cache_key] = shared
+#           self.texture_cache[cache_key] = shared
             self.next_texture_layer += 1
 #           self.next_texture_layer += 1
-            return float(layer_index)
-#           return float(layer_index)
-        return -1.0
-#       return -1.0
+            self.pending_packed_textures.append((int(shared), roughness_path, metallic_path, transmission_path))
+#           self.pending_packed_textures.append((int(shared), roughness_path, metallic_path, transmission_path))
+
+        return (
+#       return (
+            shared if roughness_path is not None else -1.0,
+#           shared if roughness_path is not None else -1.0,
+            shared if metallic_path is not None else -1.0,
+#           shared if metallic_path is not None else -1.0,
+            shared if transmission_path is not None else -1.0,
+#           shared if transmission_path is not None else -1.0,
+        )
+#       )
+
+    def _load_data_channel(self, path: pl.Path) -> npt.NDArray[np.float32] | None:
+#   def _load_data_channel(self, path: pl.Path) -> npt.NDArray[np.float32] | None:
+        # Loads a single-channel linear data map, returns it resized to the array size in [0, 1].
+#       # Loads a single-channel linear data map, returns it resized to the array size in [0, 1].
+        loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+#       loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if loaded_data is None:
+#       if loaded_data is None:
+            print(f"Warning: Failed to load texture: {path}")
+#           print(f"Warning: Failed to load texture: {path}")
+            return None
+#           return None
+
+        # Grayscale maps are 2D; for color-stored maps take the red channel (OpenCV is BGR, so index 2)
+#       # Grayscale maps are 2D; for color-stored maps take the red channel (OpenCV is BGR, so index 2)
+        channel = loaded_data if len(loaded_data.shape) == 2 else loaded_data[..., 2]
+#       channel = loaded_data if len(loaded_data.shape) == 2 else loaded_data[..., 2]
+
+        channel_float: npt.NDArray[np.float32]
+#       channel_float: npt.NDArray[np.float32]
+        if channel.dtype == np.uint8:
+#       if channel.dtype == np.uint8:
+            channel_float = channel.astype(dtype=np.float32) / 255.0
+#           channel_float = channel.astype(dtype=np.float32) / 255.0
+        elif channel.dtype == np.uint16:
+#       elif channel.dtype == np.uint16:
+            channel_float = channel.astype(dtype=np.float32) / 65535.0
+#           channel_float = channel.astype(dtype=np.float32) / 65535.0
+        else:
+#       else:
+            channel_float = channel.astype(dtype=np.float32)
+#           channel_float = channel.astype(dtype=np.float32)
+
+        if channel_float.shape[0] != self.texture_array_size or channel_float.shape[1] != self.texture_array_size:
+#       if channel_float.shape[0] != self.texture_array_size or channel_float.shape[1] != self.texture_array_size:
+            src_height, src_width = channel_float.shape[:2]
+#           src_height, src_width = channel_float.shape[:2]
+            is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
+#           is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
+            interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
+#           interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
+            channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+#           channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+
+        return channel_float
+#       return channel_float
+
+    def upload_pending_textures(self) -> None:
+#   def upload_pending_textures(self) -> None:
+        # Creates the texture array at exactly the size needed, then uploads every
+#       # Creates the texture array at exactly the size needed, then uploads every
+        # registered texture. Called once after all materials have been set up.
+#       # registered texture. Called once after all materials have been set up.
+        layer_count: int = max(1, self.next_texture_layer)
+#       layer_count: int = max(1, self.next_texture_layer)
+        self.texture_array = self.ctx.texture_array(
+#       self.texture_array = self.ctx.texture_array(
+            size=(self.texture_array_size, self.texture_array_size, layer_count), components=4, dtype="f1"
+#           size=(self.texture_array_size, self.texture_array_size, layer_count), components=4, dtype="f1"
+        )
+#       )
+        self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+#       self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
+        # Anisotropic filtering keeps textures sharp at grazing angles (clamped to hardware max)
+#       # Anisotropic filtering keeps textures sharp at grazing angles (clamped to hardware max)
+        self.texture_array.anisotropy = 16.0
+#       self.texture_array.anisotropy = 16.0
+
+        for path, layer_index, is_srgb in self.pending_textures:
+#       for path, layer_index, is_srgb in self.pending_textures:
+            self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+#           self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
+
+        # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
+        # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
+        for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
+#       for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
+            packed: npt.NDArray[np.float32] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.float32)
+#           packed: npt.NDArray[np.float32] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.float32)
+            packed[..., 3] = 1.0
+#           packed[..., 3] = 1.0
+            for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
+#           for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
+                if source_path is None:
+#               if source_path is None:
+                    continue
+#                   continue
+                channel = self._load_data_channel(source_path)
+#               channel = self._load_data_channel(source_path)
+                if channel is not None:
+#               if channel is not None:
+                    packed[..., channel_index] = channel
+#                   packed[..., channel_index] = channel
+            packed = np.flipud(packed)
+#           packed = np.flipud(packed)
+            packed_uint8: npt.NDArray[np.uint8] = (np.clip(packed, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+#           packed_uint8: npt.NDArray[np.uint8] = (np.clip(packed, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+            self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+#           self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+
+        self.texture_array.build_mipmaps()
+#       self.texture_array.build_mipmaps()
 
     def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
 #   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
@@ -931,20 +1092,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
 #           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
 
-        # Resize to 2048x2048
-        # Resize to 2048x2048
-        if loaded_data.shape[0] != self.texture_array_size or loaded_data.shape[1] != self.texture_array_size:
-#       if loaded_data.shape[0] != self.texture_array_size or loaded_data.shape[1] != self.texture_array_size:
-            loaded_data = cv2.resize(loaded_data, (self.texture_array_size, self.texture_array_size), interpolation=cv2.INTER_LINEAR)
-#           loaded_data = cv2.resize(loaded_data, (self.texture_array_size, self.texture_array_size), interpolation=cv2.INTER_LINEAR)
-
-        # Flip for OpenGL!
-        # Flip for OpenGL!
-        loaded_data = np.flipud(loaded_data)
-#       loaded_data = np.flipud(loaded_data)
-
-        # Write to texture array
-        # Write to texture array
+        # Convert to normalized float first so resizing is done on linear data
+        # Convert to normalized float first so resizing is done on linear data
         data_float: npt.NDArray[np.float32]
 #       data_float: npt.NDArray[np.float32]
 
@@ -961,8 +1110,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             data_float = loaded_data.astype(dtype=np.float32)
 #           data_float = loaded_data.astype(dtype=np.float32)
 
-        # Apply sRGB -> Linear conversion if requested
-#       # Apply sRGB -> Linear conversion if requested
+        # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
+#       # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
         if is_srgb:
 #       if is_srgb:
             # Approximate Gamma 2.2
@@ -970,8 +1119,37 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             data_float[..., :3] = np.power(data_float[..., :3], 2.2)
 #           data_float[..., :3] = np.power(data_float[..., :3], 2.2)
 
-        data_bytes = data_float.tobytes()
-#       data_bytes = data_float.tobytes()
+        # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
+        # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
+        if data_float.shape[0] != self.texture_array_size or data_float.shape[1] != self.texture_array_size:
+#       if data_float.shape[0] != self.texture_array_size or data_float.shape[1] != self.texture_array_size:
+            src_height, src_width = data_float.shape[:2]
+#           src_height, src_width = data_float.shape[:2]
+            is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
+#           is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
+            interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
+#           interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
+            data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+#           data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+
+        # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
+        # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
+        if is_srgb:
+#       if is_srgb:
+            data_float[..., :3] = np.power(np.clip(data_float[..., :3], 0.0, 1.0), 1.0 / 2.2)
+#           data_float[..., :3] = np.power(np.clip(data_float[..., :3], 0.0, 1.0), 1.0 / 2.2)
+
+        # Flip for OpenGL!
+        # Flip for OpenGL!
+        data_float = np.flipud(data_float)
+#       data_float = np.flipud(data_float)
+
+        # Quantize to 8-bit (f1) for the texture array: 4x less VRAM than f4
+        # Quantize to 8-bit (f1) for the texture array: 4x less VRAM than f4
+        data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+#       data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+        data_bytes = data_uint8.tobytes()
+#       data_bytes = data_uint8.tobytes()
 
         # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
         # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
