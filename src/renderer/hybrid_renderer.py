@@ -1327,51 +1327,71 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
         """
 
-        # Apply Exposure (matches EXPOSURE in post_tonemap_cs.glsl)
-#       # Apply Exposure (matches EXPOSURE in post_tonemap_cs.glsl)
-        EXPOSURE = 0.5
-#       EXPOSURE = 0.5
-        output_arr = output_arr * EXPOSURE
-#       output_arr = output_arr * EXPOSURE
+        # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.glsl)
+#       # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.glsl)
+        APERTURE = 16.0                 # f-number N
+#       APERTURE = 16.0                 # f-number N
+        SHUTTER_TIME = 0.008            # seconds t (~1/125 s)
+#       SHUTTER_TIME = 0.008            # seconds t (~1/125 s)
+        ISO = 100.0                     # sensitivity S
+#       ISO = 100.0                     # sensitivity S
+        EXPOSURE_COMP = 0.0             # artistic bias in stops
+#       EXPOSURE_COMP = 0.0             # artistic bias in stops
+        EXPOSURE_CALIBRATION = 19200.0  # arbitrary-units -> physical-luminance scale
+#       EXPOSURE_CALIBRATION = 19200.0  # arbitrary-units -> physical-luminance scale
+        ev100 = np.log2((APERTURE * APERTURE) / SHUTTER_TIME * 100.0 / ISO) - EXPOSURE_COMP
+#       ev100 = np.log2((APERTURE * APERTURE) / SHUTTER_TIME * 100.0 / ISO) - EXPOSURE_COMP
+        exposure = EXPOSURE_CALIBRATION / max(1.2 * (2.0 ** ev100), 1e-4)
+#       exposure = EXPOSURE_CALIBRATION / max(1.2 * (2.0 ** ev100), 1e-4)
+        output_arr = output_arr * exposure
+#       output_arr = output_arr * exposure
 
-        # Apply Khronos PBR Neutral Tonemap
-#       # Apply Khronos PBR Neutral Tonemap
-        start_compression = 0.8 - 0.04
-#       start_compression = 0.8 - 0.04
-        desaturation = 0.15
-#       desaturation = 0.15
+        # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.glsl)
+#       # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.glsl)
+        P = 1.0    # maximum brightness the curve maps to
+#       P = 1.0    # maximum brightness the curve maps to
+        a = 1.0    # contrast of the linear mid-section
+#       a = 1.0    # contrast of the linear mid-section
+        m = 0.22   # start of the linear section
+#       m = 0.22   # start of the linear section
+        l = 0.4    # length of the linear section
+#       l = 0.4    # length of the linear section
+        c = 1.33   # toe curvature (black tightness)
+#       c = 1.33   # toe curvature (black tightness)
+        b = 0.0    # pedestal (black lift)
+#       b = 0.0    # pedestal (black lift)
 
-        x = np.min(output_arr, axis=-1, keepdims=True)
-#       x = np.min(output_arr, axis=-1, keepdims=True)
-        offset = np.where(x < 0.08, x - 6.25 * x * x, 0.04)
-#       offset = np.where(x < 0.08, x - 6.25 * x * x, 0.04)
-        output_arr = output_arr - offset
-#       output_arr = output_arr - offset
+        l0 = ((P - m) * l) / a
+#       l0 = ((P - m) * l) / a
+        S0 = m + l0
+#       S0 = m + l0
+        S1 = m + a * l0
+#       S1 = m + a * l0
+        C2 = (a * P) / (P - S1)
+#       C2 = (a * P) / (P - S1)
+        CP = -C2 / P
+#       CP = -C2 / P
 
-        peak = np.max(output_arr, axis=-1, keepdims=True)
-#       peak = np.max(output_arr, axis=-1, keepdims=True)
+        # Three weighted segments: toe (T), linear mid (L) and exponential shoulder (S).
+#       # Three weighted segments: toe (T), linear mid (L) and exponential shoulder (S).
+        t = np.clip(output_arr / m, 0.0, 1.0)
+#       t = np.clip(output_arr / m, 0.0, 1.0)
+        w0 = 1.0 - (t * t * (3.0 - 2.0 * t))
+#       w0 = 1.0 - (t * t * (3.0 - 2.0 * t))
+        w2 = np.where(output_arr >= (m + l0), 1.0, 0.0)
+#       w2 = np.where(output_arr >= (m + l0), 1.0, 0.0)
+        w1 = 1.0 - w0 - w2
+#       w1 = 1.0 - w0 - w2
 
-        d = 1.0 - start_compression
-#       d = 1.0 - start_compression
-        safe_peak = np.maximum(peak, start_compression)
-#       safe_peak = np.maximum(peak, start_compression)
-        new_peak = 1.0 - d * d / (safe_peak + d - start_compression)
-#       new_peak = 1.0 - d * d / (safe_peak + d - start_compression)
+        T = m * np.power(np.maximum(output_arr / m, 0.0), c) + b
+#       T = m * np.power(np.maximum(output_arr / m, 0.0), c) + b
+        S = P - (P - S1) * np.exp(CP * (output_arr - S0))
+#       S = P - (P - S1) * np.exp(CP * (output_arr - S0))
+        L = m + a * (output_arr - m)
+#       L = m + a * (output_arr - m)
 
-        # Mask for peaks that need compression
-#       # Mask for peaks that need compression
-        mask = peak >= start_compression
-#       mask = peak >= start_compression
-
-        output_arr = np.where(mask, output_arr * (new_peak / safe_peak), output_arr)
-#       output_arr = np.where(mask, output_arr * (new_peak / safe_peak), output_arr)
-
-        current_peak = np.where(mask, new_peak, peak)
-#       current_peak = np.where(mask, new_peak, peak)
-        g = 1.0 - 1.0 / (desaturation * (peak - current_peak) + 1.0)
-#       g = 1.0 - 1.0 / (desaturation * (peak - current_peak) + 1.0)
-        output_arr = output_arr * (1.0 - g) + current_peak * g
-#       output_arr = output_arr * (1.0 - g) + current_peak * g
+        output_arr = T * w0 + L * w1 + S * w2
+#       output_arr = T * w0 + L * w1 + S * w2
 
         output_arr = np.clip(output_arr, 0.0, 1.0)
 #       output_arr = np.clip(output_arr, 0.0, 1.0)
