@@ -669,8 +669,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
         idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
 #       idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
-        idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
-#       idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png")
+        idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png", is_srgb=True)
+#       idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png", is_srgb=True)
 
         self.materials.append({
 #       self.materials.append({
