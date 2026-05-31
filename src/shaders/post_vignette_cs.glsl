@@ -8,82 +8,82 @@
     layout(binding = 1, rgba32f) uniform image2D textureInput;
 //  layout(binding = 1, rgba32f) uniform image2D textureInput;
 
-    // Vignette Parameters: Dictates the core visual framing profile. The intensity scalar drives the darkening gradient, smoothness governs the geometric falloff transition from the center, and the color override allows for cinematic tinting of the attenuated border regions.
-    // Vignette Parameters: Dictates the core visual framing profile. The intensity scalar drives the darkening gradient, smoothness governs the geometric falloff transition from the center, and the color override allows for cinematic tinting of the attenuated border regions.
-    uniform float uIntensity = 1.0;
-//  uniform float uIntensity = 1.0;
-    uniform float uSmoothness = 0.5;
-//  uniform float uSmoothness = 0.5;
-    uniform vec3 uColor = vec3(0.0);
-//  uniform vec3 uColor = vec3(0.0);
+    // Vignette Parameters: Define the core framing profile. The intensity scalar drives the darkening gradient, the smoothness governs the falloff transition out from the centre, and the color override allows for cinematic tinting of the attenuated border regions.
+//  // Vignette Parameters: Define the core framing profile. The intensity scalar drives the darkening gradient, the smoothness governs the falloff transition out from the centre, and the color override allows for cinematic tinting of the attenuated border regions.
+    uniform float uVignetteIntensity = 1.0;
+//  uniform float uVignetteIntensity = 1.0;
+    uniform float uFalloffSmoothness = 0.5;
+//  uniform float uFalloffSmoothness = 0.5;
+    uniform vec3 uVignetteColor = vec3(0.0);
+//  uniform vec3 uVignetteColor = vec3(0.0);
 
     // Constants
 //  // Constants
-    const float VIGNETTE_START = 0.8;
-//  const float VIGNETTE_START = 0.8;
-    const float VIGNETTE_CURVE = 1.2;
-//  const float VIGNETTE_CURVE = 1.2;
+    const float VIGNETTE_FALLOFF_START_RADIUS = 0.8;
+//  const float VIGNETTE_FALLOFF_START_RADIUS = 0.8;
+    const float VIGNETTE_FALLOFF_EXPONENT = 1.2;
+//  const float VIGNETTE_FALLOFF_EXPONENT = 1.2;
 
-    // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low bit-depth output would expose across the gentle gradient.
-    // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low bit-depth output would expose across the gentle gradient.
-    float ditherValue(vec2 p) {
-//  float ditherValue(vec2 p) {
-        float noise = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-//      float noise = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-        return (noise - 0.5) / 255.0;
-//      return (noise - 0.5) / 255.0;
+    // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low-bit-depth output would otherwise expose across the gentle gradient.
+//  // Interleaved Gradient Dither: A deterministic high-frequency screen-space hash evaluated per pixel, returning a signed offset smaller than a single 8-bit display code value. Injecting this into the attenuated result perturbs the otherwise mathematically perfect falloff below the quantisation threshold, dissolving the concentric banding rings that low-bit-depth output would otherwise expose across the gentle gradient.
+    float computeDitherOffset(vec2 pixelCoord) {
+//  float computeDitherOffset(vec2 pixelCoord) {
+        float interleavedGradientNoise = fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));
+//      float interleavedGradientNoise = fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));
+        return (interleavedGradientNoise - 0.5) / 255.0;
+//      return (interleavedGradientNoise - 0.5) / 255.0;
     }
 //  }
 
     void main() {
 //  void main() {
-        ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-//      ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
-        ivec2 size = imageSize(textureOutput);
-//      ivec2 size = imageSize(textureOutput);
+        ivec2 destinationPixelCoord = ivec2(gl_GlobalInvocationID.xy);
+//      ivec2 destinationPixelCoord = ivec2(gl_GlobalInvocationID.xy);
+        ivec2 outputImageSize = imageSize(textureOutput);
+//      ivec2 outputImageSize = imageSize(textureOutput);
 
-        if (coord.x >= size.x || coord.y >= size.y) {
-//      if (coord.x >= size.x || coord.y >= size.y) {
+        if (destinationPixelCoord.x >= outputImageSize.x || destinationPixelCoord.y >= outputImageSize.y) {
+//      if (destinationPixelCoord.x >= outputImageSize.x || destinationPixelCoord.y >= outputImageSize.y) {
             return;
 //          return;
         }
 //      }
 
-        vec2 uv = vec2(coord) / vec2(size);
-//      vec2 uv = vec2(coord) / vec2(size);
-        vec4 color = imageLoad(textureInput, coord);
-//      vec4 color = imageLoad(textureInput, coord);
+        vec2 pixelUv = vec2(destinationPixelCoord) / vec2(outputImageSize);
+//      vec2 pixelUv = vec2(destinationPixelCoord) / vec2(outputImageSize);
+        vec4 pixelColor = imageLoad(textureInput, destinationPixelCoord);
+//      vec4 pixelColor = imageLoad(textureInput, destinationPixelCoord);
 
-        // Aspect Ratio Normalization: Modifies the radial distance coordinate vector by scaling the horizontal axis inversely to the viewport resolution. This mathematically preserves a perfectly circular vignette gradient structure irrespective of the physical window or screen dimensions.
-        // Aspect Ratio Normalization: Modifies the radial distance coordinate vector by scaling the horizontal axis inversely to the viewport resolution. This mathematically preserves a perfectly circular vignette gradient structure irrespective of the physical window or screen dimensions.
-        vec2 dir = uv - 0.5;
-//      vec2 dir = uv - 0.5;
-        dir.x *= float(size.x) / float(size.y);
-//      dir.x *= float(size.x) / float(size.y);
+        // Aspect Ratio Correction: Scales the horizontal component of the direction vector by the viewport aspect ratio. This keeps the vignette gradient perfectly circular regardless of the window or screen dimensions.
+//      // Aspect Ratio Correction: Scales the horizontal component of the direction vector by the viewport aspect ratio. This keeps the vignette gradient perfectly circular regardless of the window or screen dimensions.
+        vec2 directionFromCenter = pixelUv - 0.5;
+//      vec2 directionFromCenter = pixelUv - 0.5;
+        directionFromCenter.x *= float(outputImageSize.x) / float(outputImageSize.y);
+//      directionFromCenter.x *= float(outputImageSize.x) / float(outputImageSize.y);
 
-        // Distance Evaluation: Determines the Euclidean magnitude from the normalized screen center to the current fragment coordinate.
-        // Distance Evaluation: Determines the Euclidean magnitude from the normalized screen center to the current fragment coordinate.
-        float dist = length(dir);
-//      float dist = length(dir);
+        // Radial Distance: Computes the Euclidean distance from the normalized screen centre to the current fragment.
+//      // Radial Distance: Computes the Euclidean distance from the normalized screen centre to the current fragment.
+        float distanceFromCenter = length(directionFromCenter);
+//      float distanceFromCenter = length(directionFromCenter);
 
-        // Filmic Attenuation Curve: Employs a non-linear smoothstep function to calculate the foundational vignette mask based on the spatial distance. A supplementary power curve is subsequently applied to sculpt a physically accurate light drop-off reminiscent of classic cinema lenses.
-        // Filmic Attenuation Curve: Employs a non-linear smoothstep function to calculate the foundational vignette mask based on the spatial distance. A supplementary power curve is subsequently applied to sculpt a physically accurate light drop-off reminiscent of classic cinema lenses.
-        float vignette = 1.0 - smoothstep(uSmoothness * 0.5, VIGNETTE_START + uSmoothness, dist * uIntensity);
-//      float vignette = 1.0 - smoothstep(uSmoothness * 0.5, VIGNETTE_START + uSmoothness, dist * uIntensity);
-        vignette = pow(vignette, VIGNETTE_CURVE);
-//      vignette = pow(vignette, VIGNETTE_CURVE);
+        // Filmic Attenuation Curve: Uses a smoothstep function to build the base vignette mask from the radial distance. A supplementary power curve is then applied to sculpt a light drop-off reminiscent of classic cinema lenses.
+//      // Filmic Attenuation Curve: Uses a smoothstep function to build the base vignette mask from the radial distance. A supplementary power curve is then applied to sculpt a light drop-off reminiscent of classic cinema lenses.
+        float vignetteMask = 1.0 - smoothstep(uFalloffSmoothness * 0.5, VIGNETTE_FALLOFF_START_RADIUS + uFalloffSmoothness, distanceFromCenter * uVignetteIntensity);
+//      float vignetteMask = 1.0 - smoothstep(uFalloffSmoothness * 0.5, VIGNETTE_FALLOFF_START_RADIUS + uFalloffSmoothness, distanceFromCenter * uVignetteIntensity);
+        vignetteMask = pow(vignetteMask, VIGNETTE_FALLOFF_EXPONENT);
+//      vignetteMask = pow(vignetteMask, VIGNETTE_FALLOFF_EXPONENT);
 
-        // Color Blending Integration: Transitions smoothly between the custom vignette color value and the underlying rendered fragment color utilizing the calculated attenuation mask as a linear interpolant, avoiding the muddy results typical of rudimentary multiplicative darkening methods.
-        // Color Blending Integration: Transitions smoothly between the custom vignette color value and the underlying rendered fragment color utilizing the calculated attenuation mask as a linear interpolant, avoiding the muddy results typical of rudimentary multiplicative darkening methods.
-        color.rgb = mix(uColor, color.rgb, vignette);
-//      color.rgb = mix(uColor, color.rgb, vignette);
+        // Color Blending: Interpolates between the custom vignette color and the underlying rendered fragment using the attenuation mask as the blend factor, avoiding the muddy results typical of naive multiplicative darkening.
+//      // Color Blending: Interpolates between the custom vignette color and the underlying rendered fragment using the attenuation mask as the blend factor, avoiding the muddy results typical of naive multiplicative darkening.
+        pixelColor.rgb = mix(uVignetteColor, pixelColor.rgb, vignetteMask);
+//      pixelColor.rgb = mix(uVignetteColor, pixelColor.rgb, vignetteMask);
 
-        // Dither Injection: Add a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
-        // Dither Injection: Add a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
-        color.rgb += ditherValue(vec2(coord));
-//      color.rgb += ditherValue(vec2(coord));
+        // Dither Injection: Adds a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
+//      // Dither Injection: Adds a sub-quantisation offset to break up the smoothstep banding before the result is written out for display.
+        pixelColor.rgb += computeDitherOffset(vec2(destinationPixelCoord));
+//      pixelColor.rgb += computeDitherOffset(vec2(destinationPixelCoord));
 
-        imageStore(textureOutput, coord, vec4(color.rgb, 1.0));
-//      imageStore(textureOutput, coord, vec4(color.rgb, 1.0));
+        imageStore(textureOutput, destinationPixelCoord, vec4(pixelColor.rgb, 1.0));
+//      imageStore(textureOutput, destinationPixelCoord, vec4(pixelColor.rgb, 1.0));
     }
 //  }
