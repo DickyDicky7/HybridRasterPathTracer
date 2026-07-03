@@ -34,12 +34,20 @@ class SceneBuilder:
 #       self.cube_instance_data: list[npt.NDArray[np.float32]] = []
         self.plane_instance_data: list[npt.NDArray[np.float32]] = []
 #       self.plane_instance_data: list[npt.NDArray[np.float32]] = []
+        # Scene geometry is stored as CHUNKS: each list entry is a whole-mesh/instance array of
+#       # Scene geometry is stored as CHUNKS: each list entry is a whole-mesh/instance array of
+        # (K, 3, 3) triangles (or (K, 3, 2) UVs / (K,) material indices) instead of one tiny array
+#       # (K, 3, 3) triangles (or (K, 3, 2) UVs / (K,) material indices) instead of one tiny array
+        # per triangle. This removes hundreds of thousands of small numpy objects (huge Python
+#       # per triangle. This removes hundreds of thousands of small numpy objects (huge Python
+        # memory overhead) and lets build() concatenate and pack everything fully vectorized.
+#       # memory overhead) and lets build() concatenate and pack everything fully vectorized.
         self.scene_triangles: list[npt.NDArray[np.float32]] = []
 #       self.scene_triangles: list[npt.NDArray[np.float32]] = []
         self.scene_uvs: list[npt.NDArray[np.float32]] = []
 #       self.scene_uvs: list[npt.NDArray[np.float32]] = []
-        self.scene_material_indices: list[int] = []
-#       self.scene_material_indices: list[int] = []
+        self.scene_material_indices: list[npt.NDArray[np.int32]] = []
+#       self.scene_material_indices: list[npt.NDArray[np.int32]] = []
         self.scene_normals: list[npt.NDArray[np.float32]] = []
 #       self.scene_normals: list[npt.NDArray[np.float32]] = []
         self.scene_tangents: list[npt.NDArray[np.float32]] = []
@@ -348,32 +356,25 @@ class SceneBuilder:
                     transformed_tangents[(~valid_tan_norms).flatten()] = [1.0, 0.0, 0.0]
 #                   transformed_tangents[(~valid_tan_norms).flatten()] = [1.0, 0.0, 0.0]
 
-                    # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) for easy appending
-#                   # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) for easy appending
+                    # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) and
+#                   # Reshape geometry into triangle primitives (N_triangles, 3 vertices, components) and
+                    # append the whole mesh as ONE chunk (the old per-triangle Python loop dominated
+#                   # append the whole mesh as ONE chunk (the old per-triangle Python loop dominated
+                    # model loading time and memory for large meshes)
+#                   # model loading time and memory for large meshes)
                     n_triangles = len(vertices) // 3
 #                   n_triangles = len(vertices) // 3
 
-                    tri_vertices = transformed_vertices.reshape((n_triangles, 3, 3))
-#                   tri_vertices = transformed_vertices.reshape((n_triangles, 3, 3))
-                    tri_normals = transformed_normals.reshape((n_triangles, 3, 3))
-#                   tri_normals = transformed_normals.reshape((n_triangles, 3, 3))
-                    tri_tangents = transformed_tangents.reshape((n_triangles, 3, 3))
-#                   tri_tangents = transformed_tangents.reshape((n_triangles, 3, 3))
-                    tri_uvs = uvs.reshape((n_triangles, 3, 2))
-#                   tri_uvs = uvs.reshape((n_triangles, 3, 2))
-
-                    for i in range(n_triangles):
-#                   for i in range(n_triangles):
-                        self.scene_triangles.append(tri_vertices[i].astype(dtype=np.float32))
-#                       self.scene_triangles.append(tri_vertices[i].astype(dtype=np.float32))
-                        self.scene_normals.append(tri_normals[i].astype(dtype=np.float32))
-#                       self.scene_normals.append(tri_normals[i].astype(dtype=np.float32))
-                        self.scene_tangents.append(tri_tangents[i].astype(dtype=np.float32))
-#                       self.scene_tangents.append(tri_tangents[i].astype(dtype=np.float32))
-                        self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
-#                       self.scene_uvs.append(tri_uvs[i].astype(dtype=np.float32))
-                        self.scene_material_indices.append(current_material_index)
-#                       self.scene_material_indices.append(current_material_index)
+                    self.scene_triangles.append(transformed_vertices.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+#                   self.scene_triangles.append(transformed_vertices.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+                    self.scene_normals.append(transformed_normals.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+#                   self.scene_normals.append(transformed_normals.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+                    self.scene_tangents.append(transformed_tangents.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+#                   self.scene_tangents.append(transformed_tangents.reshape((n_triangles, 3, 3)).astype(dtype=np.float32))
+                    self.scene_uvs.append(uvs.reshape((n_triangles, 3, 2)).astype(dtype=np.float32))
+#                   self.scene_uvs.append(uvs.reshape((n_triangles, 3, 2)).astype(dtype=np.float32))
+                    self.scene_material_indices.append(np.full(n_triangles, current_material_index, dtype=np.int32))
+#                   self.scene_material_indices.append(np.full(n_triangles, current_material_index, dtype=np.int32))
 
         except Exception as e:
 #       except Exception as e:
@@ -404,6 +405,19 @@ class SceneBuilder:
 #       # Unlike Rasterization which uses a small VBO + Instance Transform Buffer,
         # Ray Tracing (currently) needs all geometry explicitly in World Space for the LBVH construction.
 #       # Ray Tracing (currently) needs all geometry explicitly in World Space for the LBVH construction.
+        # All triangles of an instance are transformed in a single vectorized batch and appended as one chunk.
+#       # All triangles of an instance are transformed in a single vectorized batch and appended as one chunk.
+        base_triangles_array: npt.NDArray[np.float32] = np.stack(base_triangles).astype(dtype=np.float32)
+#       base_triangles_array: npt.NDArray[np.float32] = np.stack(base_triangles).astype(dtype=np.float32)
+        base_normals_array: npt.NDArray[np.float32] = np.stack(base_normals).astype(dtype=np.float32)
+#       base_normals_array: npt.NDArray[np.float32] = np.stack(base_normals).astype(dtype=np.float32)
+        base_tangents_array: npt.NDArray[np.float32] = np.stack(base_tangents).astype(dtype=np.float32)
+#       base_tangents_array: npt.NDArray[np.float32] = np.stack(base_tangents).astype(dtype=np.float32)
+        base_uvs_array: npt.NDArray[np.float32] = np.stack(base_uvs).astype(dtype=np.float32)
+#       base_uvs_array: npt.NDArray[np.float32] = np.stack(base_uvs).astype(dtype=np.float32)
+        triangle_count: int = len(base_triangles_array)
+#       triangle_count: int = len(base_triangles_array)
+
         for instance_data in instance_data_list:
 #       for instance_data in instance_data_list:
             # Reconstruct the 4x4 Model Matrix from the flattened instance data (stored in column-major order)
@@ -418,95 +432,61 @@ class SceneBuilder:
             material_index = int(instance_data[19])
 #           material_index = int(instance_data[19])
 
-            for i, triangle_vertices in enumerate(base_triangles):
-#           for i, triangle_vertices in enumerate(base_triangles):
-                ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype=np.float32)
-#               ones: npt.NDArray[np.float32] = np.ones((3, 1), dtype=np.float32)
-                vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
-#               vertices_h: npt.NDArray[np.float32] = np.hstack([triangle_vertices, ones])
-                transformed_vertices_h: npt.NDArray[np.float32] = model_matrix @ vertices_h.T
-#               transformed_vertices_h: npt.NDArray[np.float32] = model_matrix @ vertices_h.T
-                transformed_vertices_h = transformed_vertices_h.T
-#               transformed_vertices_h = transformed_vertices_h.T
-                transformed_triangle: npt.NDArray[np.float32] = transformed_vertices_h[:, :3]
-#               transformed_triangle: npt.NDArray[np.float32] = transformed_vertices_h[:, :3]
-                self.scene_triangles.append(transformed_triangle.copy())
-#               self.scene_triangles.append(transformed_triangle.copy())
-                self.scene_material_indices.append(material_index)
-#               self.scene_material_indices.append(material_index)
-                # Append UVs (no transformation needed usually for simple mapping)
-#               # Append UVs (no transformation needed usually for simple mapping)
-                self.scene_uvs.append(base_uvs[i])
-#               self.scene_uvs.append(base_uvs[i])
-                # Calculate Normal Matrix (Transpose of Inverse) to handle non-uniform scaling
-#               # Calculate Normal Matrix (Transpose of Inverse) to handle non-uniform scaling
-                # Normals are directions, not positions. Using the Model Matrix directly on normals would cause distortion
-#               # Normals are directions, not positions. Using the Model Matrix directly on normals would cause distortion
-                # if the scale is non-uniform (e.g. stretching a sphere). The Inverse-Transpose cancels this out.
-#               # if the scale is non-uniform (e.g. stretching a sphere). The Inverse-Transpose cancels this out.
-                m33 = model_matrix[:3, :3]
-#               m33 = model_matrix[:3, :3]
-                try:
-#               try:
-                    m33_inv = np.linalg.inv(m33)
-#                   m33_inv = np.linalg.inv(m33)
-                    normal_matrix = m33_inv.T
-#                   normal_matrix = m33_inv.T
-                except np.linalg.LinAlgError:
-#               except np.linalg.LinAlgError:
-                    normal_matrix = np.eye(3, dtype=np.float32)
-#                   normal_matrix = np.eye(3, dtype=np.float32)
-                triangle_normals = base_normals[i]
-#               triangle_normals = base_normals[i]
-                transformed_normals = []
-#               transformed_normals = []
-                for n in triangle_normals:
-#               for n in triangle_normals:
-                    Tn = normal_matrix @ n
-#                   Tn = normal_matrix @ n
-                    # Normalize
-#                   # Normalize
-                    norm = np.linalg.norm(Tn)
-#                   norm = np.linalg.norm(Tn)
-                    if norm > 1e-6:
-#                   if norm > 1e-6:
-                        Tn = Tn / norm
-#                       Tn = Tn / norm
-                    else:
-#                   else:
-                        Tn = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-#                       Tn = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-                    transformed_normals.append(Tn)
-#                   transformed_normals.append(Tn)
-                self.scene_normals.append(np.array(transformed_normals, dtype=np.float32))
-#               self.scene_normals.append(np.array(transformed_normals, dtype=np.float32))
+            # Positions: v' = M33 @ v + translation, applied to every vertex of the instance at once
+#           # Positions: v' = M33 @ v + translation, applied to every vertex of the instance at once
+            m33 = model_matrix[:3, :3]
+#           m33 = model_matrix[:3, :3]
+            flat_positions: npt.NDArray[np.float32] = base_triangles_array.reshape((-1, 3))
+#           flat_positions: npt.NDArray[np.float32] = base_triangles_array.reshape((-1, 3))
+            transformed_positions: npt.NDArray[np.float32] = flat_positions @ m33.T + model_matrix[:3, 3]
+#           transformed_positions: npt.NDArray[np.float32] = flat_positions @ m33.T + model_matrix[:3, 3]
+            self.scene_triangles.append(transformed_positions.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
+#           self.scene_triangles.append(transformed_positions.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
+            self.scene_material_indices.append(np.full(triangle_count, material_index, dtype=np.int32))
+#           self.scene_material_indices.append(np.full(triangle_count, material_index, dtype=np.int32))
+            # Append UVs (no transformation needed usually for simple mapping)
+#           # Append UVs (no transformation needed usually for simple mapping)
+            self.scene_uvs.append(base_uvs_array)
+#           self.scene_uvs.append(base_uvs_array)
 
-                # Tangents (Transform with model rotation)
-#               # Tangents (Transform with model rotation)
-                triangle_tangents = base_tangents[i]
-#               triangle_tangents = base_tangents[i]
-                transformed_tangents = []
-#               transformed_tangents = []
-                m33_rot = model_matrix[:3, :3] # Linear part
-#               m33_rot = model_matrix[:3, :3] # Linear part
-                for t in triangle_tangents:
-#               for t in triangle_tangents:
-                    Tt = m33_rot @ t
-#                   Tt = m33_rot @ t
-                    norm = np.linalg.norm(Tt)
-#                   norm = np.linalg.norm(Tt)
-                    if norm > 1e-6:
-#                   if norm > 1e-6:
-                        Tt = Tt / norm
-#                       Tt = Tt / norm
-                    else:
-#                   else:
-                        Tt = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-#                       Tt = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-                    transformed_tangents.append(Tt)
-#                   transformed_tangents.append(Tt)
-                self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
-#               self.scene_tangents.append(np.array(transformed_tangents, dtype=np.float32))
+            # Calculate Normal Matrix (Transpose of Inverse) to handle non-uniform scaling
+#           # Calculate Normal Matrix (Transpose of Inverse) to handle non-uniform scaling
+            # Normals are directions, not positions. Using the Model Matrix directly on normals would cause distortion
+#           # Normals are directions, not positions. Using the Model Matrix directly on normals would cause distortion
+            # if the scale is non-uniform (e.g. stretching a sphere). The Inverse-Transpose cancels this out.
+#           # if the scale is non-uniform (e.g. stretching a sphere). The Inverse-Transpose cancels this out.
+            try:
+#           try:
+                m33_inv = np.linalg.inv(m33)
+#               m33_inv = np.linalg.inv(m33)
+                normal_matrix = m33_inv.T
+#               normal_matrix = m33_inv.T
+            except np.linalg.LinAlgError:
+#           except np.linalg.LinAlgError:
+                normal_matrix = np.eye(3, dtype=np.float32)
+#               normal_matrix = np.eye(3, dtype=np.float32)
+
+            # Normals: n' = normalize(NormalMatrix @ n) batched; degenerate results fall back to +Y
+#           # Normals: n' = normalize(NormalMatrix @ n) batched; degenerate results fall back to +Y
+            flat_normals: npt.NDArray[np.float32] = base_normals_array.reshape((-1, 3)) @ normal_matrix.T
+#           flat_normals: npt.NDArray[np.float32] = base_normals_array.reshape((-1, 3)) @ normal_matrix.T
+            normal_lengths: npt.NDArray[np.float32] = np.linalg.norm(flat_normals, axis=1, keepdims=True)
+#           normal_lengths: npt.NDArray[np.float32] = np.linalg.norm(flat_normals, axis=1, keepdims=True)
+            flat_normals = np.where(normal_lengths > 1e-6, flat_normals / np.maximum(normal_lengths, 1e-12), np.array([0.0, 1.0, 0.0], dtype=np.float32))
+#           flat_normals = np.where(normal_lengths > 1e-6, flat_normals / np.maximum(normal_lengths, 1e-12), np.array([0.0, 1.0, 0.0], dtype=np.float32))
+            self.scene_normals.append(flat_normals.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
+#           self.scene_normals.append(flat_normals.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
+
+            # Tangents (Transform with model rotation): t' = normalize(M33 @ t) batched; fallback +X
+#           # Tangents (Transform with model rotation): t' = normalize(M33 @ t) batched; fallback +X
+            flat_tangents: npt.NDArray[np.float32] = base_tangents_array.reshape((-1, 3)) @ m33.T
+#           flat_tangents: npt.NDArray[np.float32] = base_tangents_array.reshape((-1, 3)) @ m33.T
+            tangent_lengths: npt.NDArray[np.float32] = np.linalg.norm(flat_tangents, axis=1, keepdims=True)
+#           tangent_lengths: npt.NDArray[np.float32] = np.linalg.norm(flat_tangents, axis=1, keepdims=True)
+            flat_tangents = np.where(tangent_lengths > 1e-6, flat_tangents / np.maximum(tangent_lengths, 1e-12), np.array([1.0, 0.0, 0.0], dtype=np.float32))
+#           flat_tangents = np.where(tangent_lengths > 1e-6, flat_tangents / np.maximum(tangent_lengths, 1e-12), np.array([1.0, 0.0, 0.0], dtype=np.float32))
+            self.scene_tangents.append(flat_tangents.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
+#           self.scene_tangents.append(flat_tangents.reshape((triangle_count, 3, 3)).astype(dtype=np.float32))
 
     def build(self) -> tuple[int, bytes, bytes, bytes]:
 #   def build(self) -> tuple[int, bytes, bytes, bytes]:
@@ -789,10 +769,20 @@ class SceneBuilder:
             self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles, base_normals=plane_base_normals, base_uvs=plane_base_uvs, base_tangents=plane_base_tangents)
 #           self.append_transformed_triangles(instance_data_list=self.plane_instance_data, base_triangles=plane_base_triangles, base_normals=plane_base_normals, base_uvs=plane_base_uvs, base_tangents=plane_base_tangents)
 
-        # Consolidate all scene geometry into a single array of triangles in world space
-#       # Consolidate all scene geometry into a single array of triangles in world space
-        world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype=np.float32)
-#       world_triangles: npt.NDArray[np.float32] = np.array(self.scene_triangles, dtype=np.float32)
+        # Consolidate all scene geometry chunks into single contiguous world-space arrays
+#       # Consolidate all scene geometry chunks into single contiguous world-space arrays
+        world_triangles: npt.NDArray[np.float32] = np.concatenate(self.scene_triangles, axis=0) if self.scene_triangles else np.zeros((0, 3, 3), dtype=np.float32)
+#       world_triangles: npt.NDArray[np.float32] = np.concatenate(self.scene_triangles, axis=0) if self.scene_triangles else np.zeros((0, 3, 3), dtype=np.float32)
+        world_uvs: npt.NDArray[np.float32] = np.concatenate(self.scene_uvs, axis=0) if self.scene_uvs else np.zeros((0, 3, 2), dtype=np.float32)
+#       world_uvs: npt.NDArray[np.float32] = np.concatenate(self.scene_uvs, axis=0) if self.scene_uvs else np.zeros((0, 3, 2), dtype=np.float32)
+        world_normals: npt.NDArray[np.float32] = np.concatenate(self.scene_normals, axis=0) if self.scene_normals else np.zeros((0, 3, 3), dtype=np.float32)
+#       world_normals: npt.NDArray[np.float32] = np.concatenate(self.scene_normals, axis=0) if self.scene_normals else np.zeros((0, 3, 3), dtype=np.float32)
+        world_tangents: npt.NDArray[np.float32] = np.concatenate(self.scene_tangents, axis=0) if self.scene_tangents else np.zeros((0, 3, 3), dtype=np.float32)
+#       world_tangents: npt.NDArray[np.float32] = np.concatenate(self.scene_tangents, axis=0) if self.scene_tangents else np.zeros((0, 3, 3), dtype=np.float32)
+        world_material_indices: npt.NDArray[np.float32] = np.concatenate(self.scene_material_indices, axis=0).astype(dtype=np.float32) if self.scene_material_indices else np.zeros(0, dtype=np.float32)
+#       world_material_indices: npt.NDArray[np.float32] = np.concatenate(self.scene_material_indices, axis=0).astype(dtype=np.float32) if self.scene_material_indices else np.zeros(0, dtype=np.float32)
+        num_triangles = len(world_triangles)
+#       num_triangles = len(world_triangles)
 
         # Build the Linear Bounding Volume Hierarchy (LBVH) for the scene
 #       # Build the Linear Bounding Volume Hierarchy (LBVH) for the scene
@@ -809,36 +799,26 @@ class SceneBuilder:
 #       # Each vertex packs into 3 vec4s to match std430 alignment constraints optimally
         # [px, py, pz, u, nx, ny, nz, v, tx, ty, tz, material_index]
 #       # [px, py, pz, u, nx, ny, nz, v, tx, ty, tz, material_index]
-        packed_vertices = []
-#       packed_vertices = []
-        num_triangles = len(self.scene_triangles)
-#       num_triangles = len(self.scene_triangles)
-        for i in range(num_triangles):
-#       for i in range(num_triangles):
-            tri = self.scene_triangles[i]
-#           tri = self.scene_triangles[i]
-            uvs = self.scene_uvs[i]
-#           uvs = self.scene_uvs[i]
-            norms = self.scene_normals[i]
-#           norms = self.scene_normals[i]
-            tans = self.scene_tangents[i]
-#           tans = self.scene_tangents[i]
-            mat_idx = float(self.scene_material_indices[i])
-#           mat_idx = float(self.scene_material_indices[i])
-            for v in range(3):
-#           for v in range(3):
-                packed_vertices.extend([
-#               packed_vertices.extend([
-                    tri[v][0], tri[v][1], tri[v][2], uvs[v][0],
-#                   tri[v][0], tri[v][1], tri[v][2], uvs[v][0],
-                    norms[v][0], norms[v][1], norms[v][2], uvs[v][1],
-#                   norms[v][0], norms[v][1], norms[v][2], uvs[v][1],
-                    tans[v][0], tans[v][1], tans[v][2], mat_idx
-#                   tans[v][0], tans[v][1], tans[v][2], mat_idx
-                ])
-#               ])
-        world_vertices: npt.NDArray[np.float32] = np.array(packed_vertices, dtype=np.float32)
-#       world_vertices: npt.NDArray[np.float32] = np.array(packed_vertices, dtype=np.float32)
+        # Fully vectorized slice assignment: the old per-vertex Python list cost seconds of load
+#       # Fully vectorized slice assignment: the old per-vertex Python list cost seconds of load
+        # time and hundreds of MB of transient memory on large scenes.
+#       # time and hundreds of MB of transient memory on large scenes.
+        packed_vertices: npt.NDArray[np.float32] = np.empty((num_triangles, 3, 3, 4), dtype=np.float32)
+#       packed_vertices: npt.NDArray[np.float32] = np.empty((num_triangles, 3, 3, 4), dtype=np.float32)
+        packed_vertices[:, :, 0, :3] = world_triangles
+#       packed_vertices[:, :, 0, :3] = world_triangles
+        packed_vertices[:, :, 0, 3] = world_uvs[:, :, 0]
+#       packed_vertices[:, :, 0, 3] = world_uvs[:, :, 0]
+        packed_vertices[:, :, 1, :3] = world_normals
+#       packed_vertices[:, :, 1, :3] = world_normals
+        packed_vertices[:, :, 1, 3] = world_uvs[:, :, 1]
+#       packed_vertices[:, :, 1, 3] = world_uvs[:, :, 1]
+        packed_vertices[:, :, 2, :3] = world_tangents
+#       packed_vertices[:, :, 2, :3] = world_tangents
+        packed_vertices[:, :, 2, 3] = world_material_indices[:, None]
+#       packed_vertices[:, :, 2, 3] = world_material_indices[:, None]
+        world_vertices: npt.NDArray[np.float32] = packed_vertices
+#       world_vertices: npt.NDArray[np.float32] = packed_vertices
 
         packed_materials = []
 #       packed_materials = []

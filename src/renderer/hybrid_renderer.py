@@ -140,6 +140,19 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
 #       self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
 
+        # Clamp-to-edge on every screen-sized target: moderngl textures default to repeat wrapping, so
+#       # Clamp-to-edge on every screen-sized target: moderngl textures default to repeat wrapping, so
+        # FXAA's edge-end search taps (and any sampler2D read near the border) wrapped around and bled
+#       # FXAA's edge-end search taps (and any sampler2D read near the border) wrapped around and bled
+        # the opposite side of the screen into the edges.
+#       # the opposite side of the screen into the edges.
+        for screen_texture in (self.texture_output, self.texture_accum, self.texture_ping):
+#       for screen_texture in (self.texture_output, self.texture_accum, self.texture_ping):
+            screen_texture.repeat_x = False
+#           screen_texture.repeat_x = False
+            screen_texture.repeat_y = False
+#           screen_texture.repeat_y = False
+
         # OIDN Setup
 #       # OIDN Setup
         self.oidn_device: pyoidn.Device = pyoidn.Device(device_type=pyoidn.OIDN_DEVICE_TYPE_CPU)
@@ -1304,6 +1317,11 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # print(f"OIDN Output Range: {np.min(output_arr)} - {np.max(output_arr)}")
 #       # print(f"OIDN Output Range: {np.min(output_arr)} - {np.max(output_arr)}")
+
+        # OIDN can emit slightly negative values; clamp so the tonemap toe and gamma pow stay well-defined
+#       # OIDN can emit slightly negative values; clamp so the tonemap toe and gamma pow stay well-defined
+        output_arr = np.maximum(output_arr, 0.0)
+#       output_arr = np.maximum(output_arr, 0.0)
 
         # if np.allclose(output_arr, 0.5):
 #       # if np.allclose(output_arr, 0.5):

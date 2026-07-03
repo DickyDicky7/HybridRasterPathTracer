@@ -1120,10 +1120,12 @@
     }
 //  }
 
-    // BSDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair at the shading point (the per-steradian throughput, before any cosine or PDF weighting). It sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry/shadowing-masking factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel additionally partitions energy between the two lobes and the metallic mask removes the diffuse component from conductors, keeping the model energy-conserving across the roughness and metalness range.
-//  // BSDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair at the shading point (the per-steradian throughput, before any cosine or PDF weighting). It sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry/shadowing-masking factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel additionally partitions energy between the two lobes and the metallic mask removes the diffuse component from conductors, keeping the model energy-conserving across the roughness and metalness range.
-    vec3 evalPrincipledBSDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
-//  vec3 evalPrincipledBSDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
+    // Fused BSDF + PDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair (the per-steradian throughput, before any cosine or PDF weighting) and, through the out parameter, the matching importance-sampling PDF. The BSDF sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel partitions energy between the lobes and the metallic mask removes the diffuse component from conductors. Every scatter and NEE sample needs both the value and the PDF, so fusing them shares the half-vector, dot products, Fresnel and GGX D terms the previously separate routines each recomputed, halving the per-sample shading math without changing a single term of either result.
+//  // Fused BSDF + PDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair (the per-steradian throughput, before any cosine or PDF weighting) and, through the out parameter, the matching importance-sampling PDF. The BSDF sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel partitions energy between the lobes and the metallic mask removes the diffuse component from conductors. Every scatter and NEE sample needs both the value and the PDF, so fusing them shares the half-vector, dot products, Fresnel and GGX D terms the previously separate routines each recomputed, halving the per-sample shading math without changing a single term of either result.
+    vec3 evalPrincipledBSDFAndPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission, out float outPdf) {
+//  vec3 evalPrincipledBSDFAndPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission, out float outPdf) {
+        outPdf = 0.0;
+//      outPdf = 0.0;
         vec3 surfaceNormal = normal;
 //      vec3 surfaceNormal = normal;
         vec3 viewDirection = -incomingDirection;
@@ -1155,6 +1157,8 @@
 
         vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
 //      vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
+        // BSDF energy split uses Fresnel at the half-vector angle
+//      // BSDF energy split uses Fresnel at the half-vector angle
         float halfDotView = max(dot(halfVector, viewDirection), 0.0);
 //      float halfDotView = max(dot(halfVector, viewDirection), 0.0);
         vec3 fresnelReflectance = schlickFresnel(halfDotView, reflectanceAtNormalIncidence);
@@ -1185,8 +1189,8 @@
         // vec3 diffuseContribution = diffuseWeight * evalOrenNayarDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
 //      // vec3 diffuseContribution = diffuseWeight * evalOrenNayarDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
 
-        // Specular
-//      // Specular
+        // Specular (GGX distribution D is shared between the BSDF value and the specular PDF)
+//      // Specular (GGX distribution D is shared between the BSDF value and the specular PDF)
         float ggxAlpha = roughness * roughness;
 //      float ggxAlpha = roughness * roughness;
         float ggxAlphaSquared = ggxAlpha * ggxAlpha;
@@ -1210,77 +1214,30 @@
         vec3 specularContribution = (normalDistribution * fresnelReflectance) / (4.0 * geometryViewTerm * geometryLightTerm + EPSILON_MATH);
 //      vec3 specularContribution = (normalDistribution * fresnelReflectance) / (4.0 * geometryViewTerm * geometryLightTerm + EPSILON_MATH);
 
+        // PDF: the lobe-selection probability uses Fresnel at the view angle (matching the sampler)
+//      // PDF: the lobe-selection probability uses Fresnel at the view angle (matching the sampler)
+        float diffusePdf = normalDotLight / PI;
+//      float diffusePdf = normalDotLight / PI;
+        float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * halfDotView + EPSILON_DOT);
+//      float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * halfDotView + EPSILON_DOT);
+        vec3 lobeSelectionFresnel = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
+//      vec3 lobeSelectionFresnel = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
+        float averageFresnel = (lobeSelectionFresnel.r + lobeSelectionFresnel.g + lobeSelectionFresnel.b) / 3.0;
+//      float averageFresnel = (lobeSelectionFresnel.r + lobeSelectionFresnel.g + lobeSelectionFresnel.b) / 3.0;
+        float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
+//      float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
+        outPdf = mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
+//      outPdf = mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
+
         return diffuseContribution + specularContribution;
 //      return diffuseContribution + specularContribution;
     }
 //  }
 
-    float evalPrincipledPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
-//  float evalPrincipledPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission) {
-        vec3 surfaceNormal = normal;
-//      vec3 surfaceNormal = normal;
-        vec3 viewDirection = -incomingDirection;
-//      vec3 viewDirection = -incomingDirection;
-        vec3 lightDirection = outgoingDirection;
-//      vec3 lightDirection = outgoingDirection;
-        vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-//      vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-        vec3 halfVector;
-//      vec3 halfVector;
-        if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-//      if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-            halfVector = normalize(halfVectorUnnormalized);
-//          halfVector = normalize(halfVectorUnnormalized);
-        } else {
-//      } else {
-            halfVector = surfaceNormal;
-//          halfVector = surfaceNormal;
-        }
-//      }
-
-        float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-//      float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-        float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-//      float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-        if (normalDotLight <= 0.0 || normalDotView <= 0.0) return 0.0;
-//      if (normalDotLight <= 0.0 || normalDotView <= 0.0) return 0.0;
-
-        float diffusePdf = normalDotLight / PI;
-//      float diffusePdf = normalDotLight / PI;
-
-        float ggxAlpha = roughness * roughness;
-//      float ggxAlpha = roughness * roughness;
-        float ggxAlphaSquared = ggxAlpha * ggxAlpha;
-//      float ggxAlphaSquared = ggxAlpha * ggxAlpha;
-        float normalDotHalf = max(dot(surfaceNormal, halfVector), 0.0);
-//      float normalDotHalf = max(dot(surfaceNormal, halfVector), 0.0);
-        float distributionDenominator = (normalDotHalf * normalDotHalf * (ggxAlphaSquared - 1.0) + 1.0);
-//      float distributionDenominator = (normalDotHalf * normalDotHalf * (ggxAlphaSquared - 1.0) + 1.0);
-        float normalDistribution = ggxAlphaSquared / (PI * distributionDenominator * distributionDenominator);
-//      float normalDistribution = ggxAlphaSquared / (PI * distributionDenominator * distributionDenominator);
-        float viewDotHalf = max(dot(viewDirection, halfVector), 0.0);
-//      float viewDotHalf = max(dot(viewDirection, halfVector), 0.0);
-        float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * viewDotHalf + EPSILON_DOT);
-//      float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * viewDotHalf + EPSILON_DOT);
-
-        vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
-//      vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
-        vec3 fresnelReflectance = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
-//      vec3 fresnelReflectance = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
-        float averageFresnel = (fresnelReflectance.r + fresnelReflectance.g + fresnelReflectance.b) / 3.0;
-//      float averageFresnel = (fresnelReflectance.r + fresnelReflectance.g + fresnelReflectance.b) / 3.0;
-        float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
-//      float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
-
-        return mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
-//      return mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
-    }
-//  }
-
     // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
 //  // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
-    bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
-//  bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
+    bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
+//  bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
         outScatteredDirection = vec3(0.0);
 //      outScatteredDirection = vec3(0.0);
         outAttenuation = vec3(0.0);
@@ -1342,10 +1299,16 @@
         }
 //      }
 
-        // Clamp roughness to prevent division by zero in specular calculations
-//      // Clamp roughness to prevent division by zero in specular calculations
-        roughness = max(roughness, MIN_ROUGHNESS);
-//      roughness = max(roughness, MIN_ROUGHNESS);
+        // Roughness annealing (SDS variance mitigation) is applied HERE, after the texture fetch: the old
+//      // Roughness annealing (SDS variance mitigation) is applied HERE, after the texture fetch: the old
+        // pre-scatter clamp in main() was silently overwritten whenever a roughness texture was bound,
+//      // pre-scatter clamp in main() was silently overwritten whenever a roughness texture was bound,
+        // so textured surfaces never annealed. Also clamp to MIN_ROUGHNESS to prevent division by zero
+//      // so textured surfaces never annealed. Also clamp to MIN_ROUGHNESS to prevent division by zero
+        // in the specular calculations.
+//      // in the specular calculations.
+        roughness = max(max(roughness, pathRoughnessFloor), MIN_ROUGHNESS);
+//      roughness = max(max(roughness, pathRoughnessFloor), MIN_ROUGHNESS);
 
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
@@ -1483,10 +1446,10 @@
 //          if (dot(specularReflectedDirection, shadingNormal) > 0.0 && dot(specularReflectedDirection, hitResult.hitSurfaceNormal) > 0.0) {
                 outScatteredDirection = specularReflectedDirection;
 //              outScatteredDirection = specularReflectedDirection;
-                vec3 bsdfValue = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              vec3 bsdfValue = evalPrincipledBSDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-                float pdfValue = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              float pdfValue = evalPrincipledPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                float pdfValue;
+//              float pdfValue;
+                vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
+//              vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
                 float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
 //              float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
                 outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
@@ -1629,10 +1592,10 @@
 
                 outScatteredDirection = diffuseDirection;
 //              outScatteredDirection = diffuseDirection;
-                vec3 bsdfValue = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              vec3 bsdfValue = evalPrincipledBSDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-                float pdfValue = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//              float pdfValue = evalPrincipledPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                float pdfValue;
+//              float pdfValue;
+                vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
+//              vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, diffuseDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
                 float cosOutgoingAngle = max(dot(shadingNormal, diffuseDirection), 0.0);
 //              float cosOutgoingAngle = max(dot(shadingNormal, diffuseDirection), 0.0);
                 outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
@@ -1950,19 +1913,17 @@
             }
 //          }
 
-            // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
-//          // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections
-            if (depth > 0) {
-//          if (depth > 0) {
-                material.roughness = max(material.roughness, pathRoughness);
-//              material.roughness = max(material.roughness, pathRoughness);
-            }
-//          }
-            pathRoughness = max(pathRoughness, material.roughness);
-//          pathRoughness = max(pathRoughness, material.roughness);
+            // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections.
+//          // As the ray depth increases, the surface roughness is artificially increased based on previous bounces to blur secondary reflections.
+            // The clamp itself lives inside scatterPrincipled (after its texture fetches) via the pathRoughness floor;
+//          // The clamp itself lives inside scatterPrincipled (after its texture fetches) via the pathRoughness floor;
+            // pathRoughness is updated below from the true post-texture sampled roughness, not the base value
+//          // pathRoughness is updated below from the true post-texture sampled roughness, not the base value
+            // (which is often a 1.0 placeholder on textured materials and used to poison the anneal).
+//          // (which is often a 1.0 placeholder on textured materials and used to poison the anneal).
 
-            if (depth >= 1 && uCacheBlendFactor > 0.0 && material.roughness > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
-//          if (depth >= 1 && uCacheBlendFactor > 0.0 && material.roughness > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
+            if (depth >= 1 && uCacheBlendFactor > 0.0 && max(material.roughness, pathRoughness) > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
+//          if (depth >= 1 && uCacheBlendFactor > 0.0 && max(material.roughness, pathRoughness) > CACHE_ROUGHNESS_GATE && material.transmission < 0.5) {
                 vec3 cachedRadiance;
 //              vec3 cachedRadiance;
                 if (readCache(hitPoint, rayHitResult.hitSurfaceNormal, cachedRadiance)) {
@@ -2003,8 +1964,8 @@
             bool scatterIsDelta;
 //          bool scatterIsDelta;
 
-            bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
-//          bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
+            bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
+//          bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
 
             accumulatedColor += attenuation * emission;
 //          accumulatedColor += attenuation * emission;
@@ -2017,6 +1978,11 @@
 //              break;
             }
 //          }
+
+            // Track the true (post-texture) sampled roughness so deeper bounces anneal correctly
+//          // Track the true (post-texture) sampled roughness so deeper bounces anneal correctly
+            pathRoughness = max(pathRoughness, roughness);
+//          pathRoughness = max(pathRoughness, roughness);
 
             // Direct Illumination (Next Event Estimation) with MIS
 //          // Direct Illumination (Next Event Estimation) with MIS
@@ -2107,8 +2073,12 @@
                         float lightPdfSolidAngle = (pdfLightArea * clampedDistanceToLight * clampedDistanceToLight) / cosLightAngle;
 //                      float lightPdfSolidAngle = (pdfLightArea * clampedDistanceToLight * clampedDistanceToLight) / cosLightAngle;
 
-                        float brdfPdfSolidAngle = evalPrincipledPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//                      float brdfPdfSolidAngle = evalPrincipledPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
+                        // Single fused evaluation supplies both the MIS counter-pdf and the BSDF value
+//                      // Single fused evaluation supplies both the MIS counter-pdf and the BSDF value
+                        float brdfPdfSolidAngle;
+//                      float brdfPdfSolidAngle;
+                        vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission, brdfPdfSolidAngle);
+//                      vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission, brdfPdfSolidAngle);
 
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating misWeightNee
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating misWeightNee
@@ -2122,9 +2092,6 @@
 //                          misWeightNee = (lightPdfSolidAngle * lightPdfSolidAngle) / sumOfSquaredPdfs;
                         }
 //                      }
-
-                        vec3 bsdfValue = evalPrincipledBSDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
-//                      vec3 bsdfValue = evalPrincipledBSDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission);
 
                         // Radiance emitted by the point light's surface
 //                      // Radiance emitted by the point light's surface
