@@ -908,5 +908,28 @@ class SceneBuilder:
         world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 20), dtype=np.float32)
 #       world_materials: npt.NDArray[np.float32] = np.array(packed_materials, dtype=np.float32) if packed_materials else np.zeros((1, 20), dtype=np.float32)
 
+        # Everything the GPU needs now lives in the returned byte blobs, but the renderer keeps
+#       # Everything the GPU needs now lives in the returned byte blobs, but the renderer keeps
+        # this SceneBuilder alive for the whole run - release the CPU-side geometry chunks
+#       # this SceneBuilder alive for the whole run - release the CPU-side geometry chunks
+        # (tens of MB of numpy arrays on large scenes). build() is single-shot by design:
+#       # (tens of MB of numpy arrays on large scenes). build() is single-shot by design:
+        # calling it again would already double-append the cube/plane batches.
+#       # calling it again would already double-append the cube/plane batches.
+        self.scene_triangles.clear()
+#       self.scene_triangles.clear()
+        self.scene_uvs.clear()
+#       self.scene_uvs.clear()
+        self.scene_normals.clear()
+#       self.scene_normals.clear()
+        self.scene_tangents.clear()
+#       self.scene_tangents.clear()
+        self.scene_material_indices.clear()
+#       self.scene_material_indices.clear()
+        self.cube_instance_data.clear()
+#       self.cube_instance_data.clear()
+        self.plane_instance_data.clear()
+#       self.plane_instance_data.clear()
+
         return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()
 #       return num_triangles, bvh_data, world_vertices.flatten().tobytes(), world_materials.flatten().tobytes()

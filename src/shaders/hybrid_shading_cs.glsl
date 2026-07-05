@@ -4,8 +4,12 @@
     layout(local_size_x = 16, local_size_y = 16) in;
 //  layout(local_size_x = 16, local_size_y = 16) in;
 
-    layout(binding = 0, rgba32f) uniform image2D textureOutput;
-//  layout(binding = 0, rgba32f) uniform image2D textureOutput;
+    // rgba16f matches the f2 post-processing texture bound here; this image is only ever queried
+//  // rgba16f matches the f2 post-processing texture bound here; this image is only ever queried
+    // via imageSize() (the shading result goes to textureAccum), so no pixel precision is involved.
+//  // via imageSize() (the shading result goes to textureAccum), so no pixel precision is involved.
+    layout(binding = 0, rgba16f) uniform image2D textureOutput;
+//  layout(binding = 0, rgba16f) uniform image2D textureOutput;
     layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
 //  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
     layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
@@ -107,8 +111,10 @@
 //      vec4 worldPositionAndHashKey; // xyz = world position of the cached point (for spatial-proximity validation on read); w = bit-packed hash key identifying the occupying entry
         vec4 surfaceNormalAndLastWriteFrame; // xyz = surface normal, gated against the query normal to reject mismatched surfaces; w = frame index of the last write, used for stale-entry eviction
 //      vec4 surfaceNormalAndLastWriteFrame; // xyz = surface normal, gated against the query normal to reject mismatched surfaces; w = frame index of the last write, used for stale-entry eviction
-        vec4 reservedPadding; // reserved 16-byte slot for future per-entry data; also keeps the struct std430 16-byte aligned
-//      vec4 reservedPadding; // reserved 16-byte slot for future per-entry data; also keeps the struct std430 16-byte aligned
+        // The former reservedPadding vec4 was removed: three vec4s already satisfy std430
+//      // The former reservedPadding vec4 was removed: three vec4s already satisfy std430
+        // alignment, and dropping the dead 16 bytes cuts every cache entry read/write by 25%.
+//      // alignment, and dropping the dead 16 bytes cuts every cache entry read/write by 25%.
     };
 //  };
 
@@ -374,8 +380,6 @@
 //              cacheEntries[slotIndex].worldPositionAndHashKey = vec4(worldPosition, uintBitsToFloat(hashKey));
                 cacheEntries[slotIndex].surfaceNormalAndLastWriteFrame = vec4(surfaceNormal, float(uCacheFrameCounter));
 //              cacheEntries[slotIndex].surfaceNormalAndLastWriteFrame = vec4(surfaceNormal, float(uCacheFrameCounter));
-                cacheEntries[slotIndex].reservedPadding = vec4(0.0);
-//              cacheEntries[slotIndex].reservedPadding = vec4(0.0);
             }
 //          }
         }

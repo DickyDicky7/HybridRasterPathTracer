@@ -125,18 +125,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         )
 #       )
 
-        self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-#       self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+        # Post-processing ping-pong pair in rgba16f (f2): everything after the tonemap pass is
+#       # Post-processing ping-pong pair in rgba16f (f2): everything after the tonemap pass is
+        # gamma-encoded LDR in [0, 1], where half floats resolve ~1/2048 steps vs the display's
+#       # gamma-encoded LDR in [0, 1], where half floats resolve ~1/2048 steps vs the display's
+        # 1/255 - visually identical, at half the memory traffic for every post pass and blit.
+#       # 1/255 - visually identical, at half the memory traffic for every post pass and blit.
+        self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
+#       self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
         self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
 #       self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
 
+        # The accumulation history MUST stay f4: it averages thousands of HDR samples with blend
+#       # The accumulation history MUST stay f4: it averages thousands of HDR samples with blend
+        # weights down to 0.001, which half-float precision would visibly stall and band.
+#       # weights down to 0.001, which half-float precision would visibly stall and band.
         self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
 #       self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
         self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
 #       self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
 
-        self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-#       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
+        self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
+#       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
         self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
 #       self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
 
@@ -748,8 +758,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         cache_entry_count: int = 131072
 #       cache_entry_count: int = 131072
-        cache_floats_per_entry: int = 16
-#       cache_floats_per_entry: int = 16
+        # 3 vec4s per entry (radiance+count, position+key, normal+frame): the reserved 4th vec4
+#       # 3 vec4s per entry (radiance+count, position+key, normal+frame): the reserved 4th vec4
+        # was never read or needed for std430 alignment, so dropping it cuts every cache
+#       # was never read or needed for std430 alignment, so dropping it cuts every cache
+        # read/write in the bounce loop by 25% and shrinks the buffer 8MB -> 6MB.
+#       # read/write in the bounce loop by 25% and shrinks the buffer 8MB -> 6MB.
+        cache_floats_per_entry: int = 12
+#       cache_floats_per_entry: int = 12
         self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
 #       self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
 
@@ -807,6 +823,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Pipeline of active post-processing shaders
 #       # Pipeline of active post-processing shaders
+        # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input image is
+#       # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input image is
+        # declared rgba32f (it reads the f4 accumulation buffer); every later pass declares its
+#       # declared rgba32f (it reads the f4 accumulation buffer); every later pass declares its
+        # input rgba16f to match the f2 ping-pong pair.
+#       # input rgba16f to match the f2 ping-pong pair.
         self.post_processing_pipeline: list[mgl.ComputeShader] = [
 #       self.post_processing_pipeline: list[mgl.ComputeShader] = [
             self.program_post_tonemap,
@@ -1040,10 +1062,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
         for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
 #       for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
-            packed: npt.NDArray[np.float32] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.float32)
-#           packed: npt.NDArray[np.float32] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.float32)
-            packed[..., 3] = 1.0
-#           packed[..., 3] = 1.0
+            # Quantize each channel straight into the 8-bit layer: identical bytes to the old
+#           # Quantize each channel straight into the 8-bit layer: identical bytes to the old
+            # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
+#           # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
+            # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
+#           # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
+            packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
+#           packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
+            packed_uint8[..., 3] = 255
+#           packed_uint8[..., 3] = 255
             for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
 #           for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
                 if source_path is None:
@@ -1054,17 +1082,26 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #               channel = self._load_data_channel(source_path)
                 if channel is not None:
 #               if channel is not None:
-                    packed[..., channel_index] = channel
-#                   packed[..., channel_index] = channel
-            packed = np.flipud(packed)
-#           packed = np.flipud(packed)
-            packed_uint8: npt.NDArray[np.uint8] = (np.clip(packed, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-#           packed_uint8: npt.NDArray[np.uint8] = (np.clip(packed, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+                    packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+#                   packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+            packed_uint8 = np.flipud(packed_uint8)
+#           packed_uint8 = np.flipud(packed_uint8)
             self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
 #           self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
 
         self.texture_array.build_mipmaps()
 #       self.texture_array.build_mipmaps()
+
+        # Bind the array to unit 9 right away: the geometry pass samples uSceneTextureArray on
+#       # Bind the array to unit 9 right away: the geometry pass samples uSceneTextureArray on
+        # unit 9 and runs BEFORE the shading section (which used to be the only place binding it),
+#       # unit 9 and runs BEFORE the shading section (which used to be the only place binding it),
+        # so the very first frame rasterized with an unbound unit and seeded the accumulation
+#       # so the very first frame rasterized with an unbound unit and seeded the accumulation
+        # history with undefined (usually black) albedo.
+#       # history with undefined (usually black) albedo.
+        self.texture_array.use(location=9)
+#       self.texture_array.use(location=9)
 
     def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
 #   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
@@ -1104,6 +1141,21 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       elif loaded_data.shape[2] == 4:
             loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
 #           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
+
+        # Fast path: an 8-bit source already at the array size needs no resize, so the
+        # Fast path: an 8-bit source already at the array size needs no resize, so the
+        # sRGB decode -> resize -> encode round-trip below is an exact identity and both
+        # sRGB decode -> resize -> encode round-trip below is an exact identity and both
+        # full-resolution pow() passes (plus the float conversion) can be skipped entirely.
+        # full-resolution pow() passes (plus the float conversion) can be skipped entirely.
+        if loaded_data.dtype == np.uint8 and loaded_data.shape[0] == self.texture_array_size and loaded_data.shape[1] == self.texture_array_size:
+#       if loaded_data.dtype == np.uint8 and loaded_data.shape[0] == self.texture_array_size and loaded_data.shape[1] == self.texture_array_size:
+            # Flip for OpenGL!
+            # Flip for OpenGL!
+            self.texture_array.write(np.flipud(loaded_data).tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+#           self.texture_array.write(np.flipud(loaded_data).tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+            return True
+#           return True
 
         # Convert to normalized float first so resizing is done on linear data
         # Convert to normalized float first so resizing is done on linear data
@@ -1515,8 +1567,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 #       jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 
-        transform_view: rr.Matrix44 = self.camera.get_view_matrix()
-#       transform_view: rr.Matrix44 = self.camera.get_view_matrix()
+        # Reuse the matrix computed for the movement check above instead of rebuilding it
+#       # Reuse the matrix computed for the movement check above instead of rebuilding it
+        transform_view: rr.Matrix44 = current_view_matrix
+#       transform_view: rr.Matrix44 = current_view_matrix
         transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
 #       transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
 
@@ -1732,8 +1786,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
             focal_length: float = rr.vector.length(self.camera.look_from - self.camera.look_at)
 #           focal_length: float = rr.vector.length(self.camera.look_from - self.camera.look_at)
-            tan_half_fovy: float = np.tan(np.deg2rad(60.0) / 2.0)
-#           tan_half_fovy: float = np.tan(np.deg2rad(60.0) / 2.0)
+            # Use the camera's actual FOV: this was hardcoded to 60.0 and would silently desync
+#           # Use the camera's actual FOV: this was hardcoded to 60.0 and would silently desync
+            # the ray-traced primary rays from the rasterized G-Buffer if the FOV ever changed.
+#           # the ray-traced primary rays from the rasterized G-Buffer if the FOV ever changed.
+            tan_half_fovy: float = np.tan(np.deg2rad(self.camera.fov) / 2.0)
+#           tan_half_fovy: float = np.tan(np.deg2rad(self.camera.fov) / 2.0)
             viewport_height: float = 2.0 * tan_half_fovy * focal_length
 #           viewport_height: float = 2.0 * tan_half_fovy * focal_length
             viewport_width: float = viewport_height * self.aspect_ratio

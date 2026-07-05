@@ -3,8 +3,16 @@
     layout(local_size_x = 16, local_size_y = 16) in;
 //  layout(local_size_x = 16, local_size_y = 16) in;
 
-    layout(binding = 0, rgba32f) uniform image2D textureOutput;
-//  layout(binding = 0, rgba32f) uniform image2D textureOutput;
+    // Output is the f2 ping-pong pair: the tonemapped result is gamma-encoded LDR in [0, 1],
+//  // Output is the f2 ping-pong pair: the tonemapped result is gamma-encoded LDR in [0, 1],
+    // where rgba16f resolves ~8x finer than an 8-bit display at half the memory traffic.
+//  // where rgba16f resolves ~8x finer than an 8-bit display at half the memory traffic.
+    layout(binding = 0, rgba16f) uniform image2D textureOutput;
+//  layout(binding = 0, rgba16f) uniform image2D textureOutput;
+    // Input stays rgba32f: this pass MUST run first in the pipeline, reading the f4 HDR
+//  // Input stays rgba32f: this pass MUST run first in the pipeline, reading the f4 HDR
+    // accumulation buffer directly (all later passes declare their input rgba16f).
+//  // accumulation buffer directly (all later passes declare their input rgba16f).
     layout(binding = 1, rgba32f) uniform image2D textureInput;
 //  layout(binding = 1, rgba32f) uniform image2D textureInput;
 

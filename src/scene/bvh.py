@@ -287,8 +287,18 @@ class LBVH:
         """
         Builds a standard BVH using the sorted morton codes (Karras 2012 / Bit-Split).
 #       Builds a standard BVH using the sorted morton codes (Karras 2012 / Bit-Split).
-        Optimization: Uses pre-allocated numpy arrays instead of list of dicts.
-#       Optimization: Uses pre-allocated numpy arrays instead of list of dicts.
+        Optimization: Fully iterative and vectorized. The old recursive builder made one Python
+#       Optimization: Fully iterative and vectorized. The old recursive builder made one Python
+        call plus several tiny numpy operations PER NODE (seconds of startup time on large
+#       call plus several tiny numpy operations PER NODE (seconds of startup time on large
+        scenes) and could blow the interpreter recursion limit on degenerate/deep trees.
+#       scenes) and could blow the interpreter recursion limit on degenerate/deep trees.
+        This version walks the ranges with an explicit stack (pure int math, identical
+#       This version walks the ranges with an explicit stack (pure int math, identical
+        pre-order node numbering), then fills leaf bounds and unions internal bounds
+#       pre-order node numbering), then fills leaf bounds and unions internal bounds
+        bottom-up per depth level as batched numpy operations.
+#       bottom-up per depth level as batched numpy operations.
         The resulting layout is a flat array of nodes, optimized for GPU cache.
 #       The resulting layout is a flat array of nodes, optimized for GPU cache.
         """
@@ -311,85 +321,165 @@ class LBVH:
         self.gpu_nodes: npt.NDArray[np.float32] = np.zeros((num_nodes, 2, 4), dtype=np.float32)
 #       self.gpu_nodes: npt.NDArray[np.float32] = np.zeros((num_nodes, 2, 4), dtype=np.float32)
 
+        # Pass 1: iterative pre-order DFS over triangle ranges (first and last are INCLUSIVE).
+#       # Pass 1: iterative pre-order DFS over triangle ranges (first and last are INCLUSIVE).
+        # Pushing the right range before the left reproduces the exact node numbering of the
+#       # Pushing the right range before the left reproduces the exact node numbering of the
+        # old recursive builder (parent, whole left subtree, whole right subtree).
+#       # old recursive builder (parent, whole left subtree, whole right subtree).
+        # Only topology (child links, depths, leaf triangle ids) is recorded here; no numpy per node.
+#       # Only topology (child links, depths, leaf triangle ids) is recorded here; no numpy per node.
+        left_child: npt.NDArray[np.int64] = np.full(num_nodes, -1, dtype=np.int64)
+#       left_child: npt.NDArray[np.int64] = np.full(num_nodes, -1, dtype=np.int64)
+        right_child: npt.NDArray[np.int64] = np.full(num_nodes, -1, dtype=np.int64)
+#       right_child: npt.NDArray[np.int64] = np.full(num_nodes, -1, dtype=np.int64)
+        node_depth: npt.NDArray[np.int64] = np.zeros(num_nodes, dtype=np.int64)
+#       node_depth: npt.NDArray[np.int64] = np.zeros(num_nodes, dtype=np.int64)
+        leaf_node_indices: list[int] = []
+#       leaf_node_indices: list[int] = []
+        leaf_triangle_indices: list[int] = []
+#       leaf_triangle_indices: list[int] = []
+        internal_node_indices: list[int] = []
+#       internal_node_indices: list[int] = []
+        sorted_indices_list: list[int] = self.sorted_indices.tolist()
+#       sorted_indices_list: list[int] = self.sorted_indices.tolist()
+        # Plain Python ints: extracting numpy scalars inside the split search dominates pass-1 cost
+#       # Plain Python ints: extracting numpy scalars inside the split search dominates pass-1 cost
+        morton_codes_list: list[int] = self.morton_codes.tolist()
+#       morton_codes_list: list[int] = self.morton_codes.tolist()
+
+        def find_split_fast(first: int, last: int) -> int:
+#       def find_split_fast(first: int, last: int) -> int:
+            # Same Karras bit-split search as find_split, but on the cached Python-int list
+#           # Same Karras bit-split search as find_split, but on the cached Python-int list
+            first_code: int = morton_codes_list[first]
+#           first_code: int = morton_codes_list[first]
+            last_code: int = morton_codes_list[last]
+#           last_code: int = morton_codes_list[last]
+            if first_code == last_code:
+#           if first_code == last_code:
+                return (first + last) // 2
+#               return (first + last) // 2
+            common_prefix: int = 32 - (first_code ^ last_code).bit_length()
+#           common_prefix: int = 32 - (first_code ^ last_code).bit_length()
+            split: int = first
+#           split: int = first
+            step: int = last - first
+#           step: int = last - first
+            while step > 1:
+#           while step > 1:
+                step = (step + 1) // 2
+#               step = (step + 1) // 2
+                new_split: int = split + step
+#               new_split: int = split + step
+                if new_split < last:
+#               if new_split < last:
+                    if 32 - (first_code ^ morton_codes_list[new_split]).bit_length() > common_prefix:
+#                   if 32 - (first_code ^ morton_codes_list[new_split]).bit_length() > common_prefix:
+                        split = new_split
+#                       split = new_split
+            return split
+#           return split
+
         self.next_node_idx: int = 0
 #       self.next_node_idx: int = 0
 
-        # Recursive builder (first and last are INCLUSIVE indices of sorted triangles)
-#       # Recursive builder (first and last are INCLUSIVE indices of sorted triangles)
-        def build(first: int, last: int) -> int:
-#       def build(first: int, last: int) -> int:
+        # Stack entries: (first, last, parent_idx, is_left_child, depth)
+#       # Stack entries: (first, last, parent_idx, is_left_child, depth)
+        range_stack: list[tuple[int, int, int, bool, int]] = [(0, self.count - 1, -1, False, 0)]
+#       range_stack: list[tuple[int, int, int, bool, int]] = [(0, self.count - 1, -1, False, 0)]
+        while range_stack:
+#       while range_stack:
+            first, last, parent_idx, is_left_child, depth = range_stack.pop()
+#           first, last, parent_idx, is_left_child, depth = range_stack.pop()
             node_idx: int = self.next_node_idx
 #           node_idx: int = self.next_node_idx
             self.next_node_idx += 1
 #           self.next_node_idx += 1
+            node_depth[node_idx] = depth
+#           node_depth[node_idx] = depth
+
+            if parent_idx >= 0:
+#           if parent_idx >= 0:
+                if is_left_child:
+#               if is_left_child:
+                    left_child[parent_idx] = node_idx
+#                   left_child[parent_idx] = node_idx
+                else:
+#               else:
+                    right_child[parent_idx] = node_idx
+#                   right_child[parent_idx] = node_idx
 
             # Leaf Case
 #           # Leaf Case
             if first == last:
 #           if first == last:
-                idx: int = self.sorted_indices[first]
-#               idx: int = self.sorted_indices[first]
-
-                # Min: bound_min, -1.0
-#               # Min: bound_min, -1.0
-                self.gpu_nodes[node_idx, 0, :3] = self.min_bounds[idx]
-#               self.gpu_nodes[node_idx, 0, :3] = self.min_bounds[idx]
-                self.gpu_nodes[node_idx, 0, 3] = -1.0
-#               self.gpu_nodes[node_idx, 0, 3] = -1.0
-
-                # Max: bound_max, tri_idx
-#               # Max: bound_max, tri_idx
-                self.gpu_nodes[node_idx, 1, :3] = self.max_bounds[idx]
-#               self.gpu_nodes[node_idx, 1, :3] = self.max_bounds[idx]
-                self.gpu_nodes[node_idx, 1, 3] = float(idx)
-#               self.gpu_nodes[node_idx, 1, 3] = float(idx)
-
-                return node_idx
-#               return node_idx
+                leaf_node_indices.append(node_idx)
+#               leaf_node_indices.append(node_idx)
+                leaf_triangle_indices.append(sorted_indices_list[first])
+#               leaf_triangle_indices.append(sorted_indices_list[first])
+                continue
+#               continue
 
             # Internal Case
 #           # Internal Case
-            split: int = self.find_split(first=first, last=last)
-#           split: int = self.find_split(first=first, last=last)
+            internal_node_indices.append(node_idx)
+#           internal_node_indices.append(node_idx)
+            split: int = find_split_fast(first=first, last=last)
+#           split: int = find_split_fast(first=first, last=last)
+            range_stack.append((split + 1, last, node_idx, False, depth + 1))
+#           range_stack.append((split + 1, last, node_idx, False, depth + 1))
+            range_stack.append((first, split, node_idx, True, depth + 1))
+#           range_stack.append((first, split, node_idx, True, depth + 1))
 
-            left_idx: int = build(first=first, last=split)
-#           left_idx: int = build(first=first, last=split)
-            right_idx: int = build(first=split + 1, last=last)
-#           right_idx: int = build(first=split + 1, last=last)
+        # Pass 2: batch-fill every leaf node in one shot (bounds + leaf sentinel + triangle id)
+#       # Pass 2: batch-fill every leaf node in one shot (bounds + leaf sentinel + triangle id)
+        leaf_nodes_array: npt.NDArray[np.int64] = np.array(leaf_node_indices, dtype=np.int64)
+#       leaf_nodes_array: npt.NDArray[np.int64] = np.array(leaf_node_indices, dtype=np.int64)
+        leaf_triangles_array: npt.NDArray[np.int64] = np.array(leaf_triangle_indices, dtype=np.int64)
+#       leaf_triangles_array: npt.NDArray[np.int64] = np.array(leaf_triangle_indices, dtype=np.int64)
+        self.gpu_nodes[leaf_nodes_array, 0, :3] = self.min_bounds[leaf_triangles_array]
+#       self.gpu_nodes[leaf_nodes_array, 0, :3] = self.min_bounds[leaf_triangles_array]
+        self.gpu_nodes[leaf_nodes_array, 0, 3] = -1.0
+#       self.gpu_nodes[leaf_nodes_array, 0, 3] = -1.0
+        self.gpu_nodes[leaf_nodes_array, 1, :3] = self.max_bounds[leaf_triangles_array]
+#       self.gpu_nodes[leaf_nodes_array, 1, :3] = self.max_bounds[leaf_triangles_array]
+        self.gpu_nodes[leaf_nodes_array, 1, 3] = leaf_triangles_array.astype(np.float32)
+#       self.gpu_nodes[leaf_nodes_array, 1, 3] = leaf_triangles_array.astype(np.float32)
 
-            # Compute union bounds
-#           # Compute union bounds
-            # Access children directly from the array
-#           # Access children directly from the array
-            l_min: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 0, :3]
-#           l_min: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 0, :3]
-            l_max: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 1, :3]
-#           l_max: npt.NDArray[np.float32] = self.gpu_nodes[left_idx, 1, :3]
-            r_min: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 0, :3]
-#           r_min: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 0, :3]
-            r_max: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 1, :3]
-#           r_max: npt.NDArray[np.float32] = self.gpu_nodes[right_idx, 1, :3]
+        # Pass 3: batch-fill internal child links, then union bounds bottom-up.
+#       # Pass 3: batch-fill internal child links, then union bounds bottom-up.
+        # Children always sit exactly one depth level below their parent, so processing the
+#       # Children always sit exactly one depth level below their parent, so processing the
+        # levels deepest-first guarantees both children are final before the parent unions them.
+#       # levels deepest-first guarantees both children are final before the parent unions them.
+        if internal_node_indices:
+#       if internal_node_indices:
+            internal_nodes_array: npt.NDArray[np.int64] = np.array(internal_node_indices, dtype=np.int64)
+#           internal_nodes_array: npt.NDArray[np.int64] = np.array(internal_node_indices, dtype=np.int64)
+            self.gpu_nodes[internal_nodes_array, 0, 3] = left_child[internal_nodes_array].astype(np.float32)
+#           self.gpu_nodes[internal_nodes_array, 0, 3] = left_child[internal_nodes_array].astype(np.float32)
+            self.gpu_nodes[internal_nodes_array, 1, 3] = right_child[internal_nodes_array].astype(np.float32)
+#           self.gpu_nodes[internal_nodes_array, 1, 3] = right_child[internal_nodes_array].astype(np.float32)
 
-            node_min: npt.NDArray[np.float32] = np.minimum(l_min, r_min)
-#           node_min: npt.NDArray[np.float32] = np.minimum(l_min, r_min)
-            node_max: npt.NDArray[np.float32] = np.maximum(l_max, r_max)
-#           node_max: npt.NDArray[np.float32] = np.maximum(l_max, r_max)
-
-            self.gpu_nodes[node_idx, 0, :3] = node_min
-#           self.gpu_nodes[node_idx, 0, :3] = node_min
-            self.gpu_nodes[node_idx, 0, 3] = float(left_idx)
-#           self.gpu_nodes[node_idx, 0, 3] = float(left_idx)
-
-            self.gpu_nodes[node_idx, 1, :3] = node_max
-#           self.gpu_nodes[node_idx, 1, :3] = node_max
-            self.gpu_nodes[node_idx, 1, 3] = float(right_idx)
-#           self.gpu_nodes[node_idx, 1, 3] = float(right_idx)
-
-            return node_idx
-#           return node_idx
-
-        build(first=0, last=self.count - 1)
-#       build(first=0, last=self.count - 1)
+            internal_depths: npt.NDArray[np.int64] = node_depth[internal_nodes_array]
+#           internal_depths: npt.NDArray[np.int64] = node_depth[internal_nodes_array]
+            for current_depth in range(int(internal_depths.max()), -1, -1):
+#           for current_depth in range(int(internal_depths.max()), -1, -1):
+                level_nodes: npt.NDArray[np.int64] = internal_nodes_array[internal_depths == current_depth]
+#               level_nodes: npt.NDArray[np.int64] = internal_nodes_array[internal_depths == current_depth]
+                if len(level_nodes) == 0:
+#               if len(level_nodes) == 0:
+                    continue
+#                   continue
+                level_left: npt.NDArray[np.int64] = left_child[level_nodes]
+#               level_left: npt.NDArray[np.int64] = left_child[level_nodes]
+                level_right: npt.NDArray[np.int64] = right_child[level_nodes]
+#               level_right: npt.NDArray[np.int64] = right_child[level_nodes]
+                self.gpu_nodes[level_nodes, 0, :3] = np.minimum(self.gpu_nodes[level_left, 0, :3], self.gpu_nodes[level_right, 0, :3])
+#               self.gpu_nodes[level_nodes, 0, :3] = np.minimum(self.gpu_nodes[level_left, 0, :3], self.gpu_nodes[level_right, 0, :3])
+                self.gpu_nodes[level_nodes, 1, :3] = np.maximum(self.gpu_nodes[level_left, 1, :3], self.gpu_nodes[level_right, 1, :3])
+#               self.gpu_nodes[level_nodes, 1, :3] = np.maximum(self.gpu_nodes[level_left, 1, :3], self.gpu_nodes[level_right, 1, :3])
 
         # Truncate unused nodes if any (though max should be close)
 #       # Truncate unused nodes if any (though max should be close)

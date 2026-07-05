@@ -3,10 +3,12 @@
     layout(local_size_x = 16, local_size_y = 16) in;
 //  layout(local_size_x = 16, local_size_y = 16) in;
 
-    layout(binding = 0, rgba32f) uniform image2D textureOutput;
-//  layout(binding = 0, rgba32f) uniform image2D textureOutput;
-    layout(binding = 1, rgba32f) uniform image2D textureInput;
-//  layout(binding = 1, rgba32f) uniform image2D textureInput;
+    // rgba16f matches the f2 post-processing ping-pong pair (LDR data - no visible precision loss)
+//  // rgba16f matches the f2 post-processing ping-pong pair (LDR data - no visible precision loss)
+    layout(binding = 0, rgba16f) uniform image2D textureOutput;
+//  layout(binding = 0, rgba16f) uniform image2D textureOutput;
+    layout(binding = 1, rgba16f) uniform image2D textureInput;
+//  layout(binding = 1, rgba16f) uniform image2D textureInput;
 
     // Aberration Strength: Controls the fractional displacement applied to the red and blue color channels across the lens. This simulates the optical dispersion of physical camera lenses, where light of differing wavelengths refracts at slightly different angles.
 //  // Aberration Strength: Controls the fractional displacement applied to the red and blue color channels across the lens. This simulates the optical dispersion of physical camera lenses, where light of differing wavelengths refracts at slightly different angles.
