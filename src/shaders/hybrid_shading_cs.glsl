@@ -125,6 +125,78 @@
     };
 //  };
 
+    // ReSTIR Spatiotemporal Reservoir Buffer (double-buffered: 2 frames)
+//  // ReSTIR Spatiotemporal Reservoir Buffer (double-buffered: 2 frames)
+    struct LightSample {
+//  struct LightSample {
+        vec3 position;
+//      vec3 position;
+        float padding1;
+//      float padding1;
+        vec3 normal;
+//      vec3 normal;
+        float padding2;
+//      float padding2;
+        vec3 emission;
+//      vec3 emission;
+        float probability_density;
+//      float probability_density;
+    };
+//  };
+
+    struct Reservoir {
+//  struct Reservoir {
+        LightSample selected_sample; // 48 bytes
+//      LightSample selected_sample; // 48 bytes
+        float sum_of_weights;        // 4 bytes | w_sum
+//      float sum_of_weights;        // 4 bytes | w_sum
+        float sample_count;          // 4 bytes | M
+//      float sample_count;          // 4 bytes | M
+        float contribution_weight;   // 4 bytes | W
+//      float contribution_weight;   // 4 bytes | W
+        float surface_depth;         // 4 bytes | hit distance
+//      float surface_depth;         // 4 bytes | hit distance
+        vec3 surface_normal;         // 12 bytes| world normal
+//      vec3 surface_normal;         // 12 bytes| world normal
+        uint rate_and_flags;         // 4 bytes | VRT rate class in the low bits, 0x80 marks an actively traced pixel
+//      uint rate_and_flags;         // 4 bytes | VRT rate class in the low bits, 0x80 marks an actively traced pixel
+    };
+//  };
+
+    layout(std430, binding = 10) buffer SampleReservoirs {
+//  layout(std430, binding = 10) buffer SampleReservoirs {
+        Reservoir sampleReservoirs[];
+//      Reservoir sampleReservoirs[];
+    };
+//  };
+
+    // Neural Radiance Cache (NRC) Weights Buffer (4556 floats total)
+//  // Neural Radiance Cache (NRC) Weights Buffer (4556 floats total)
+    layout(std430, binding = 11) buffer NRCWeights {
+//  layout(std430, binding = 11) buffer NRCWeights {
+        float neuralNetworkWeights[];
+//      float neuralNetworkWeights[];
+    };
+//  };
+
+    // NRC Training Records Buffer (up to 8192 records of 9 floats)
+//  // NRC Training Records Buffer (up to 8192 records of 9 floats)
+    layout(std430, binding = 12) buffer NRCTrainingRecords {
+//  layout(std430, binding = 12) buffer NRCTrainingRecords {
+        float nrcTrainingRecords[];
+//      float nrcTrainingRecords[];
+    };
+//  };
+
+    // NRC Training Atomic Counter
+//  // NRC Training Atomic Counter
+    layout(std430, binding = 13) buffer NRCTrainingCounter {
+//  layout(std430, binding = 13) buffer NRCTrainingCounter {
+        uint uTrainingRecordCount;
+//      uint uTrainingRecordCount;
+    };
+//  };
+
     struct Ray {
 //  struct Ray {
         vec3 origin; // ray start point in world space
@@ -196,9 +268,40 @@
 //  uniform uint uCacheFrameCounter;
     uniform float uCacheBlendFactor;
 //  uniform float uCacheBlendFactor;
+    uniform bool uNRCEnabled;
+//  uniform bool uNRCEnabled;
+    uniform bool uReSTIREnabled;
+//  uniform bool uReSTIREnabled;
+    uniform bool uVRTEnabled;
+//  uniform bool uVRTEnabled;
+    uniform bool uVRTVisualize;
+//  uniform bool uVRTVisualize;
+    uniform ivec2 uResolution;
+//  uniform ivec2 uResolution;
+    // NRC input-domain normalisation. The frequency positional encoding below is only well conditioned
+//  // NRC input-domain normalisation. The frequency positional encoding below is only well conditioned
+    // when the encoded position spans roughly [-0.75, 0.75] (which is what Experiment001's unit-scale
+//  // when the encoded position spans roughly [-0.75, 0.75] (which is what Experiment001's unit-scale
+    // Cornell box gave it via a bare position * 0.5). These map this scene's world AABB onto that range,
+//  // Cornell box gave it via a bare position * 0.5). These map this scene's world AABB onto that range,
+    // otherwise sin/cos of the raw position aliases many times over and the MLP cannot fit the scene.
+//  // otherwise sin/cos of the raw position aliases many times over and the MLP cannot fit the scene.
+    uniform vec3 uNRCPositionOffset;
+//  uniform vec3 uNRCPositionOffset;
+    uniform float uNRCPositionScale;
+//  uniform float uNRCPositionScale;
+
+    // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
+//  // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
+    // workgroup at the top of main() so every cache query reads shared memory instead of the SSBO.
+//  // workgroup at the top of main() so every cache query reads shared memory instead of the SSBO.
+    shared float shared_network_weights[1139];
+//  shared float shared_network_weights[1139];
 
     const float PI = 3.14159265359;
 //  const float PI = 3.14159265359;
+    const float TWO_PI = 6.28318530718;
+//  const float TWO_PI = 6.28318530718;
     const float INF = 1e30;
 //  const float INF = 1e30;
 
@@ -228,6 +331,18 @@
 //  const float EPSILON_OFFSET = 0.001;
     const float MISS_DISTANCE = INF;
 //  const float MISS_DISTANCE = INF;
+    // Variable Rate Tracing (VRT) rate classes; the value is the number of pixels that share one traced ray.
+//  // Variable Rate Tracing (VRT) rate classes; the value is the number of pixels that share one traced ray.
+    const uint VRT_RATE_1X1 = 0u; // 1 ray per 1x1 block (100% ray budget)
+//  const uint VRT_RATE_1X1 = 0u; // 1 ray per 1x1 block (100% ray budget)
+    const uint VRT_RATE_2X1 = 1u; // 1 ray per 2x1 block (50% ray budget)
+//  const uint VRT_RATE_2X1 = 1u; // 1 ray per 2x1 block (50% ray budget)
+    const uint VRT_RATE_1X2 = 2u; // 1 ray per 1x2 block (50% ray budget)
+//  const uint VRT_RATE_1X2 = 2u; // 1 ray per 1x2 block (50% ray budget)
+    const uint VRT_RATE_2X2 = 3u; // 1 ray per 2x2 block (25% ray budget)
+//  const uint VRT_RATE_2X2 = 3u; // 1 ray per 2x2 block (25% ray budget)
+    const uint VRT_RATE_4X4 = 4u; // 1 ray per 4x4 block (6.25% ray budget)
+//  const uint VRT_RATE_4X4 = 4u; // 1 ray per 4x4 block (6.25% ray budget)
     const uint CACHE_SIZE = 131072u;
 //  const uint CACHE_SIZE = 131072u;
     const float CACHE_CELL_SIZE = 0.5;
@@ -1238,6 +1353,473 @@
     }
 //  }
 
+    float calculateLuminance(vec3 color) {
+//  float calculateLuminance(vec3 color) {
+        return dot(color, vec3(0.2126, 0.7152, 0.0722));
+//      return dot(color, vec3(0.2126, 0.7152, 0.0722));
+    }
+//  }
+
+    // Neural Radiance Cache forward pass.
+//  // Neural Radiance Cache forward pass.
+    // Multi-Layer Perceptron: 16 inputs -> 16 hidden (x4, ReLU) -> 3 outputs.
+//  // Multi-Layer Perceptron: 16 inputs -> 16 hidden (x4, ReLU) -> 3 outputs.
+    //
+//  //
+    // Reads the weights out of shared_network_weights, which main() fills once per workgroup with the
+//  // Reads the weights out of shared_network_weights, which main() fills once per workgroup with the
+    // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
+//  // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
+    // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
+//  // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
+    // inside this deeply inlined function makes the NVIDIA GLSL compiler give up with
+//  // inside this deeply inlined function makes the NVIDIA GLSL compiler give up with
+    // "error C5025: lvalue in array access too complex", failing the whole program link.
+//  // "error C5025: lvalue in array access too complex", failing the whole program link.
+    //
+//  //
+    // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
+//  // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
+    // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
+//  // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
+    // trips the same compiler limit. This layout also matches nrc_train_cs.glsl exactly, so inference
+//  // trips the same compiler limit. This layout also matches nrc_train_cs.glsl exactly, so inference
+    // and training cannot drift apart.
+//  // and training cannot drift apart.
+    vec3 evaluateNeuralRadianceCache(vec3 position, vec3 normal) {
+//  vec3 evaluateNeuralRadianceCache(vec3 position, vec3 normal) {
+        vec3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
+//      vec3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
+
+        // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
+//      // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
+        float inputFeatures[16];
+//      float inputFeatures[16];
+        inputFeatures[0] = scaledPos.x;
+//      inputFeatures[0] = scaledPos.x;
+        inputFeatures[1] = scaledPos.y;
+//      inputFeatures[1] = scaledPos.y;
+        inputFeatures[2] = scaledPos.z;
+//      inputFeatures[2] = scaledPos.z;
+        inputFeatures[3] = normal.x;
+//      inputFeatures[3] = normal.x;
+        inputFeatures[4] = normal.y;
+//      inputFeatures[4] = normal.y;
+        inputFeatures[5] = normal.z;
+//      inputFeatures[5] = normal.z;
+        inputFeatures[6] = sin(scaledPos.x * PI);
+//      inputFeatures[6] = sin(scaledPos.x * PI);
+        inputFeatures[7] = sin(scaledPos.y * PI);
+//      inputFeatures[7] = sin(scaledPos.y * PI);
+        inputFeatures[8] = sin(scaledPos.z * PI);
+//      inputFeatures[8] = sin(scaledPos.z * PI);
+        inputFeatures[9] = cos(scaledPos.x * PI);
+//      inputFeatures[9] = cos(scaledPos.x * PI);
+        inputFeatures[10] = cos(scaledPos.y * PI);
+//      inputFeatures[10] = cos(scaledPos.y * PI);
+        inputFeatures[11] = cos(scaledPos.z * PI);
+//      inputFeatures[11] = cos(scaledPos.z * PI);
+        inputFeatures[12] = sin(scaledPos.x * TWO_PI);
+//      inputFeatures[12] = sin(scaledPos.x * TWO_PI);
+        inputFeatures[13] = sin(scaledPos.y * TWO_PI);
+//      inputFeatures[13] = sin(scaledPos.y * TWO_PI);
+        inputFeatures[14] = sin(scaledPos.z * TWO_PI);
+//      inputFeatures[14] = sin(scaledPos.z * TWO_PI);
+        inputFeatures[15] = 1.0;
+//      inputFeatures[15] = 1.0;
+
+        // Hidden Layer 1 (weights offset 0, bias offset 256)
+//      // Hidden Layer 1 (weights offset 0, bias offset 256)
+        float hiddenLayer1[16];
+//      float hiddenLayer1[16];
+        for (uint i = 0u; i < 16u; i++) {
+//      for (uint i = 0u; i < 16u; i++) {
+            float activationSum = shared_network_weights[256u + i];
+//          float activationSum = shared_network_weights[256u + i];
+            uint weightOffset = i * 16u;
+//          uint weightOffset = i * 16u;
+            for (uint j = 0u; j < 16u; j++) {
+//          for (uint j = 0u; j < 16u; j++) {
+                activationSum += inputFeatures[j] * shared_network_weights[weightOffset + j];
+//              activationSum += inputFeatures[j] * shared_network_weights[weightOffset + j];
+            }
+//          }
+            hiddenLayer1[i] = max(0.0, activationSum); // ReLU
+//          hiddenLayer1[i] = max(0.0, activationSum); // ReLU
+        }
+//      }
+
+        // Hidden Layer 2 (weights offset 272, bias offset 528)
+//      // Hidden Layer 2 (weights offset 272, bias offset 528)
+        float hiddenLayer2[16];
+//      float hiddenLayer2[16];
+        for (uint i = 0u; i < 16u; i++) {
+//      for (uint i = 0u; i < 16u; i++) {
+            float activationSum = shared_network_weights[528u + i];
+//          float activationSum = shared_network_weights[528u + i];
+            uint weightOffset = 272u + i * 16u;
+//          uint weightOffset = 272u + i * 16u;
+            for (uint j = 0u; j < 16u; j++) {
+//          for (uint j = 0u; j < 16u; j++) {
+                activationSum += hiddenLayer1[j] * shared_network_weights[weightOffset + j];
+//              activationSum += hiddenLayer1[j] * shared_network_weights[weightOffset + j];
+            }
+//          }
+            hiddenLayer2[i] = max(0.0, activationSum); // ReLU
+//          hiddenLayer2[i] = max(0.0, activationSum); // ReLU
+        }
+//      }
+
+        // Hidden Layer 3 (weights offset 544, bias offset 800)
+//      // Hidden Layer 3 (weights offset 544, bias offset 800)
+        float hiddenLayer3[16];
+//      float hiddenLayer3[16];
+        for (uint i = 0u; i < 16u; i++) {
+//      for (uint i = 0u; i < 16u; i++) {
+            float activationSum = shared_network_weights[800u + i];
+//          float activationSum = shared_network_weights[800u + i];
+            uint weightOffset = 544u + i * 16u;
+//          uint weightOffset = 544u + i * 16u;
+            for (uint j = 0u; j < 16u; j++) {
+//          for (uint j = 0u; j < 16u; j++) {
+                activationSum += hiddenLayer2[j] * shared_network_weights[weightOffset + j];
+//              activationSum += hiddenLayer2[j] * shared_network_weights[weightOffset + j];
+            }
+//          }
+            hiddenLayer3[i] = max(0.0, activationSum); // ReLU
+//          hiddenLayer3[i] = max(0.0, activationSum); // ReLU
+        }
+//      }
+
+        // Hidden Layer 4 (weights offset 816, bias offset 1072)
+//      // Hidden Layer 4 (weights offset 816, bias offset 1072)
+        float hiddenLayer4[16];
+//      float hiddenLayer4[16];
+        for (uint i = 0u; i < 16u; i++) {
+//      for (uint i = 0u; i < 16u; i++) {
+            float activationSum = shared_network_weights[1072u + i];
+//          float activationSum = shared_network_weights[1072u + i];
+            uint weightOffset = 816u + i * 16u;
+//          uint weightOffset = 816u + i * 16u;
+            for (uint j = 0u; j < 16u; j++) {
+//          for (uint j = 0u; j < 16u; j++) {
+                activationSum += hiddenLayer3[j] * shared_network_weights[weightOffset + j];
+//              activationSum += hiddenLayer3[j] * shared_network_weights[weightOffset + j];
+            }
+//          }
+            hiddenLayer4[i] = max(0.0, activationSum); // ReLU
+//          hiddenLayer4[i] = max(0.0, activationSum); // ReLU
+        }
+//      }
+
+        // Output Layer (weights offset 1088, bias offset 1136)
+//      // Output Layer (weights offset 1088, bias offset 1136)
+        vec3 outputRadiance = vec3(0.0);
+//      vec3 outputRadiance = vec3(0.0);
+        for (uint i = 0u; i < 3u; i++) {
+//      for (uint i = 0u; i < 3u; i++) {
+            float activationSum = shared_network_weights[1136u + i];
+//          float activationSum = shared_network_weights[1136u + i];
+            uint weightOffset = 1088u + i * 16u;
+//          uint weightOffset = 1088u + i * 16u;
+            for (uint j = 0u; j < 16u; j++) {
+//          for (uint j = 0u; j < 16u; j++) {
+                activationSum += hiddenLayer4[j] * shared_network_weights[weightOffset + j];
+//              activationSum += hiddenLayer4[j] * shared_network_weights[weightOffset + j];
+            }
+//          }
+            outputRadiance[int(i)] = activationSum;
+//          outputRadiance[int(i)] = activationSum;
+        }
+//      }
+
+        // Clamp to prevent explosive feedback during early training
+//      // Clamp to prevent explosive feedback during early training
+        return clamp(outputRadiance, vec3(0.0), vec3(15.0));
+//      return clamp(outputRadiance, vec3(0.0), vec3(15.0));
+    }
+//  }
+
+    // Variable Rate Tracing (VRT) rate classification and temporal allocation.
+//  // Variable Rate Tracing (VRT) rate classification and temporal allocation.
+    // The rate encodes how many pixels share a single traced ray: 1x1 spends the full ray budget,
+//  // The rate encodes how many pixels share a single traced ray: 1x1 spends the full ray budget,
+    // 4x4 spends 1/16th of it, and the remaining pixels in a tile live off the ReSTIR history instead.
+//  // 4x4 spends 1/16th of it, and the remaining pixels in a tile live off the ReSTIR history instead.
+    uint classifyPixelTracingRate(vec3 geometricNormal, float roughness, float metallic, float transmission, float emissive) {
+//  uint classifyPixelTracingRate(vec3 geometricNormal, float roughness, float metallic, float transmission, float emissive) {
+        if (!uVRTEnabled) {
+//      if (!uVRTEnabled) {
+            return VRT_RATE_1X1;
+//          return VRT_RATE_1X1;
+        }
+//      }
+
+        // Specular reflections, glass transmission and smooth surfaces carry high-frequency detail: full rate.
+//      // Specular reflections, glass transmission and smooth surfaces carry high-frequency detail: full rate.
+        if (metallic > 0.1 || transmission > 0.0 || roughness < 0.25) {
+//      if (metallic > 0.1 || transmission > 0.0 || roughness < 0.25) {
+            return VRT_RATE_1X1;
+//          return VRT_RATE_1X1;
+        }
+//      }
+
+        // Direct emitters: full rate.
+//      // Direct emitters: full rate.
+        if (emissive > 0.0) {
+//      if (emissive > 0.0) {
+            return VRT_RATE_1X1;
+//          return VRT_RATE_1X1;
+        }
+//      }
+
+        // Planar diffuse geometry (floors, walls, ceilings) tolerates the coarsest rate.
+//      // Planar diffuse geometry (floors, walls, ceilings) tolerates the coarsest rate.
+        bool isCardinalPlane = (abs(geometricNormal.x) > 0.95 || abs(geometricNormal.y) > 0.95 || abs(geometricNormal.z) > 0.95);
+//      bool isCardinalPlane = (abs(geometricNormal.x) > 0.95 || abs(geometricNormal.y) > 0.95 || abs(geometricNormal.z) > 0.95);
+
+        if (roughness >= 0.5 && isCardinalPlane) {
+//      if (roughness >= 0.5 && isCardinalPlane) {
+            return VRT_RATE_4X4;
+//          return VRT_RATE_4X4;
+        }
+//      }
+
+        if (roughness >= 0.35) {
+//      if (roughness >= 0.35) {
+            return VRT_RATE_2X2;
+//          return VRT_RATE_2X2;
+        }
+//      }
+
+        if (abs(geometricNormal.y) > 0.9) {
+//      if (abs(geometricNormal.y) > 0.9) {
+            return VRT_RATE_2X1;
+//          return VRT_RATE_2X1;
+        }
+//      }
+
+        return VRT_RATE_2X2;
+//      return VRT_RATE_2X2;
+    }
+//  }
+
+    // Rotates which pixel inside a tile owns the ray this frame, so every pixel is refreshed over time.
+//  // Rotates which pixel inside a tile owns the ray this frame, so every pixel is refreshed over time.
+    bool isPixelActiveForVRT(uint pixelX, uint pixelY, uint rate, uint frameIndex) {
+//  bool isPixelActiveForVRT(uint pixelX, uint pixelY, uint rate, uint frameIndex) {
+        if (rate == VRT_RATE_2X1) {
+//      if (rate == VRT_RATE_2X1) {
+            uint tileId = pixelX / 2u;
+//          uint tileId = pixelX / 2u;
+            uint activeOffset = (frameIndex + tileId) % 2u;
+//          uint activeOffset = (frameIndex + tileId) % 2u;
+            return (pixelX % 2u) == activeOffset;
+//          return (pixelX % 2u) == activeOffset;
+        }
+//      }
+        if (rate == VRT_RATE_1X2) {
+//      if (rate == VRT_RATE_1X2) {
+            uint tileId = pixelY / 2u;
+//          uint tileId = pixelY / 2u;
+            uint activeOffset = (frameIndex + tileId) % 2u;
+//          uint activeOffset = (frameIndex + tileId) % 2u;
+            return (pixelY % 2u) == activeOffset;
+//          return (pixelY % 2u) == activeOffset;
+        }
+//      }
+        if (rate == VRT_RATE_2X2) {
+//      if (rate == VRT_RATE_2X2) {
+            uint tileX = pixelX / 2u;
+//          uint tileX = pixelX / 2u;
+            uint tileY = pixelY / 2u;
+//          uint tileY = pixelY / 2u;
+            uint subPixel = (pixelY % 2u) * 2u + (pixelX % 2u);
+//          uint subPixel = (pixelY % 2u) * 2u + (pixelX % 2u);
+            uint dither = (tileX * 3u + tileY * 7u) % 4u;
+//          uint dither = (tileX * 3u + tileY * 7u) % 4u;
+            uint activeSub = (frameIndex + dither) % 4u;
+//          uint activeSub = (frameIndex + dither) % 4u;
+            return subPixel == activeSub;
+//          return subPixel == activeSub;
+        }
+//      }
+        if (rate == VRT_RATE_4X4) {
+//      if (rate == VRT_RATE_4X4) {
+            uint tileX = pixelX / 4u;
+//          uint tileX = pixelX / 4u;
+            uint tileY = pixelY / 4u;
+//          uint tileY = pixelY / 4u;
+            uint subPixel = (pixelY % 4u) * 4u + (pixelX % 4u);
+//          uint subPixel = (pixelY % 4u) * 4u + (pixelX % 4u);
+            uint dither = (tileX * 7u + tileY * 11u) % 16u;
+//          uint dither = (tileX * 7u + tileY * 11u) % 16u;
+            uint activeSub = (frameIndex * 3u + dither) % 16u;
+//          uint activeSub = (frameIndex * 3u + dither) % 16u;
+            return subPixel == activeSub;
+//          return subPixel == activeSub;
+        }
+//      }
+        return true;
+//      return true;
+    }
+//  }
+
+    // Heatmap colours matching the Experiment001 legend: red 1x1, yellow 2x1/1x2, green 2x2, blue 4x4.
+//  // Heatmap colours matching the Experiment001 legend: red 1x1, yellow 2x1/1x2, green 2x2, blue 4x4.
+    vec3 visualizeTracingRate(uint rate, bool isActiveTrace) {
+//  vec3 visualizeTracingRate(uint rate, bool isActiveTrace) {
+        vec3 heatColor = vec3(0.9, 0.15, 0.15);
+//      vec3 heatColor = vec3(0.9, 0.15, 0.15);
+        if (rate == VRT_RATE_2X1 || rate == VRT_RATE_1X2) {
+//      if (rate == VRT_RATE_2X1 || rate == VRT_RATE_1X2) {
+            heatColor = vec3(0.95, 0.85, 0.1);
+//          heatColor = vec3(0.95, 0.85, 0.1);
+        } else if (rate == VRT_RATE_2X2) {
+//      } else if (rate == VRT_RATE_2X2) {
+            heatColor = vec3(0.1, 0.85, 0.25);
+//          heatColor = vec3(0.1, 0.85, 0.25);
+        } else if (rate == VRT_RATE_4X4) {
+//      } else if (rate == VRT_RATE_4X4) {
+            heatColor = vec3(0.15, 0.55, 1.0);
+//          heatColor = vec3(0.15, 0.55, 1.0);
+        }
+//      }
+        if (isActiveTrace) {
+//      if (isActiveTrace) {
+            heatColor = min(heatColor + vec3(0.3, 0.3, 0.3), vec3(1.0));
+//          heatColor = min(heatColor + vec3(0.3, 0.3, 0.3), vec3(1.0));
+        } else {
+//      } else {
+            heatColor *= 0.55;
+//          heatColor *= 0.55;
+        }
+//      }
+        return heatColor;
+//      return heatColor;
+    }
+//  }
+    LightSample generateLightSampleCandidate(vec3 hitPoint, vec3 shadingNormal) {
+//  LightSample generateLightSampleCandidate(vec3 hitPoint, vec3 shadingNormal) {
+        LightSample candidate;
+//      LightSample candidate;
+        candidate.position = vec3(0.0);
+//      candidate.position = vec3(0.0);
+        candidate.padding1 = 0.0;
+//      candidate.padding1 = 0.0;
+        candidate.normal = vec3(0.0, 1.0, 0.0);
+//      candidate.normal = vec3(0.0, 1.0, 0.0);
+        candidate.padding2 = 0.0;
+//      candidate.padding2 = 0.0;
+        candidate.emission = vec3(0.0);
+//      candidate.emission = vec3(0.0);
+        candidate.probability_density = 0.0;
+//      candidate.probability_density = 0.0;
+
+        if (uPointLightCount <= 0) return candidate;
+//      if (uPointLightCount <= 0) return candidate;
+
+        float lightSelectionRandom = rand();
+//      float lightSelectionRandom = rand();
+        int selectedLightIndex = max(0, uPointLightCount - 1);
+//      int selectedLightIndex = max(0, uPointLightCount - 1);
+        for (int lightSearchIndex = 0; lightSearchIndex < uPointLightCount; lightSearchIndex++) {
+//      for (int lightSearchIndex = 0; lightSearchIndex < uPointLightCount; lightSearchIndex++) {
+            if (lightSelectionRandom <= uPointLights[lightSearchIndex].cdf) {
+//          if (lightSelectionRandom <= uPointLights[lightSearchIndex].cdf) {
+                selectedLightIndex = lightSearchIndex;
+//              selectedLightIndex = lightSearchIndex;
+                break;
+//              break;
+            }
+//          }
+        }
+//      }
+
+        vec3 lightPosition = uPointLights[selectedLightIndex].position;
+//      vec3 lightPosition = uPointLights[selectedLightIndex].position;
+        float lightRadius = uPointLights[selectedLightIndex].radius;
+//      float lightRadius = uPointLights[selectedLightIndex].radius;
+        float lightPdf = uPointLights[selectedLightIndex].pdf;
+//      float lightPdf = uPointLights[selectedLightIndex].pdf;
+
+        vec3 lightToSurfaceDirection = normalize(hitPoint - lightPosition);
+//      vec3 lightToSurfaceDirection = normalize(hitPoint - lightPosition);
+        vec3 lightSampleNormal = randomUnitVector();
+//      vec3 lightSampleNormal = randomUnitVector();
+        if (dot(lightSampleNormal, lightToSurfaceDirection) < 0.0) lightSampleNormal = -lightSampleNormal;
+//      if (dot(lightSampleNormal, lightToSurfaceDirection) < 0.0) lightSampleNormal = -lightSampleNormal;
+        vec3 sampledLightPoint = lightPosition + lightSampleNormal * lightRadius;
+//      vec3 sampledLightPoint = lightPosition + lightSampleNormal * lightRadius;
+
+        float lightSurfaceArea = 2.0 * PI * lightRadius * lightRadius;
+//      float lightSurfaceArea = 2.0 * PI * lightRadius * lightRadius;
+        float pdfLightArea = lightPdf / max(lightSurfaceArea, 1.0e-5);
+//      float pdfLightArea = lightPdf / max(lightSurfaceArea, 1.0e-5);
+
+        candidate.position = sampledLightPoint;
+//      candidate.position = sampledLightPoint;
+        candidate.normal = lightSampleNormal;
+//      candidate.normal = lightSampleNormal;
+        candidate.emission = uPointLights[selectedLightIndex].color;
+//      candidate.emission = uPointLights[selectedLightIndex].color;
+        candidate.probability_density = pdfLightArea;
+//      candidate.probability_density = pdfLightArea;
+        return candidate;
+//      return candidate;
+    }
+//  }
+
+    float evaluateTargetPdf(LightSample lightSample, vec3 hitPoint, vec3 shadingNormal, vec3 viewDirection, vec3 albedo, float roughness, float metallic, float transmission) {
+//  float evaluateTargetPdf(LightSample lightSample, vec3 hitPoint, vec3 shadingNormal, vec3 viewDirection, vec3 albedo, float roughness, float metallic, float transmission) {
+        vec3 toLight = lightSample.position - hitPoint;
+//      vec3 toLight = lightSample.position - hitPoint;
+        float squaredDistance = dot(toLight, toLight);
+//      float squaredDistance = dot(toLight, toLight);
+        if (squaredDistance < 1.0e-6) return 0.0;
+//      if (squaredDistance < 1.0e-6) return 0.0;
+
+        float distanceToLight = sqrt(squaredDistance);
+//      float distanceToLight = sqrt(squaredDistance);
+        vec3 lightDirection = toLight / distanceToLight;
+//      vec3 lightDirection = toLight / distanceToLight;
+        float normalDotLight = max(0.0, dot(shadingNormal, lightDirection));
+//      float normalDotLight = max(0.0, dot(shadingNormal, lightDirection));
+        float lightNormalDotDirection = max(0.0, dot(lightSample.normal, -lightDirection));
+//      float lightNormalDotDirection = max(0.0, dot(lightSample.normal, -lightDirection));
+
+        if (normalDotLight > 0.0 && lightNormalDotDirection > 0.0) {
+//      if (normalDotLight > 0.0 && lightNormalDotDirection > 0.0) {
+            float unusedPdf;
+//          float unusedPdf;
+            vec3 brdfValue = evalPrincipledBSDFAndPDF(-viewDirection, lightDirection, shadingNormal, albedo, roughness, metallic, transmission, unusedPdf);
+//          vec3 brdfValue = evalPrincipledBSDFAndPDF(-viewDirection, lightDirection, shadingNormal, albedo, roughness, metallic, transmission, unusedPdf);
+            vec3 targetColor = brdfValue * normalDotLight * lightSample.emission * (lightNormalDotDirection / squaredDistance);
+//          vec3 targetColor = brdfValue * normalDotLight * lightSample.emission * (lightNormalDotDirection / squaredDistance);
+            return calculateLuminance(targetColor);
+//          return calculateLuminance(targetColor);
+        }
+//      }
+        return 0.0;
+//      return 0.0;
+    }
+//  }
+
+    void updateReservoirSample(inout Reservoir reservoir, LightSample candidate, float weight, float countMultiplier) {
+//  void updateReservoirSample(inout Reservoir reservoir, LightSample candidate, float weight, float countMultiplier) {
+        reservoir.sum_of_weights += weight;
+//      reservoir.sum_of_weights += weight;
+        reservoir.sample_count += countMultiplier;
+//      reservoir.sample_count += countMultiplier;
+        if (weight > 0.0 && rand() * reservoir.sum_of_weights < weight) {
+//      if (weight > 0.0 && rand() * reservoir.sum_of_weights < weight) {
+            reservoir.selected_sample = candidate;
+//          reservoir.selected_sample = candidate;
+        }
+//      }
+    }
+//  }
+
     // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
 //  // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
     bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
@@ -1674,6 +2256,19 @@
 
     void main() {
 //  void main() {
+        // Stage the NRC EMA weights in shared memory. This runs before the bounds check on purpose:
+//      // Stage the NRC EMA weights in shared memory. This runs before the bounds check on purpose:
+        // barrier() must be reached by every invocation in the workgroup, so no thread may return first.
+//      // barrier() must be reached by every invocation in the workgroup, so no thread may return first.
+        for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
+//      for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
+            shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+//          shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+        }
+//      }
+        barrier();
+//      barrier();
+
         ivec2 pixelCoordinates = ivec2(gl_GlobalInvocationID.xy);
 //      ivec2 pixelCoordinates = ivec2(gl_GlobalInvocationID.xy);
         ivec2 dimensions = imageSize(textureOutput);
@@ -1721,6 +2316,10 @@
 //      vec3 hitPoint = vec3(0.0);
         bool lastSkippedNEE = false;
 //      bool lastSkippedNEE = false;
+        bool lastRanReSTIR = false;
+//      bool lastRanReSTIR = false;
+        int diffuseBounceCount = 0;
+//      int diffuseBounceCount = 0;
 
         for (int depth = 0; depth < maxDepth; depth++) {
 //      for (int depth = 0; depth < maxDepth; depth++) {
@@ -1729,6 +2328,18 @@
 
             if (depth == 0) {
 //          if (depth == 0) {
+                if (uReSTIREnabled) {
+//              if (uReSTIREnabled) {
+                    uint totalPixels = uint(uResolution.x * uResolution.y);
+//                  uint totalPixels = uint(uResolution.x * uResolution.y);
+                    uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+//                  uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                    uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+//                  uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+                    sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+//                  sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+                }
+//              }
                 // Hybrid Start: Fetch base surface properties from G-Buffer to avoid first-hit traversal overhead
 //              // Hybrid Start: Fetch base surface properties from G-Buffer to avoid first-hit traversal overhead
                 vec4 sampleGlobalPosition = imageLoad(textureGeometryGlobalPosition, pixelCoordinates);
@@ -1825,8 +2436,8 @@
 //              if (depth == 0 || lastWasDelta) {
                     accumulatedColor += attenuation * emittedRadiance;
 //                  accumulatedColor += attenuation * emittedRadiance;
-                } else {
-//              } else {
+                } else if (!lastRanReSTIR) {
+//              } else if (!lastRanReSTIR) {
                     vec3 lightHitNormal = normalize((currentRay.origin + currentRay.direction * lightHit.distanceToHit) - uPointLights[lightHit.lightIndex].position);
 //                  vec3 lightHitNormal = normalize((currentRay.origin + currentRay.direction * lightHit.distanceToHit) - uPointLights[lightHit.lightIndex].position);
                     float cosLightAngle = max(0.0, dot(lightHitNormal, -currentRay.direction));
@@ -1890,6 +2501,18 @@
 //          if (rayHitResult.hitTriangleIndex == -1) {
                 // Sky
 //              // Sky
+                if (depth == 0 && uReSTIREnabled) {
+//              if (depth == 0 && uReSTIREnabled) {
+                    uint totalPixels = uint(uResolution.x * uResolution.y);
+//                  uint totalPixels = uint(uResolution.x * uResolution.y);
+                    uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+//                  uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                    uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+//                  uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+                    sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+//                  sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+                }
+//              }
                 vec3 skyRadiance = getSkyColor(currentRay.direction);
 //              vec3 skyRadiance = getSkyColor(currentRay.direction);
                 accumulatedColor += attenuation * skyRadiance;
@@ -1988,10 +2611,263 @@
             pathRoughness = max(pathRoughness, roughness);
 //          pathRoughness = max(pathRoughness, roughness);
 
+            // Spatiotemporal ReSTIR Direct Illumination (ST-ReSTIR DI)
+//          // Spatiotemporal ReSTIR Direct Illumination (ST-ReSTIR DI)
+            bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
+//          bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
+            bool skipNEE = isSpecularDelta;
+//          bool skipNEE = isSpecularDelta;
+            bool ranReSTIR = false;
+//          bool ranReSTIR = false;
+            // Gate on the texture-resolved metallic, not material.metallic: the raw scalar is a 1.0
+//          // Gate on the texture-resolved metallic, not material.metallic: the raw scalar is a 1.0
+            // placeholder on every material that carries a metallic map, which would switch ReSTIR
+//          // placeholder on every material that carries a metallic map, which would switch ReSTIR
+            // off across most of the scene.
+//          // off across most of the scene.
+            bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !skipNEE && metallic < 0.99 && material.transmission < 0.01;
+//          bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !skipNEE && metallic < 0.99 && material.transmission < 0.01;
+            if (executeReSTIR) {
+//          if (executeReSTIR) {
+                uint totalPixels = uint(uResolution.x * uResolution.y);
+//              uint totalPixels = uint(uResolution.x * uResolution.y);
+                uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+//              uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                uint previousFrameOffset = ((uint(uFrameCount) + 1u) % 2u) * totalPixels;
+//              uint previousFrameOffset = ((uint(uFrameCount) + 1u) % 2u) * totalPixels;
+                uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+//              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+
+                // Variable Rate Tracing: decide this pixel's rate class and whether it owns the ray this frame.
+//              // Variable Rate Tracing: decide this pixel's rate class and whether it owns the ray this frame.
+                uint vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, material.emissive);
+//              uint vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, material.emissive);
+                bool isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
+//              bool isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
+
+                Reservoir pixelReservoir;
+//              Reservoir pixelReservoir;
+//              Reservoir pixelReservoir;
+                pixelReservoir.sum_of_weights = 0.0;
+//              pixelReservoir.sum_of_weights = 0.0;
+                pixelReservoir.sample_count = 0.0;
+//              pixelReservoir.sample_count = 0.0;
+                pixelReservoir.contribution_weight = 0.0;
+//              pixelReservoir.contribution_weight = 0.0;
+                pixelReservoir.surface_depth = rayHitResult.hitDistance;
+//              pixelReservoir.surface_depth = rayHitResult.hitDistance;
+                pixelReservoir.surface_normal = rayHitResult.hitSurfaceNormal;
+//              pixelReservoir.surface_normal = rayHitResult.hitSurfaceNormal;
+                pixelReservoir.rate_and_flags = vrtRate | (isActiveTrace ? 0x80u : 0u);
+//              pixelReservoir.rate_and_flags = vrtRate | (isActiveTrace ? 0x80u : 0u);
+                pixelReservoir.selected_sample.position = vec3(0.0);
+//              pixelReservoir.selected_sample.position = vec3(0.0);
+                pixelReservoir.selected_sample.padding1 = 0.0;
+//              pixelReservoir.selected_sample.padding1 = 0.0;
+                pixelReservoir.selected_sample.normal = vec3(0.0, 1.0, 0.0);
+//              pixelReservoir.selected_sample.normal = vec3(0.0, 1.0, 0.0);
+                pixelReservoir.selected_sample.padding2 = 0.0;
+//              pixelReservoir.selected_sample.padding2 = 0.0;
+                pixelReservoir.selected_sample.emission = vec3(0.0);
+//              pixelReservoir.selected_sample.emission = vec3(0.0);
+                pixelReservoir.selected_sample.probability_density = 0.0;
+//              pixelReservoir.selected_sample.probability_density = 0.0;
+
+                vec3 viewDirection = -currentRay.direction;
+//              vec3 viewDirection = -currentRay.direction;
+
+                // Step 1: Initial Local Candidate Generation (only for the pixel that owns this frame's ray)
+//              // Step 1: Initial Local Candidate Generation (only for the pixel that owns this frame's ray)
+                if (isActiveTrace) {
+//              if (isActiveTrace) {
+                    LightSample candidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+//                  LightSample candidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+                    float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+//                  float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                    float candidateWeight = (candidate.probability_density > 0.0) ? (targetPdfCandidate / candidate.probability_density) : 0.0;
+//                  float candidateWeight = (candidate.probability_density > 0.0) ? (targetPdfCandidate / candidate.probability_density) : 0.0;
+                    updateReservoirSample(pixelReservoir, candidate, candidateWeight, 1.0);
+//                  updateReservoirSample(pixelReservoir, candidate, candidateWeight, 1.0);
+                }
+//              }
+
+                // Step 2: Spatiotemporal Reuse
+//              // Step 2: Spatiotemporal Reuse
+                if (uFrameCount > 1) {
+//              if (uFrameCount > 1) {
+                    Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + pixelIndex];
+//                  Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + pixelIndex];
+                    if (previousReservoir.sample_count > 0.0) {
+//                  if (previousReservoir.sample_count > 0.0) {
+                        float depthDiff = abs(previousReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
+//                      float depthDiff = abs(previousReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
+                        float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+//                      float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+                        if (depthDiff < 0.1 && normalDot > 0.9) {
+//                      if (depthDiff < 0.1 && normalDot > 0.9) {
+                            // Pixels that skipped their own trace this frame are allowed a longer history.
+//                          // Pixels that skipped their own trace this frame are allowed a longer history.
+                            float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
+//                          float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
+                            previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
+//                          previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
+                            float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+//                          float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                            updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
+//                          updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
+                        }
+//                      }
+                    }
+//                  }
+
+                    // Spatial reuse compensates for the missing local candidate on non-traced pixels.
+//                  // Spatial reuse compensates for the missing local candidate on non-traced pixels.
+                    int spatialTapCount = isActiveTrace ? 3 : 5;
+//                  int spatialTapCount = isActiveTrace ? 3 : 5;
+                    for (int tap = 0; tap < spatialTapCount; tap++) {
+//                  for (int tap = 0; tap < spatialTapCount; tap++) {
+                        float radius = sqrt(rand()) * 30.0;
+//                      float radius = sqrt(rand()) * 30.0;
+                        float theta = rand() * TWO_PI;
+//                      float theta = rand() * TWO_PI;
+                        int neighborX = clamp(pixelCoordinates.x + int(radius * cos(theta)), 0, uResolution.x - 1);
+//                      int neighborX = clamp(pixelCoordinates.x + int(radius * cos(theta)), 0, uResolution.x - 1);
+                        int neighborY = clamp(pixelCoordinates.y + int(radius * sin(theta)), 0, uResolution.y - 1);
+//                      int neighborY = clamp(pixelCoordinates.y + int(radius * sin(theta)), 0, uResolution.y - 1);
+                        uint neighborIndex = uint(neighborY * uResolution.x + neighborX);
+//                      uint neighborIndex = uint(neighborY * uResolution.x + neighborX);
+                        Reservoir spatialReservoir = sampleReservoirs[previousFrameOffset + neighborIndex];
+//                      Reservoir spatialReservoir = sampleReservoirs[previousFrameOffset + neighborIndex];
+                        if (spatialReservoir.sample_count > 0.0) {
+//                      if (spatialReservoir.sample_count > 0.0) {
+                            float depthDiff = abs(spatialReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
+//                          float depthDiff = abs(spatialReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
+                            float normalDot = dot(spatialReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+//                          float normalDot = dot(spatialReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+                            if (depthDiff < 0.1 && normalDot > 0.9) {
+//                          if (depthDiff < 0.1 && normalDot > 0.9) {
+                                spatialReservoir.sample_count = min(spatialReservoir.sample_count, 20.0);
+//                              spatialReservoir.sample_count = min(spatialReservoir.sample_count, 20.0);
+                                float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+//                              float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                                updateReservoirSample(pixelReservoir, spatialReservoir.selected_sample, targetPdfSpatial * spatialReservoir.contribution_weight * spatialReservoir.sample_count, spatialReservoir.sample_count);
+//                              updateReservoirSample(pixelReservoir, spatialReservoir.selected_sample, targetPdfSpatial * spatialReservoir.contribution_weight * spatialReservoir.sample_count, spatialReservoir.sample_count);
+                            }
+//                          }
+                        }
+//                      }
+                    }
+//                  }
+                }
+//              }
+
+                // Fallback candidate: a non-traced pixel with no usable history would otherwise stay black.
+//              // Fallback candidate: a non-traced pixel with no usable history would otherwise stay black.
+                if (pixelReservoir.sample_count == 0.0) {
+//              if (pixelReservoir.sample_count == 0.0) {
+                    LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+//                  LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+                    float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+//                  float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                    float fallbackWeight = (fallbackCandidate.probability_density > 0.0) ? (targetPdfFallback / fallbackCandidate.probability_density) : 0.0;
+//                  float fallbackWeight = (fallbackCandidate.probability_density > 0.0) ? (targetPdfFallback / fallbackCandidate.probability_density) : 0.0;
+                    updateReservoirSample(pixelReservoir, fallbackCandidate, fallbackWeight, 1.0);
+//                  updateReservoirSample(pixelReservoir, fallbackCandidate, fallbackWeight, 1.0);
+                }
+//              }
+
+                // Step 3: Finalize Weights
+//              // Step 3: Finalize Weights
+                float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+//              float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                float denom = pixelReservoir.sample_count * targetPdfFinal;
+//              float denom = pixelReservoir.sample_count * targetPdfFinal;
+                pixelReservoir.contribution_weight = (denom > 0.0) ? (pixelReservoir.sum_of_weights / denom) : 0.0;
+//              pixelReservoir.contribution_weight = (denom > 0.0) ? (pixelReservoir.sum_of_weights / denom) : 0.0;
+                sampleReservoirs[currentFrameOffset + pixelIndex] = pixelReservoir;
+//              sampleReservoirs[currentFrameOffset + pixelIndex] = pixelReservoir;
+
+                // Step 4: Resolve Visibility & Direct Illumination
+//              // Step 4: Resolve Visibility & Direct Illumination
+                if (targetPdfFinal > 0.0) {
+//              if (targetPdfFinal > 0.0) {
+                    vec3 toLight = pixelReservoir.selected_sample.position - hitPoint;
+//                  vec3 toLight = pixelReservoir.selected_sample.position - hitPoint;
+                    float distanceToLight = length(toLight);
+//                  float distanceToLight = length(toLight);
+                    vec3 lightDirection = toLight / max(distanceToLight, 1.0e-4);
+//                  vec3 lightDirection = toLight / max(distanceToLight, 1.0e-4);
+                    float surfaceCosine = max(0.0, dot(shadingNormal, lightDirection));
+//                  float surfaceCosine = max(0.0, dot(shadingNormal, lightDirection));
+                    float lightCosine = max(0.0, dot(pixelReservoir.selected_sample.normal, -lightDirection));
+//                  float lightCosine = max(0.0, dot(pixelReservoir.selected_sample.normal, -lightDirection));
+                    if (surfaceCosine > 0.0 && lightCosine > 0.0 && dot(rayHitResult.hitSurfaceNormal, lightDirection) > 0.0) {
+//                  if (surfaceCosine > 0.0 && lightCosine > 0.0 && dot(rayHitResult.hitSurfaceNormal, lightDirection) > 0.0) {
+                        Ray shadowRay;
+//                      Ray shadowRay;
+                        shadowRay.origin = hitPoint;
+//                      shadowRay.origin = hitPoint;
+                        shadowRay.direction = lightDirection;
+//                      shadowRay.direction = lightDirection;
+                        Interval shadowInterval;
+//                      Interval shadowInterval;
+                        shadowInterval.min = EPSILON_OFFSET;
+//                      shadowInterval.min = EPSILON_OFFSET;
+                        shadowInterval.max = distanceToLight - EPSILON_OFFSET;
+//                      shadowInterval.max = distanceToLight - EPSILON_OFFSET;
+
+                        if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//                      if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+                            float unusedPdf;
+//                          float unusedPdf;
+                            vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, material.transmission, unusedPdf);
+//                          vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, material.transmission, unusedPdf);
+                            vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
+//                          vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
+                            directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
+//                          directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
+                            accumulatedColor += attenuation * directLight;
+//                          accumulatedColor += attenuation * directLight;
+                            bounceDirectRadiance += directLight;
+//                          bounceDirectRadiance += directLight;
+                        }
+//                      }
+                    }
+//                  }
+                }
+//              }
+
+                // Variable Rate Tracing heatmap overlay
+//              // Variable Rate Tracing heatmap overlay
+                if (uVRTVisualize) {
+//              if (uVRTVisualize) {
+                    accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
+//                  accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
+                }
+//              }
+
+                skipNEE = true;
+//              skipNEE = true;
+                ranReSTIR = true;
+//              ranReSTIR = true;
+            } else if (depth == 0 && uReSTIREnabled) {
+//          } else if (depth == 0 && uReSTIREnabled) {
+                uint totalPixels = uint(uResolution.x * uResolution.y);
+//              uint totalPixels = uint(uResolution.x * uResolution.y);
+                uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+//              uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+//              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
+                sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+//              sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+            }
+//          }
+
+            // NRC training records are collected by the dedicated nrc_gather_cs.glsl pass.
+//          // NRC training records are collected by the dedicated nrc_gather_cs.glsl pass.
+
             // Direct Illumination (Next Event Estimation) with MIS
 //          // Direct Illumination (Next Event Estimation) with MIS
-            bool skipNEE = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
-//          bool skipNEE = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
             if (uPointLightCount > 0 && !skipNEE) {
 //          if (uPointLightCount > 0 && !skipNEE) {
                 float lightSelectionRandom = rand();
@@ -2116,21 +2992,28 @@
             }
 //          }
 
+            // Neural Radiance Cache: terminate the path and read the remaining indirect illumination out
+//          // Neural Radiance Cache: terminate the path and read the remaining indirect illumination out
+            // of the cache. The network regresses outgoing radiance, so it is added without re-applying
+//          // of the cache. The network regresses outgoing radiance, so it is added without re-applying
+            // the surface albedo. Experiment001 multiplies by base_color here, which double counts the
+//          // the surface albedo. Experiment001 multiplies by base_color here, which double counts the
+            // albedo its own training target already baked in.
+//          // albedo its own training target already baked in.
+            if (uNRCEnabled && diffuseBounceCount >= 1 && !scatterIsDelta && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05) {
+//          if (uNRCEnabled && diffuseBounceCount >= 1 && !scatterIsDelta && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05) {
+                accumulatedColor += attenuation * evaluateNeuralRadianceCache(hitPoint, rayHitResult.hitSurfaceNormal);
+//              accumulatedColor += attenuation * evaluateNeuralRadianceCache(hitPoint, rayHitResult.hitSurfaceNormal);
+                break;
+//              break;
+            }
+//          }
             if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
 //          if (depth >= 1 && uCacheBlendFactor > 0.0 && !scatterIsDelta) {
                 writeCache(hitPoint, rayHitResult.hitSurfaceNormal, bounceDirectRadiance);
 //              writeCache(hitPoint, rayHitResult.hitSurfaceNormal, bounceDirectRadiance);
             }
 //          }
-
-            /*
-            if (!isScattered) {
-//          if (!isScattered) {
-                break;
-//              break;
-            }
-//          }
-            */
 
             attenuation *= scatterAttenuation;
 //          attenuation *= scatterAttenuation;
@@ -2160,8 +3043,16 @@
 //          lastBrdfPdfSolidAngle = scatterPdf;
             lastWasDelta = scatterIsDelta;
 //          lastWasDelta = scatterIsDelta;
-            lastSkippedNEE = skipNEE;
-//          lastSkippedNEE = skipNEE;
+            if (!scatterIsDelta) {
+//          if (!scatterIsDelta) {
+                diffuseBounceCount++;
+//              diffuseBounceCount++;
+            }
+//          }
+            lastSkippedNEE = isSpecularDelta;
+//          lastSkippedNEE = isSpecularDelta;
+            lastRanReSTIR = ranReSTIR;
+//          lastRanReSTIR = ranReSTIR;
         }
 //      }
 

@@ -82,6 +82,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.last_view_matrix: rr.Matrix44 = None
         self.render_mode: RenderMode = RenderMode.PATH_TRACE
 #       self.render_mode: RenderMode = RenderMode.PATH_TRACE
+        self.is_nrc_enabled: bool = True
+#       self.is_nrc_enabled: bool = True
+        self.is_restir_enabled: bool = True
+#       self.is_restir_enabled: bool = True
+        self.is_vrt_enabled: bool = True
+#       self.is_vrt_enabled: bool = True
+        self.is_vrt_visualize: bool = False
+#       self.is_vrt_visualize: bool = False
+        self.nrc_training_step: int = 0
+#       self.nrc_training_step: int = 0
 
         # -----------------------------
 #       # -----------------------------
@@ -270,6 +280,26 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
         self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
 #       self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
+
+        # -----------------------------
+#       # -----------------------------
+        # 3b. Compute Shader (NRC Training Passes)
+#       # 3b. Compute Shader (NRC Training Passes)
+        # -----------------------------
+#       # -----------------------------
+        nrc_gather_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_gather_cs.glsl"
+#       nrc_gather_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_gather_cs.glsl"
+        nrc_gather_cs_code: str = resolve_includes(nrc_gather_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       nrc_gather_cs_code: str = resolve_includes(nrc_gather_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_nrc_gather: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_gather_cs_code)
+#       self.program_nrc_gather: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_gather_cs_code)
+
+        nrc_train_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_train_cs.glsl"
+#       nrc_train_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_train_cs.glsl"
+        nrc_train_cs_code: str = resolve_includes(nrc_train_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       nrc_train_cs_code: str = resolve_includes(nrc_train_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
+#       self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
 
         # -----------------------------
 #       # -----------------------------
@@ -756,6 +786,42 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 #       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
 
+        # NRC input-domain normalisation, derived from the BVH root AABB (bvh_data node 0 is
+#       # NRC input-domain normalisation, derived from the BVH root AABB (bvh_data node 0 is
+        # [aabb_min.xyz, left_child, aabb_max.xyz, right_child] as float32).
+#       # [aabb_min.xyz, left_child, aabb_max.xyz, right_child] as float32).
+        # The MLP's frequency positional encoding was designed in Experiment001 for a unit-scale
+#       # The MLP's frequency positional encoding was designed in Experiment001 for a unit-scale
+        # Cornell box, where a bare position * 0.5 landed inside roughly [-0.75, 0.75]. This scene is
+#       # Cornell box, where a bare position * 0.5 landed inside roughly [-0.75, 0.75]. This scene is
+        # ~20 units across, so the same constant would make sin/cos of the position alias many times
+#       # ~20 units across, so the same constant would make sin/cos of the position alias many times
+        # over and the network could not fit it. Map the scene AABB onto that same range instead.
+#       # over and the network could not fit it. Map the scene AABB onto that same range instead.
+        if len(bvh_data) >= 32:
+#       if len(bvh_data) >= 32:
+            bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
+#           bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
+            scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
+#           scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
+            scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
+#           scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
+        else:
+#       else:
+            scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+#           scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+            scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+#           scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
+#       scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
+        scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
+#       scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
+        self.nrc_position_offset: vec3f32 = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
+#       self.nrc_position_offset: vec3f32 = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
+        self.nrc_position_scale: float = 1.5 / scene_max_extent
+#       self.nrc_position_scale: float = 1.5 / scene_max_extent
+        print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
+#       print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
         cache_entry_count: int = 131072
 #       cache_entry_count: int = 131072
         # 3 vec4s per entry (radiance+count, position+key, normal+frame): the reserved 4th vec4
@@ -768,6 +834,33 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       cache_floats_per_entry: int = 12
         self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
 #       self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+
+        # 4. Spatiotemporal ReSTIR Reservoirs Buffer (double-buffered: 2 frames)
+#       # 4. Spatiotemporal ReSTIR Reservoirs Buffer (double-buffered: 2 frames)
+        reservoir_floats_per_item: int = 20
+#       reservoir_floats_per_item: int = 20
+        w_res, h_res = self.window_size
+#       w_res, h_res = self.window_size
+        self.ssbo_sample_reservoirs: mgl.Buffer = self.ctx.buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+#       self.ssbo_sample_reservoirs: mgl.Buffer = self.ctx.buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+
+        # 5. Neural Radiance Cache (NRC) Weights Buffer: 4556 floats total
+#       # 5. Neural Radiance Cache (NRC) Weights Buffer: 4556 floats total
+        self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
+#       self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
+
+        # 6. NRC Training Records Buffer: 8192 records * 9 floats
+#       # 6. NRC Training Records Buffer: 8192 records * 9 floats
+        self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
+#       self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
+
+        # 7. NRC Training Counter Buffer: 1 uint32 atomic counter
+#       # 7. NRC Training Counter Buffer: 1 uint32 atomic counter
+        self.ssbo_nrc_training_count: mgl.Buffer = self.ctx.buffer(data=np.zeros(1, dtype=np.uint32).tobytes())
+#       self.ssbo_nrc_training_count: mgl.Buffer = self.ctx.buffer(data=np.zeros(1, dtype=np.uint32).tobytes())
+
+        self.reset_neural_cache_weights()
+#       self.reset_neural_cache_weights()
 
         # Single VAO for the entire scene
 #       # Single VAO for the entire scene
@@ -1102,6 +1195,39 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # history with undefined (usually black) albedo.
         self.texture_array.use(location=9)
 #       self.texture_array.use(location=9)
+
+    def reset_neural_cache_weights(self) -> None:
+#   def reset_neural_cache_weights(self) -> None:
+        initial_weights: npt.NDArray[np.float32] = np.zeros(4556, dtype=np.float32)
+#       initial_weights: npt.NDArray[np.float32] = np.zeros(4556, dtype=np.float32)
+        def initialize_layer(start_offset: int, inputs: int, outputs: int) -> None:
+#       def initialize_layer(start_offset: int, inputs: int, outputs: int) -> None:
+            distribution_limit: float = float(np.sqrt(2.0 / float(inputs)))
+#           distribution_limit: float = float(np.sqrt(2.0 / float(inputs)))
+            for j in range(inputs * outputs):
+#           for j in range(inputs * outputs):
+                random_val: float = float((np.random.rand() * 2.0 - 1.0) * distribution_limit)
+#               random_val: float = float((np.random.rand() * 2.0 - 1.0) * distribution_limit)
+                initial_weights[start_offset + j] = random_val
+#               initial_weights[start_offset + j] = random_val
+                initial_weights[1139 + start_offset + j] = random_val
+#               initial_weights[1139 + start_offset + j] = random_val
+        initialize_layer(0, 16, 16)
+#       initialize_layer(0, 16, 16)
+        initialize_layer(272, 16, 16)
+#       initialize_layer(272, 16, 16)
+        initialize_layer(544, 16, 16)
+#       initialize_layer(544, 16, 16)
+        initialize_layer(816, 16, 16)
+#       initialize_layer(816, 16, 16)
+        initialize_layer(1088, 16, 3)
+#       initialize_layer(1088, 16, 3)
+        self.ssbo_nrc_weights.write(initial_weights.tobytes())
+#       self.ssbo_nrc_weights.write(initial_weights.tobytes())
+        self.ssbo_nrc_training_count.write(np.zeros(1, dtype=np.uint32).tobytes())
+#       self.ssbo_nrc_training_count.write(np.zeros(1, dtype=np.uint32).tobytes())
+        self.nrc_training_step = 0
+#       self.nrc_training_step = 0
 
     def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
 #   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
@@ -1821,6 +1947,149 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             self.program_shading["uJitter"] = (jitter_x, jitter_y)
 #           self.program_shading["uJitter"] = (jitter_x, jitter_y)
 
+        # Bind ReSTIR reservoirs and NRC buffers
+#       # Bind ReSTIR reservoirs and NRC buffers
+        self.ssbo_sample_reservoirs.bind_to_storage_buffer(binding=10)
+#       self.ssbo_sample_reservoirs.bind_to_storage_buffer(binding=10)
+        self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+#       self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+        self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+#       self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+        self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+#       self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+
+        if "uNRCEnabled" in self.program_shading:
+#       if "uNRCEnabled" in self.program_shading:
+            self.program_shading["uNRCEnabled"] = self.is_nrc_enabled
+#           self.program_shading["uNRCEnabled"] = self.is_nrc_enabled
+        if "uReSTIREnabled" in self.program_shading:
+#       if "uReSTIREnabled" in self.program_shading:
+            self.program_shading["uReSTIREnabled"] = self.is_restir_enabled
+#           self.program_shading["uReSTIREnabled"] = self.is_restir_enabled
+        if "uVRTEnabled" in self.program_shading:
+#       if "uVRTEnabled" in self.program_shading:
+            self.program_shading["uVRTEnabled"] = self.is_vrt_enabled
+#           self.program_shading["uVRTEnabled"] = self.is_vrt_enabled
+        if "uVRTVisualize" in self.program_shading:
+#       if "uVRTVisualize" in self.program_shading:
+            self.program_shading["uVRTVisualize"] = self.is_vrt_visualize
+#           self.program_shading["uVRTVisualize"] = self.is_vrt_visualize
+        if "uNRCPositionOffset" in self.program_shading:
+#       if "uNRCPositionOffset" in self.program_shading:
+            self.program_shading["uNRCPositionOffset"] = self.nrc_position_offset
+#           self.program_shading["uNRCPositionOffset"] = self.nrc_position_offset
+            self.program_shading["uNRCPositionScale"] = self.nrc_position_scale
+#           self.program_shading["uNRCPositionScale"] = self.nrc_position_scale
+        if "uResolution" in self.program_shading:
+#       if "uResolution" in self.program_shading:
+            self.program_shading["uResolution"] = (w, h)
+#           self.program_shading["uResolution"] = (w, h)
+
+        # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
+#       # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
+        if self.is_nrc_enabled:
+#       if self.is_nrc_enabled:
+            # 1. Gather pass: collect training records from the scene
+#           # 1. Gather pass: collect training records from the scene
+            self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
+#           self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
+            self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
+#           self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
+            self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+#           self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+            self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
+#           self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
+            self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
+#           self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
+            self.ssbo_materials.bind_to_storage_buffer(binding=8)
+#           self.ssbo_materials.bind_to_storage_buffer(binding=8)
+            self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+#           self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+            self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+#           self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+            self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+#           self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+
+            if "uTrainingStep" in self.program_nrc_gather:
+#           if "uTrainingStep" in self.program_nrc_gather:
+                self.program_nrc_gather["uTrainingStep"] = self.nrc_training_step
+#               self.program_nrc_gather["uTrainingStep"] = self.nrc_training_step
+            if "uNRCPositionOffset" in self.program_nrc_gather:
+#           if "uNRCPositionOffset" in self.program_nrc_gather:
+                self.program_nrc_gather["uNRCPositionOffset"] = self.nrc_position_offset
+#               self.program_nrc_gather["uNRCPositionOffset"] = self.nrc_position_offset
+                self.program_nrc_gather["uNRCPositionScale"] = self.nrc_position_scale
+#               self.program_nrc_gather["uNRCPositionScale"] = self.nrc_position_scale
+            if "uResolution" in self.program_nrc_gather:
+#           if "uResolution" in self.program_nrc_gather:
+                self.program_nrc_gather["uResolution"] = (w, h)
+#               self.program_nrc_gather["uResolution"] = (w, h)
+            if "uPointLightCount" in self.program_nrc_gather:
+#           if "uPointLightCount" in self.program_nrc_gather:
+                self.program_nrc_gather["uPointLightCount"] = len(point_lights)
+#               self.program_nrc_gather["uPointLightCount"] = len(point_lights)
+                cumulative_prob = 0.0
+#               cumulative_prob = 0.0
+                for i, light in enumerate(point_lights):
+#               for i, light in enumerate(point_lights):
+                    pos = light["position"]
+#                   pos = light["position"]
+                    color = light["color"]
+#                   color = light["color"]
+                    r = light["radius"]
+#                   r = light["radius"]
+                    power = get_light_power(light)
+#                   power = get_light_power(light)
+                    prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
+#                   prob = power / total_power if total_power > 0.0 else 1.0 / len(point_lights)
+                    cumulative_prob += prob
+#                   cumulative_prob += prob
+                    if f"uPointLights[{i}].position" in self.program_nrc_gather:
+#                   if f"uPointLights[{i}].position" in self.program_nrc_gather:
+                        self.program_nrc_gather[f"uPointLights[{i}].position"] = pos
+#                       self.program_nrc_gather[f"uPointLights[{i}].position"] = pos
+                        self.program_nrc_gather[f"uPointLights[{i}].color"] = color
+#                       self.program_nrc_gather[f"uPointLights[{i}].color"] = color
+                        self.program_nrc_gather[f"uPointLights[{i}].radius"] = r
+#                       self.program_nrc_gather[f"uPointLights[{i}].radius"] = r
+                        if f"uPointLights[{i}].cdf" in self.program_nrc_gather:
+#                       if f"uPointLights[{i}].cdf" in self.program_nrc_gather:
+                            self.program_nrc_gather[f"uPointLights[{i}].cdf"] = cumulative_prob
+#                           self.program_nrc_gather[f"uPointLights[{i}].cdf"] = cumulative_prob
+                            self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
+#                           self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
+
+            self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
+#           self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
+            self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+#           self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+
+            # 2. Train MLP pass: mini-batch SGD with Adam optimizer on GPU
+#           # 2. Train MLP pass: mini-batch SGD with Adam optimizer on GPU
+            self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+#           self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
+            self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+#           self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
+            self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+#           self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
+            if "uTrainingStep" in self.program_nrc_train:
+#           if "uTrainingStep" in self.program_nrc_train:
+                self.program_nrc_train["uTrainingStep"] = self.nrc_training_step
+#               self.program_nrc_train["uTrainingStep"] = self.nrc_training_step
+            if "uNRCPositionOffset" in self.program_nrc_train:
+#           if "uNRCPositionOffset" in self.program_nrc_train:
+                self.program_nrc_train["uNRCPositionOffset"] = self.nrc_position_offset
+#               self.program_nrc_train["uNRCPositionOffset"] = self.nrc_position_offset
+                self.program_nrc_train["uNRCPositionScale"] = self.nrc_position_scale
+#               self.program_nrc_train["uNRCPositionScale"] = self.nrc_position_scale
+
+            self.program_nrc_train.run(group_x=1, group_y=1, group_z=1)
+#           self.program_nrc_train.run(group_x=1, group_y=1, group_z=1)
+            self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+#           self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+            self.nrc_training_step += 1
+#           self.nrc_training_step += 1
+
         gx, gy = (w + 15) // 16, (h + 15) // 16
 #       gx, gy = (w + 15) // 16, (h + 15) // 16
         self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
@@ -1919,6 +2188,34 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           elif key == self.wnd.keys.NUMBER_4:
                 self.render_mode = RenderMode.TANGENT
 #               self.render_mode = RenderMode.TANGENT
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.N:
+#           elif key == self.wnd.keys.N:
+                self.is_nrc_enabled = not self.is_nrc_enabled
+#               self.is_nrc_enabled = not self.is_nrc_enabled
+                if self.is_nrc_enabled:
+#               if self.is_nrc_enabled:
+                    self.reset_neural_cache_weights()
+#                   self.reset_neural_cache_weights()
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.R:
+#           elif key == self.wnd.keys.R:
+                self.is_restir_enabled = not self.is_restir_enabled
+#               self.is_restir_enabled = not self.is_restir_enabled
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.V:
+#           elif key == self.wnd.keys.V:
+                self.is_vrt_enabled = not self.is_vrt_enabled
+#               self.is_vrt_enabled = not self.is_vrt_enabled
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.H:
+#           elif key == self.wnd.keys.H:
+                self.is_vrt_visualize = not self.is_vrt_visualize
+#               self.is_vrt_visualize = not self.is_vrt_visualize
                 self.frame_count = 0
 #               self.frame_count = 0
             pass
