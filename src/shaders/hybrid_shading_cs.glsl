@@ -1538,8 +1538,8 @@
 
     // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
 //  // Stochastic Importance Sampling: chooses a secondary ray direction by first stochastically picking a lobe — Fresnel-weighted specular, diffuse, or transmission — then sampling that lobe according to its matching BSDF PDF: GGX half-vectors for specular reflection and refraction, a cosine-weighted hemisphere for diffuse. Concentrating samples where the integrand is large minimizes Monte Carlo variance. It also resolves Walter-style microfacet refraction with a total-internal-reflection fallback, returns the path throughput f·cos θ / pdf folded into a single attenuation, and flags delta (perfectly specular/transmissive) bounces so the integrator skips Next Event Estimation on them.
-    bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
-//  bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
+    bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out float outTransmission, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
+//  bool scatterPrincipled(Ray incomingRay, RayHitResult hitResult, Material material, float pathRoughnessFloor, out vec3 outAlbedo, out float outRoughness, out float outMetallic, out float outTransmission, out vec3 outShadingNormal, out vec3 outEmission, out vec3 outScatteredDirection, out vec3 outAttenuation, out float outPdf, out bool outIsDelta) {
         outScatteredDirection = vec3(0.0);
 //      outScatteredDirection = vec3(0.0);
         outAttenuation = vec3(0.0);
@@ -1550,6 +1550,12 @@
 //      outPdf = 0.0;
         outIsDelta = false;
 //      outIsDelta = false;
+        // Seeded from the raw scalar so the value is defined on every early return below; the packed
+//      // Seeded from the raw scalar so the value is defined on every early return below; the packed
+        // ORM fetch further down overwrites it with the texture-resolved value where a map exists.
+//      // ORM fetch further down overwrites it with the texture-resolved value where a map exists.
+        outTransmission = material.transmission;
+//      outTransmission = material.transmission;
 
         // Check texture indices
 //      // Check texture indices
@@ -1600,6 +1606,14 @@
 //          material.transmission *= textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
         }
 //      }
+        // Hand the resolved value back. main() gates ReSTIR and the Neural Radiance Cache on it, and
+//      // Hand the resolved value back. main() gates ReSTIR and the Neural Radiance Cache on it, and
+        // material.transmission there is only the raw scalar -- a 1.0 placeholder on any material that
+//      // material.transmission there is only the raw scalar -- a 1.0 placeholder on any material that
+        // carries a transmission map, exactly the trap already fixed for metallic and roughness.
+//      // carries a transmission map, exactly the trap already fixed for metallic and roughness.
+        outTransmission = material.transmission;
+//      outTransmission = material.transmission;
 
         // Roughness annealing (SDS variance mitigation) is applied HERE, after the texture fetch: the old
 //      // Roughness annealing (SDS variance mitigation) is applied HERE, after the texture fetch: the old
@@ -1976,10 +1990,28 @@
 //      // Stage the NRC EMA weights in shared memory. This runs before the bounds check on purpose:
         // barrier() must be reached by every invocation in the workgroup, so no thread may return first.
 //      // barrier() must be reached by every invocation in the workgroup, so no thread may return first.
-        for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
-//      for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
-            shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
-//          shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+        //
+//      //
+        // The copy is skipped outright when the cache is off. uNRCEnabled is a uniform, so this is
+//      // The copy is skipped outright when the cache is off. uNRCEnabled is a uniform, so this is
+        // uniform control flow across the workgroup and the barrier below stays legal; the barrier is
+//      // uniform control flow across the workgroup and the barrier below stays legal; the barrier is
+        // kept outside the guard so it is reached unconditionally either way. This saves 1139 scalar
+//      // kept outside the guard so it is reached unconditionally either way. This saves 1139 scalar
+        // SSBO loads per workgroup per frame whenever the Neural Radiance Cache is disabled, and it is
+//      // SSBO loads per workgroup per frame whenever the Neural Radiance Cache is disabled, and it is
+        // safe because the sole reader, evaluateNeuralRadianceCache, is only reached through
+//      // safe because the sole reader, evaluateNeuralRadianceCache, is only reached through
+        // nrcTerminatesPath, which already requires uNRCEnabled.
+//      // nrcTerminatesPath, which already requires uNRCEnabled.
+        if (uNRCEnabled) {
+//      if (uNRCEnabled) {
+            for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
+//          for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 256u) {
+                shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+//              shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+            }
+//          }
         }
 //      }
         barrier();
@@ -1987,8 +2019,20 @@
 
         ivec2 pixelCoordinates = ivec2(gl_GlobalInvocationID.xy);
 //      ivec2 pixelCoordinates = ivec2(gl_GlobalInvocationID.xy);
-        ivec2 dimensions = imageSize(textureOutput);
-//      ivec2 dimensions = imageSize(textureOutput);
+        // Bounds-check against uResolution rather than imageSize(textureOutput). Both describe the
+//      // Bounds-check against uResolution rather than imageSize(textureOutput). Both describe the
+        // same extent and agree today only because the window is a fixed size, but they are two
+//      // same extent and agree today only because the window is a fixed size, but they are two
+        // independent sources of truth and only one of them is the one that matters here: every
+//      // independent sources of truth and only one of them is the one that matters here: every
+        // reservoir index below is built from uResolution, and ssbo_sample_reservoirs is sized for
+//      // reservoir index below is built from uResolution, and ssbo_sample_reservoirs is sized for
+        // exactly that many pixels. An out-of-range imageStore is a defined no-op, whereas an
+//      // exactly that many pixels. An out-of-range imageStore is a defined no-op, whereas an
+        // out-of-range SSBO write corrupts memory, so the guard is derived from the buffer's extent.
+//      // out-of-range SSBO write corrupts memory, so the guard is derived from the buffer's extent.
+        ivec2 dimensions = uResolution;
+//      ivec2 dimensions = uResolution;
 
         if (pixelCoordinates.x >= dimensions.x || pixelCoordinates.y >= dimensions.y) {
 //      if (pixelCoordinates.x >= dimensions.x || pixelCoordinates.y >= dimensions.y) {
@@ -2294,6 +2338,8 @@
 //          float roughness;
             float metallic;
 //          float metallic;
+            float transmission;
+//          float transmission;
             vec3 shadingNormal;
 //          vec3 shadingNormal;
             vec3 emission;
@@ -2307,8 +2353,8 @@
             bool scatterIsDelta;
 //          bool scatterIsDelta;
 
-            bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
-//          bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
+            bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, transmission, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
+//          bool isScattered = scatterPrincipled(currentRay, rayHitResult, material, (depth > 0) ? pathRoughness : 0.0, albedo, roughness, metallic, transmission, shadingNormal, emission, scatteredDirection, scatterAttenuation, scatterPdf, scatterIsDelta);
 
             accumulatedColor += attenuation * emission;
 //          accumulatedColor += attenuation * emission;
@@ -2329,8 +2375,8 @@
 
             // Spatiotemporal ReSTIR Direct Illumination (ST-ReSTIR DI)
 //          // Spatiotemporal ReSTIR Direct Illumination (ST-ReSTIR DI)
-            bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
-//          bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
+            bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || transmission > 0.99);
+//          bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || transmission > 0.99);
             // The Neural Radiance Cache regresses total outgoing radiance, direct illumination included.
 //          // The Neural Radiance Cache regresses total outgoing radiance, direct illumination included.
             // Deciding here -- before Next Event Estimation runs -- whether the cache will terminate the
@@ -2351,8 +2397,8 @@
 //          // instead of double counting it, so both now consult this single flag.
             bool nrcTerminatesPath = uNRCEnabled && diffuseBounceCount >= 1 && !isSpecularDelta
 //          bool nrcTerminatesPath = uNRCEnabled && diffuseBounceCount >= 1 && !isSpecularDelta
-                                  && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05;
-//                                && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05;
+                                  && metallic < 0.99 && transmission < 0.01 && roughness >= 0.05;
+//                                && metallic < 0.99 && transmission < 0.01 && roughness >= 0.05;
             bool skipNEE = isSpecularDelta || nrcTerminatesPath;
 //          bool skipNEE = isSpecularDelta || nrcTerminatesPath;
             bool ranReSTIR = false;
@@ -2363,8 +2409,8 @@
 //          // placeholder on every material that carries a metallic map, which would switch ReSTIR
             // off across most of the scene.
 //          // off across most of the scene.
-            bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && material.transmission < 0.01;
-//          bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && material.transmission < 0.01;
+            bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && transmission < 0.01;
+//          bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && transmission < 0.01;
 
             // Variable Rate Tracing rate class for this pixel, and whether it owns the ray this frame.
 //          // Variable Rate Tracing rate class for this pixel, and whether it owns the ray this frame.
@@ -2394,8 +2440,8 @@
 //              // unreachable -- Experiment001's "emitters get full rate" rule holds trivially. Kept
                 // correct-by-construction so the branch behaves if emitters ever stop terminating a path.
 //              // correct-by-construction so the branch behaves if emitters ever stop terminating a path.
-                vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, maxVec3(emission));
-//              vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, maxVec3(emission));
+                vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, transmission, maxVec3(emission));
+//              vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, transmission, maxVec3(emission));
                 isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
 //              isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
             }
@@ -2449,8 +2495,8 @@
 //              if (isActiveTrace) {
                     LightSample candidate = generateLightSampleCandidate(hitPoint);
 //                  LightSample candidate = generateLightSampleCandidate(hitPoint);
-                    float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
-//                  float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                    float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//                  float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
                     float candidateWeight = (candidate.probability_density > 0.0) ? (targetPdfCandidate / candidate.probability_density) : 0.0;
 //                  float candidateWeight = (candidate.probability_density > 0.0) ? (targetPdfCandidate / candidate.probability_density) : 0.0;
                     updateReservoirSample(pixelReservoir, candidate, candidateWeight, 1.0);
@@ -2478,8 +2524,8 @@
 //                          float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
                             previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
 //                          previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
-                            float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
-//                          float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                            float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//                          float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
                             updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
 //                          updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
                         }
@@ -2515,8 +2561,8 @@
 //                          if (depthDiff < 0.1 && normalDot > 0.9) {
                                 spatialReservoir.sample_count = min(spatialReservoir.sample_count, 20.0);
 //                              spatialReservoir.sample_count = min(spatialReservoir.sample_count, 20.0);
-                                float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
-//                              float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                                float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//                              float targetPdfSpatial = evaluateTargetPdf(spatialReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
                                 updateReservoirSample(pixelReservoir, spatialReservoir.selected_sample, targetPdfSpatial * spatialReservoir.contribution_weight * spatialReservoir.sample_count, spatialReservoir.sample_count);
 //                              updateReservoirSample(pixelReservoir, spatialReservoir.selected_sample, targetPdfSpatial * spatialReservoir.contribution_weight * spatialReservoir.sample_count, spatialReservoir.sample_count);
                             }
@@ -2534,8 +2580,8 @@
 //              if (pixelReservoir.sample_count == 0.0) {
                     LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint);
 //                  LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint);
-                    float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
-//                  float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                    float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//                  float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
                     float fallbackWeight = (fallbackCandidate.probability_density > 0.0) ? (targetPdfFallback / fallbackCandidate.probability_density) : 0.0;
 //                  float fallbackWeight = (fallbackCandidate.probability_density > 0.0) ? (targetPdfFallback / fallbackCandidate.probability_density) : 0.0;
                     updateReservoirSample(pixelReservoir, fallbackCandidate, fallbackWeight, 1.0);
@@ -2545,8 +2591,8 @@
 
                 // Step 3: Finalize Weights
 //              // Step 3: Finalize Weights
-                float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
-//              float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
+                float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//              float targetPdfFinal = evaluateTargetPdf(pixelReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
                 float denom = pixelReservoir.sample_count * targetPdfFinal;
 //              float denom = pixelReservoir.sample_count * targetPdfFinal;
                 pixelReservoir.contribution_weight = (denom > 0.0) ? (pixelReservoir.sum_of_weights / denom) : 0.0;
@@ -2607,8 +2653,8 @@
 //                      if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
                             float unusedPdf;
 //                          float unusedPdf;
-                            vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, material.transmission, unusedPdf);
-//                          vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, material.transmission, unusedPdf);
+                            vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, transmission, unusedPdf);
+//                          vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, transmission, unusedPdf);
                             vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
 //                          vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
                             directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
@@ -2744,8 +2790,8 @@
 //                      // Single fused evaluation supplies both the MIS counter-pdf and the BSDF value
                         float brdfPdfSolidAngle;
 //                      float brdfPdfSolidAngle;
-                        vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission, brdfPdfSolidAngle);
-//                      vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, material.transmission, brdfPdfSolidAngle);
+                        vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, transmission, brdfPdfSolidAngle);
+//                      vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, shadowRayDirection, shadingNormal, albedo, roughness, metallic, transmission, brdfPdfSolidAngle);
 
                         // Replaced the Balance Heuristic with the robust Power Heuristic for calculating misWeightNee
 //                      // Replaced the Balance Heuristic with the robust Power Heuristic for calculating misWeightNee

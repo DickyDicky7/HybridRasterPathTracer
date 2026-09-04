@@ -10,6 +10,14 @@
 //  layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
     layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
 //  layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
+    // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.glsl packs the
+//  // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.glsl packs the
+    // interpolated texcoord V there (U lives in the normal target), which is what the material
+//  // interpolated texcoord V there (U lives in the normal target), which is what the material
+    // resolution below needs to sample the same maps the shading pass shades that pixel with.
+//  // resolution below needs to sample the same maps the shading pass shades that pixel with.
+    layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
+//  layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
 
     struct Node {
 //  struct Node {
@@ -155,6 +163,21 @@
     uniform bool uUseHdri;
 //  uniform bool uUseHdri;
 
+    // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
+//  // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
+    // a material's scalar roughness/metallic/albedo, which on any textured material is a placeholder
+//  // a material's scalar roughness/metallic/albedo, which on any textured material is a placeholder
+    // rather than the value the shading pass actually shades with. That mismatch used to be masked by
+//  // rather than the value the shading pass actually shades with. That mismatch used to be masked by
+    // the exact Next Event Estimation term at the vertex the cache terminates a path on; since that
+//  // the exact Next Event Estimation term at the vertex the cache terminates a path on; since that
+    // term is (correctly) suppressed there, the network is the sole source of direct light at that
+//  // term is (correctly) suppressed there, the network is the sole source of direct light at that
+    // vertex and the target has to be built from the same material the renderer will ask about.
+//  // vertex and the target has to be built from the same material the renderer will ask about.
+    uniform sampler2DArray uSceneTextureArray;
+//  uniform sampler2DArray uSceneTextureArray;
+
     // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
 //  // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
     // workgroup at the top of main() so every cache query reads shared memory instead of the SSBO.
@@ -182,6 +205,10 @@
 //  // Required by sky_environment.glsl below; value mirrors hybrid_shading_cs.glsl.
     const float HDRI_CLAMP = 20.0;
 //  const float HDRI_CLAMP = 20.0;
+    // Mirrors hybrid_shading_cs.glsl: the same floor scatterPrincipled clamps sampled roughness to.
+//  // Mirrors hybrid_shading_cs.glsl: the same floor scatterPrincipled clamps sampled roughness to.
+    const float MIN_ROUGHNESS = 0.04;
+//  const float MIN_ROUGHNESS = 0.04;
 
     // Shared with hybrid_shading_cs.glsl so the cache is trained against the same BSDF it is later
     // evaluated with. The directive is deliberately not mirrored into a // comment: the AMD GLSL
@@ -538,8 +565,8 @@
     }
 //  }
 
-    bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex) {
-//  bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex) {
+    bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex, out vec2 outTexcoord, out float outDistance) {
+//  bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex, out vec2 outTexcoord, out float outDistance) {
         vec3 directionSign = sign(direction);
 //      vec3 directionSign = sign(direction);
         directionSign += 1.0 - abs(directionSign);
@@ -657,6 +684,10 @@
 
         outTriangleIndex = hitTriangle;
 //      outTriangleIndex = hitTriangle;
+        outTexcoord = vec2(0.0);
+//      outTexcoord = vec2(0.0);
+        outDistance = closestDist;
+//      outDistance = closestDist;
 
         if (hitTriangle != -1) {
 //      if (hitTriangle != -1) {
@@ -668,6 +699,18 @@
 //          vec3 n1 = vertices[hitTriangle * 3 + 1].normalAndTexcoordV.xyz;
             vec3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
 //          vec3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
+            // Texcoords ride in the w channels of the two position/normal vec4s, barycentric
+//          // Texcoords ride in the w channels of the two position/normal vec4s, barycentric
+            // interpolated with the same weights as the shading normal above.
+//          // interpolated with the same weights as the shading normal above.
+            vec2 t0 = vec2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
+//          vec2 t0 = vec2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
+            vec2 t1 = vec2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
+//          vec2 t1 = vec2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
+            vec2 t2 = vec2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
+//          vec2 t2 = vec2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
+            outTexcoord = (1.0 - bestU - bestV) * t0 + bestU * t1 + bestV * t2;
+//          outTexcoord = (1.0 - bestU - bestV) * t0 + bestU * t1 + bestV * t2;
             vec3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
 //          vec3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
             if (dot(interpolatedNormal, interpolatedNormal) > 1.0e-6) {
@@ -705,10 +748,86 @@
 //  // facing hemisphere (area 2*PI*r*r) and weights by cos at the light, whose expectation over that
     // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
 //  // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
+    // Texture-resolved surface parameters at a hit, mirroring scatterPrincipled in
+//  // Texture-resolved surface parameters at a hit, mirroring scatterPrincipled in
+    // hybrid_shading_cs.glsl term for term: same packed-ORM channel assignment, same sRGB decode on
+//  // hybrid_shading_cs.glsl term for term: same packed-ORM channel assignment, same sRGB decode on
+    // albedo and emissive, same distance-derived LOD, same MIN_ROUGHNESS floor. The two have to agree,
+//  // albedo and emissive, same distance-derived LOD, same MIN_ROUGHNESS floor. The two have to agree,
+    // because the network is trained here and evaluated there; a divergence would make it regress a
+//  // because the network is trained here and evaluated there; a divergence would make it regress a
+    // target the renderer never asks for, and would be invisible in either file on its own.
+//  // target the renderer never asks for, and would be invisible in either file on its own.
+    //
+//  //
+    // The only term deliberately not mirrored is the roughness anneal: pathRoughnessFloor is a
+//  // The only term deliberately not mirrored is the roughness anneal: pathRoughnessFloor is a
+    // property of the camera path being traced, and this pass traces its own short paths.
+//  // property of the camera path being traced, and this pass traces its own short paths.
+    void resolveSurfaceMaterial(Material material, vec2 texcoord, float hitDistance,
+//  void resolveSurfaceMaterial(Material material, vec2 texcoord, float hitDistance,
+                                out vec3 outAlbedo, out float outRoughness, out float outMetallic,
+//                              out vec3 outAlbedo, out float outRoughness, out float outMetallic,
+                                out float outTransmission, out vec3 outEmission) {
+//                              out float outTransmission, out vec3 outEmission) {
+        outAlbedo = material.albedo.rgb;
+//      outAlbedo = material.albedo.rgb;
+        outRoughness = material.roughness;
+//      outRoughness = material.roughness;
+        outMetallic = material.metallic;
+//      outMetallic = material.metallic;
+        outTransmission = material.transmission;
+//      outTransmission = material.transmission;
+
+        float textureLodLevel = max(0.0, log2(hitDistance * 0.1));
+//      float textureLodLevel = max(0.0, log2(hitDistance * 0.1));
+        vec2 scaledTexcoord = texcoord * material.uvScale;
+//      vec2 scaledTexcoord = texcoord * material.uvScale;
+
+        if (material.textureIndexAlbedo > -0.5) {
+//      if (material.textureIndexAlbedo > -0.5) {
+            outAlbedo *= pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, vec3(2.2));
+//          outAlbedo *= pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, vec3(2.2));
+        }
+//      }
+        if (material.textureIndexRoughness > -0.5) {
+//      if (material.textureIndexRoughness > -0.5) {
+            outRoughness = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
+//          outRoughness = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
+        }
+//      }
+        if (material.textureIndexMetallic > -0.5) {
+//      if (material.textureIndexMetallic > -0.5) {
+            outMetallic = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
+//          outMetallic = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
+        }
+//      }
+        if (material.textureIndexTransmission > -0.5) {
+//      if (material.textureIndexTransmission > -0.5) {
+            outTransmission *= textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
+//          outTransmission *= textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
+        }
+//      }
+        outRoughness = max(outRoughness, MIN_ROUGHNESS);
+//      outRoughness = max(outRoughness, MIN_ROUGHNESS);
+
+        if (material.textureIndexEmissive > -0.5) {
+//      if (material.textureIndexEmissive > -0.5) {
+            outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, vec3(2.2));
+//          outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, vec3(2.2));
+        } else {
+//      } else {
+            outEmission = material.emissive * outAlbedo;
+//          outEmission = material.emissive * outAlbedo;
+        }
+//      }
+    }
+//  }
+
     vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
 //  vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-                                vec3 albedo, float roughness, float metallic) {
-//                              vec3 albedo, float roughness, float metallic) {
+                                vec3 albedo, float roughness, float metallic, float transmission) {
+//                              vec3 albedo, float roughness, float metallic, float transmission) {
         if (uPointLightCount <= 0) return vec3(0.0);
 //      if (uPointLightCount <= 0) return vec3(0.0);
 
@@ -760,8 +879,8 @@
 //      float unusedPdf;
         vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
 //      vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
-                                                  albedo, roughness, metallic, 0.0, unusedPdf);
-//                                                albedo, roughness, metallic, 0.0, unusedPdf);
+                                                  albedo, roughness, metallic, transmission, unusedPdf);
+//                                                albedo, roughness, metallic, transmission, unusedPdf);
         return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
 //      return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
     }
@@ -799,12 +918,12 @@
 //  // that contribution -- a bias that grows with how much of the scene sees the sky.
     vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
 //  vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-                               vec3 albedo, float roughness, float metallic) {
-//                             vec3 albedo, float roughness, float metallic) {
+                               vec3 albedo, float roughness, float metallic, float transmission) {
+//                             vec3 albedo, float roughness, float metallic, float transmission) {
         vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
 //      vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
-                                                     albedo, roughness, metallic);
-//                                                   albedo, roughness, metallic);
+                                                     albedo, roughness, metallic, transmission);
+//                                                   albedo, roughness, metallic, transmission);
 
         // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
 //      // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
@@ -827,8 +946,12 @@
 //          vec3 nextHitNormal;
             int nextTriangleIndex;
 //          int nextTriangleIndex;
-            if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
-//          if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
+            vec2 nextTexcoord;
+//          vec2 nextTexcoord;
+            float nextDistance;
+//          float nextDistance;
+            if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex, nextTexcoord, nextDistance)) {
+//          if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex, nextTexcoord, nextDistance)) {
                 // Escaped the geometry: the radiance left along this direction is the environment. The
 //              // Escaped the geometry: the radiance left along this direction is the environment. The
                 // bounce is cosine sampled, so throughput already carries albedo * cos / pdf.
@@ -847,22 +970,52 @@
             Material hitMaterial = materials[hitMaterialIndex];
 //          Material hitMaterial = materials[hitMaterialIndex];
 
-            // Emitters are seen directly by the path tracer; folding them in here would double count.
-//          // Emitters are seen directly by the path tracer; folding them in here would double count.
-            if (hitMaterial.emissive > 0.0 || hitMaterial.textureIndexEmissive >= 0.0) break;
-//          if (hitMaterial.emissive > 0.0 || hitMaterial.textureIndexEmissive >= 0.0) break;
+            // Emissive geometry is a light source for this target, not something to skip. The reasoning
+//          // Emissive geometry is a light source for this target, not something to skip. The reasoning
+            // that emitters are "seen directly by the path tracer" only holds for emitters the camera
+//          // that emitters are "seen directly by the path tracer" only holds for emitters the camera
+            // can reach: hybrid_shading_cs.glsl terminates a path at the vertex it reads the cache on,
+//          // can reach: hybrid_shading_cs.glsl terminates a path at the vertex it reads the cache on,
+            // so nothing downstream ever reaches an emitter beyond it. Dropping the emission here
+//          // so nothing downstream ever reaches an emitter beyond it. Dropping the emission here
+            // deletes it from the render's indirect lighting outright, and estimateDirectLighting above
+//          // deletes it from the render's indirect lighting outright, and estimateDirectLighting above
+            // cannot cover for it either -- that samples uPointLights only, so mesh emitters are never
+//          // cannot cover for it either -- that samples uPointLights only, so mesh emitters are never
+            // next-event sampled at all. This scene lights four cubes purely by material emission.
+//          // next-event sampled at all. This scene lights four cubes purely by material emission.
+            //
+//          //
+            // The colour is whatever scatterPrincipled would have emitted at this vertex, mapped
+//          // The colour is whatever scatterPrincipled would have emitted at this vertex, mapped
+            // emitters included -- resolveSurfaceMaterial reproduces both of its branches.
+//          // emitters included -- resolveSurfaceMaterial reproduces both of its branches.
+            vec3 hitAlbedo;
+//          vec3 hitAlbedo;
+            float hitRoughness;
+//          float hitRoughness;
+            float hitMetallic;
+//          float hitMetallic;
+            float hitTransmission;
+//          float hitTransmission;
+            vec3 hitEmission;
+//          vec3 hitEmission;
+            resolveSurfaceMaterial(hitMaterial, nextTexcoord, nextDistance,
+//          resolveSurfaceMaterial(hitMaterial, nextTexcoord, nextDistance,
+                                   hitAlbedo, hitRoughness, hitMetallic, hitTransmission, hitEmission);
+//                                 hitAlbedo, hitRoughness, hitMetallic, hitTransmission, hitEmission);
 
-            // Same placeholder-scalar caveat as main(): a mapped roughness/metallic only exposes 1.0.
-//          // Same placeholder-scalar caveat as main(): a mapped roughness/metallic only exposes 1.0.
-            float hitRoughness = (hitMaterial.textureIndexRoughness < -0.5) ? hitMaterial.roughness : 0.5;
-//          float hitRoughness = (hitMaterial.textureIndexRoughness < -0.5) ? hitMaterial.roughness : 0.5;
-            float hitMetallic  = (hitMaterial.textureIndexMetallic  < -0.5) ? hitMaterial.metallic  : 0.0;
-//          float hitMetallic  = (hitMaterial.textureIndexMetallic  < -0.5) ? hitMaterial.metallic  : 0.0;
-            vec3 hitAlbedo = hitMaterial.albedo.rgb;
-//          vec3 hitAlbedo = hitMaterial.albedo.rgb;
+            if (hitEmission.r > 0.0 || hitEmission.g > 0.0 || hitEmission.b > 0.0) {
+//          if (hitEmission.r > 0.0 || hitEmission.g > 0.0 || hitEmission.b > 0.0) {
+                targetRadiance += throughput * hitEmission;
+//              targetRadiance += throughput * hitEmission;
+                break;
+//              break;
+            }
+//          }
 
-            bool isCacheableVertex = (hitMetallic <= 0.8 && hitMaterial.transmission <= 0.5 && hitRoughness >= 0.05);
-//          bool isCacheableVertex = (hitMetallic <= 0.8 && hitMaterial.transmission <= 0.5 && hitRoughness >= 0.05);
+            bool isCacheableVertex = (hitMetallic <= 0.8 && hitTransmission <= 0.5 && hitRoughness >= 0.05);
+//          bool isCacheableVertex = (hitMetallic <= 0.8 && hitTransmission <= 0.5 && hitRoughness >= 0.05);
             if (isCacheableVertex) {
 //          if (isCacheableVertex) {
                 // The cache already represents the full outgoing radiance at a vertex (its own target
@@ -886,10 +1039,12 @@
 
             // Mirror or glass: the cache is view dependent there, so carry the path on instead. The
 //          // Mirror or glass: the cache is view dependent there, so carry the path on instead. The
-            // continuation lobe is cosine rather than BSDF-sampled for the same reason the material
-//          // continuation lobe is cosine rather than BSDF-sampled for the same reason the material
-            // scalars are approximated above, namely that this pass has no texture sampler.
-//          // scalars are approximated above, namely that this pass has no texture sampler.
+            // continuation lobe stays cosine rather than BSDF-sampled -- this is a bootstrap estimate
+//          // continuation lobe stays cosine rather than BSDF-sampled -- this is a bootstrap estimate
+            // for a vertex the network is not asked about, and the extra variance of a proper
+//          // for a vertex the network is not asked about, and the extra variance of a proper
+            // specular lobe here would cost more than the bias it removes.
+//          // specular lobe here would cost more than the bias it removes.
             throughput *= hitAlbedo;
 //          throughput *= hitAlbedo;
             rayOrigin = nextHitPoint + nextHitNormal * EPSILON_OFFSET;
@@ -966,18 +1121,33 @@
         if (dot(normSample.xyz, normSample.xyz) < 1.0e-6) return;
 //      if (dot(normSample.xyz, normSample.xyz) < 1.0e-6) return;
 
+        vec4 tangentSample = imageLoad(textureGeometryGlobalTangent, pixelCoord);
+//      vec4 tangentSample = imageLoad(textureGeometryGlobalTangent, pixelCoord);
+
         vec3 currentPoint = posSample.xyz;
 //      vec3 currentPoint = posSample.xyz;
         vec3 currentNormal = normalize(normSample.xyz);
 //      vec3 currentNormal = normalize(normSample.xyz);
-        vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
-//      vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
         int currentTriangle = triangleIndex;
 //      int currentTriangle = triangleIndex;
         vec3 toSurface = currentPoint - uCameraGlobalPosition;
 //      vec3 toSurface = currentPoint - uCameraGlobalPosition;
+        float currentDistance = length(toSurface);
+//      float currentDistance = length(toSurface);
         vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
 //      vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
+        // U and V are packed into the w channels of the normal and tangent targets, matching the
+//      // U and V are packed into the w channels of the normal and tangent targets, matching the
+        // reconstruction hybrid_shading_cs.glsl does for its own depth-0 vertex.
+//      // reconstruction hybrid_shading_cs.glsl does for its own depth-0 vertex.
+        vec2 currentTexcoord = vec2(normSample.w, tangentSample.w);
+//      vec2 currentTexcoord = vec2(normSample.w, tangentSample.w);
+        // The albedo target already holds the resolved, sRGB-decoded base colour for this pixel, and
+//      // The albedo target already holds the resolved, sRGB-decoded base colour for this pixel, and
+        // the shading pass shades depth 0 from exactly this value, so prefer it over a re-fetch.
+//      // the shading pass shades depth 0 from exactly this value, so prefer it over a re-fetch.
+        vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
+//      vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
 
         // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
 //      // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
@@ -992,39 +1162,57 @@
             Material material = materials[materialIndex];
 //          Material material = materials[materialIndex];
 
-            // Emitters are seen directly by the path tracer; caching them would double count.
-//          // Emitters are seen directly by the path tracer; caching them would double count.
-            if (material.emissive > 0.0 || material.textureIndexEmissive >= 0.0) break;
-//          if (material.emissive > 0.0 || material.textureIndexEmissive >= 0.0) break;
+            // The same maps the shading pass shades this surface with, so the recorded vertex is
+//          // The same maps the shading pass shades this surface with, so the recorded vertex is
+            // classified and its target built from the material the renderer will actually query about.
+//          // classified and its target built from the material the renderer will actually query about.
+            // The primary vertex keeps its G-Buffer albedo; deeper vertices take the resolved one.
+//          // The primary vertex keeps its G-Buffer albedo; deeper vertices take the resolved one.
+            vec3 resolvedAlbedo;
+//          vec3 resolvedAlbedo;
+            float effectiveRoughness;
+//          float effectiveRoughness;
+            float effectiveMetallic;
+//          float effectiveMetallic;
+            float effectiveTransmission;
+//          float effectiveTransmission;
+            vec3 resolvedEmission;
+//          vec3 resolvedEmission;
+            resolveSurfaceMaterial(material, currentTexcoord, currentDistance,
+//          resolveSurfaceMaterial(material, currentTexcoord, currentDistance,
+                                   resolvedAlbedo, effectiveRoughness, effectiveMetallic,
+//                                 resolvedAlbedo, effectiveRoughness, effectiveMetallic,
+                                   effectiveTransmission, resolvedEmission);
+//                                 effectiveTransmission, resolvedEmission);
+            if (bounce > 0u) {
+//          if (bounce > 0u) {
+                currentAlbedo = resolvedAlbedo;
+//              currentAlbedo = resolvedAlbedo;
+            }
+//          }
 
-            // This pass has no texture sampler, so a material whose metallic/roughness comes from a map
-//          // This pass has no texture sampler, so a material whose metallic/roughness comes from a map
-            // only exposes the 1.0 placeholder scalar. Trusting that placeholder would classify most of
-//          // only exposes the 1.0 placeholder scalar. Trusting that placeholder would classify most of
-            // the scene as a mirror and collect no training records at all, so fall back to neutral
-//          // the scene as a mirror and collect no training records at all, so fall back to neutral
-            // values whenever the scalar is not authoritative.
-//          // values whenever the scalar is not authoritative.
-            bool metallicIsAuthoritative = (material.textureIndexMetallic < -0.5);
-//          bool metallicIsAuthoritative = (material.textureIndexMetallic < -0.5);
-            bool roughnessIsAuthoritative = (material.textureIndexRoughness < -0.5);
-//          bool roughnessIsAuthoritative = (material.textureIndexRoughness < -0.5);
-            float effectiveMetallic = metallicIsAuthoritative ? material.metallic : 0.0;
-//          float effectiveMetallic = metallicIsAuthoritative ? material.metallic : 0.0;
-            float effectiveRoughness = roughnessIsAuthoritative ? material.roughness : 0.5;
-//          float effectiveRoughness = roughnessIsAuthoritative ? material.roughness : 0.5;
+            // Emitters are seen directly by the path tracer; caching them would double count. Tested on
+//          // Emitters are seen directly by the path tracer; caching them would double count. Tested on
+            // the resolved emission, so an emissive map that is black here no longer disqualifies the
+//          // the resolved emission, so an emissive map that is black here no longer disqualifies the
+            // whole material -- the same test scatterPrincipled applies before it refuses to scatter.
+//          // whole material -- the same test scatterPrincipled applies before it refuses to scatter.
+            if (resolvedEmission.r > 0.0 || resolvedEmission.g > 0.0 || resolvedEmission.b > 0.0) break;
+//          if (resolvedEmission.r > 0.0 || resolvedEmission.g > 0.0 || resolvedEmission.b > 0.0) break;
 
             // Only cache broadly diffuse dielectrics; mirrors and glass are view dependent.
 //          // Only cache broadly diffuse dielectrics; mirrors and glass are view dependent.
-            bool isCacheable = (effectiveMetallic <= 0.8 && material.transmission <= 0.5 && effectiveRoughness >= 0.05);
-//          bool isCacheable = (effectiveMetallic <= 0.8 && material.transmission <= 0.5 && effectiveRoughness >= 0.05);
+            bool isCacheable = (effectiveMetallic <= 0.8 && effectiveTransmission <= 0.5 && effectiveRoughness >= 0.05);
+//          bool isCacheable = (effectiveMetallic <= 0.8 && effectiveTransmission <= 0.5 && effectiveRoughness >= 0.05);
 
             if (isCacheable) {
 //          if (isCacheable) {
                 vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
 //              vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
-                                                            currentAlbedo, effectiveRoughness, effectiveMetallic);
-//                                                          currentAlbedo, effectiveRoughness, effectiveMetallic);
+                                                            currentAlbedo, effectiveRoughness, effectiveMetallic,
+//                                                          currentAlbedo, effectiveRoughness, effectiveMetallic,
+                                                            effectiveTransmission);
+//                                                          effectiveTransmission);
 
                 float acceptanceProb = 1.0;
 //              float acceptanceProb = 1.0;
@@ -1110,8 +1298,12 @@
 //          vec3 nextNormal;
             int nextTriangle;
 //          int nextTriangle;
-            if (!traverseClosestHit(currentPoint + currentNormal * EPSILON_OFFSET, continueDir, INF, nextPoint, nextNormal, nextTriangle)) break;
-//          if (!traverseClosestHit(currentPoint + currentNormal * EPSILON_OFFSET, continueDir, INF, nextPoint, nextNormal, nextTriangle)) break;
+            vec2 nextTexcoord;
+//          vec2 nextTexcoord;
+            float nextDistance;
+//          float nextDistance;
+            if (!traverseClosestHit(currentPoint + currentNormal * EPSILON_OFFSET, continueDir, INF, nextPoint, nextNormal, nextTriangle, nextTexcoord, nextDistance)) break;
+//          if (!traverseClosestHit(currentPoint + currentNormal * EPSILON_OFFSET, continueDir, INF, nextPoint, nextNormal, nextTriangle, nextTexcoord, nextDistance)) break;
             if (nextTriangle < 0) break;
 //          if (nextTriangle < 0) break;
 
@@ -1123,8 +1315,10 @@
 //          currentTriangle = nextTriangle;
             currentIncomingDir = continueDir;
 //          currentIncomingDir = continueDir;
-            currentAlbedo = materials[int(vertices[nextTriangle * 3].tangentAndMaterialIndex.w)].albedo.rgb;
-//          currentAlbedo = materials[int(vertices[nextTriangle * 3].tangentAndMaterialIndex.w)].albedo.rgb;
+            currentTexcoord = nextTexcoord;
+//          currentTexcoord = nextTexcoord;
+            currentDistance = nextDistance;
+//          currentDistance = nextDistance;
         }
 //      }
     }

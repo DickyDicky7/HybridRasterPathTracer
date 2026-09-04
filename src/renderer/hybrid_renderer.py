@@ -1723,10 +1723,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # The G-Buffer just written by the rasterization pass is read back through imageLoad by both
         # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
 #       # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
-        # writes once here, ahead of either consumer, instead of only on the Neural Radiance Cache path
-#       # writes once here, ahead of either consumer, instead of only on the Neural Radiance Cache path
-        # (where the barrier used to live and left the shading pass uncovered whenever NRC was off).
-#       # (where the barrier used to live and left the shading pass uncovered whenever NRC was off).
+        # writes once here, ahead of either consumer. No such barrier existed before: the raster ->
+#       # writes once here, ahead of either consumer. No such barrier existed before: the raster ->
+        # compute G-Buffer handoff was unsynchronised outright rather than merely under-covered, going
+#       # compute G-Buffer handoff was unsynchronised outright rather than merely under-covered, going
+        # back past the NRC work to 0349123. The two SHADER_STORAGE barriers further down guard the
+#       # back past the NRC work to 0349123. The two SHADER_STORAGE barriers further down guard the
+        # training records and weights, not these images.
+#       # training records and weights, not these images.
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
 
@@ -1887,8 +1891,22 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           self.program_shading["uCacheFrameCounter"] = self.cache_frame_counter
         if "uCacheBlendFactor" in self.program_shading:
 #       if "uCacheBlendFactor" in self.program_shading:
-            self.program_shading["uCacheBlendFactor"] = 0.5
-#           self.program_shading["uCacheBlendFactor"] = 0.5
+            # The hash radiance cache and the Neural Radiance Cache are two answers to the same
+#           # The hash radiance cache and the Neural Radiance Cache are two answers to the same
+            # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.glsl breaks out
+#           # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.glsl breaks out
+            # of the path at the NRC vertex before writeCache is reached, so nothing is ever written
+#           # of the path at the NRC vertex before writeCache is reached, so nothing is ever written
+            # at a diffuse vertex. What survives is the worst of both -- readCache still runs on every
+#           # at a diffuse vertex. What survives is the worst of both -- readCache still runs on every
+            # secondary bounce, and can still fire on a stale entry left by a metallic or near-mirror
+#           # secondary bounce, and can still fire on a stale entry left by a metallic or near-mirror
+            # vertex, pre-empting the network's full outgoing radiance with a direct-only value.
+#           # vertex, pre-empting the network's full outgoing radiance with a direct-only value.
+            # Switching the blend off makes the supersession explicit instead of accidental.
+#           # Switching the blend off makes the supersession explicit instead of accidental.
+            self.program_shading["uCacheBlendFactor"] = 0.0 if self.is_nrc_enabled else 0.5
+#           self.program_shading["uCacheBlendFactor"] = 0.0 if self.is_nrc_enabled else 0.5
 
         # HDRI Texture
 #       # HDRI Texture
@@ -2010,6 +2028,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
             self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
 #           self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
+            # The gather pass reads texcoord V out of the tangent target's w channel, so it can resolve
+#           # The gather pass reads texcoord V out of the tangent target's w channel, so it can resolve
+            # the primary vertex's material from the same maps the shading pass uses on that pixel.
+#           # the primary vertex's material from the same maps the shading pass uses on that pixel.
+            self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
+#           self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
             self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
 #           self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
             self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
@@ -2053,6 +2077,16 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if "uUseHdri" in self.program_nrc_gather:
                 self.program_nrc_gather["uUseHdri"] = self.use_hdri
 #               self.program_nrc_gather["uUseHdri"] = self.use_hdri
+            # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
+#           # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
+            # the HDRI above, the gather program only needs the sampler index. Without it the training
+#           # the HDRI above, the gather program only needs the sampler index. Without it the training
+            # target would be built from placeholder material scalars on every textured surface.
+#           # target would be built from placeholder material scalars on every textured surface.
+            if "uSceneTextureArray" in self.program_nrc_gather:
+#           if "uSceneTextureArray" in self.program_nrc_gather:
+                self.program_nrc_gather["uSceneTextureArray"] = 9
+#               self.program_nrc_gather["uSceneTextureArray"] = 9
             if "uPointLightCount" in self.program_nrc_gather:
 #           if "uPointLightCount" in self.program_nrc_gather:
                 self.program_nrc_gather["uPointLightCount"] = len(point_lights)
