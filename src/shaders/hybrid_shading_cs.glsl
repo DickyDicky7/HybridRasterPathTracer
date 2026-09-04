@@ -519,86 +519,9 @@
     }
 //  }
 
-    // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk.
-//  // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk.
-    vec3 getSkyColor(vec3 rayDirection) {
-//  vec3 getSkyColor(vec3 rayDirection) {
-        if (uUseHdri) {
-//      if (uUseHdri) {
-            // Equirectangular mapping
-//          // Equirectangular mapping
-            float latitudeAngle = acos(clamp(-rayDirection.y, -1.0, 1.0)); // latitude: 0 at top, PI at bottom
-//          float latitudeAngle = acos(clamp(-rayDirection.y, -1.0, 1.0)); // latitude: 0 at top, PI at bottom
-            float longitudeAngle = atan(-rayDirection.z, rayDirection.x) + PI; // longitude: 0 to 2*PI
-//          float longitudeAngle = atan(-rayDirection.z, rayDirection.x) + PI; // longitude: 0 to 2*PI
-            float equirectU = clamp(longitudeAngle / (2.0 * PI), 0.0, 1.0);
-//          float equirectU = clamp(longitudeAngle / (2.0 * PI), 0.0, 1.0);
-            float equirectV = clamp(latitudeAngle / PI, 0.0, 1.0);
-//          float equirectV = clamp(latitudeAngle / PI, 0.0, 1.0);
-            vec3 environmentColor = textureLod(uHdriTexture, vec2(equirectU, equirectV), 0.0).rgb;
-//          vec3 environmentColor = textureLod(uHdriTexture, vec2(equirectU, equirectV), 0.0).rgb;
-            return min(environmentColor, vec3(HDRI_CLAMP));
-//          return min(environmentColor, vec3(HDRI_CLAMP));
-        }
-//      }
-        /*
-        // Fallback: procedural gradient sky
-//      // Fallback: procedural gradient sky
-        float verticalBlend = 0.5 * (rayDirection.y + 1.0);
-//      float verticalBlend = 0.5 * (rayDirection.y + 1.0);
-        return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), verticalBlend);
-//      return mix(vec3(0.1), vec3(0.5, 0.7, 1.0), verticalBlend);
-        */
-        // Fallback: procedural atmospheric sky
-//      // Fallback: procedural atmospheric sky
-        // Rayleigh Gradient: Approximates scattering of blue wavelengths, deeper at zenith
-//      // Rayleigh Gradient: Approximates scattering of blue wavelengths, deeper at zenith
-        vec3 skyColor = vec3(0.2, 0.45, 0.9) - rayDirection.y * 0.25 * vec3(1.0, 0.5, 1.2) + 0.1 * vec3(1.0);
-//      vec3 skyColor = vec3(0.2, 0.45, 0.9) - rayDirection.y * 0.25 * vec3(1.0, 0.5, 1.2) + 0.1 * vec3(1.0);
-        // Mie Scattering: Exponential horizon haze due to higher atmospheric density
-//      // Mie Scattering: Exponential horizon haze due to higher atmospheric density
-        skyColor = mix(skyColor, vec3(0.9, 0.95, 1.0), exp(-15.0 * max(rayDirection.y, 0.0)));
-//      skyColor = mix(skyColor, vec3(0.9, 0.95, 1.0), exp(-15.0 * max(rayDirection.y, 0.0)));
-        // Cloud-like ground: Replace the bottom with a bright, vivid white-blue deck
-//      // Cloud-like ground: Replace the bottom with a bright, vivid white-blue deck
-        if (rayDirection.y < 0.0) skyColor = mix(vec3(0.9, 0.95, 1.0), vec3(0.98, 0.99, 1.0), pow(abs(rayDirection.y), 0.5));
-//      if (rayDirection.y < 0.0) skyColor = mix(vec3(0.9, 0.95, 1.0), vec3(0.98, 0.99, 1.0), pow(abs(rayDirection.y), 0.5));
-        // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
-//      // Sun Disk: Layered glows using increasing powers of the dot product (cosine of angle)
-        // Enhance sun intensity and direction for a more dramatic sky
-//      // Enhance sun intensity and direction for a more dramatic sky
-        vec3 sunDirection = normalize(vec3(0.0, 0.5, 0.5));
-//      vec3 sunDirection = normalize(vec3(0.0, 0.5, 0.5));
-        float sunCosine = clamp(dot(rayDirection, sunDirection), 0.0, 1.0);
-//      float sunCosine = clamp(dot(rayDirection, sunDirection), 0.0, 1.0);
-        float sunCosinePow2 = sunCosine * sunCosine;
-//      float sunCosinePow2 = sunCosine * sunCosine;
-        float sunCosinePow4 = sunCosinePow2 * sunCosinePow2;
-//      float sunCosinePow4 = sunCosinePow2 * sunCosinePow2;
-        float sunCosinePow8 = sunCosinePow4 * sunCosinePow4;
-//      float sunCosinePow8 = sunCosinePow4 * sunCosinePow4;
-        float sunCosinePow16 = sunCosinePow8 * sunCosinePow8;
-//      float sunCosinePow16 = sunCosinePow8 * sunCosinePow8;
-        float sunCosinePow32 = sunCosinePow16 * sunCosinePow16;
-//      float sunCosinePow32 = sunCosinePow16 * sunCosinePow16;
-        float sunCosinePow64 = sunCosinePow32 * sunCosinePow32;
-//      float sunCosinePow64 = sunCosinePow32 * sunCosinePow32;
-        float sunCosinePow128 = sunCosinePow64 * sunCosinePow64;
-//      float sunCosinePow128 = sunCosinePow64 * sunCosinePow64;
-        float sunCosinePow256 = sunCosinePow128 * sunCosinePow128;
-//      float sunCosinePow256 = sunCosinePow128 * sunCosinePow128;
-        float sunCosinePow512 = sunCosinePow256 * sunCosinePow256;
-//      float sunCosinePow512 = sunCosinePow256 * sunCosinePow256;
-        skyColor += 0.4 * vec3(10.0, 10.6, 10.3) * sunCosinePow8; // Wide soft orange glow
-//      skyColor += 0.4 * vec3(10.0, 10.6, 10.3) * sunCosinePow8; // Wide soft orange glow
-        skyColor += 0.3 * vec3(10.0, 10.8, 10.5) * sunCosinePow64; // Bright golden core
-//      skyColor += 0.3 * vec3(10.0, 10.8, 10.5) * sunCosinePow64; // Bright golden core
-        skyColor += 0.5 * vec3(10.0, 10.0, 10.0) * sunCosinePow512; // Intense white disk
-//      skyColor += 0.5 * vec3(10.0, 10.0, 10.0) * sunCosinePow512; // Intense white disk
-        return skyColor;
-//      return skyColor;
-    }
-//  }
+    // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same sky this pass gathers.
+//  // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same sky this pass gathers.
+    #include "sky_environment.glsl"
 
     // New Structs and Helper Functions
 //  // New Structs and Helper Functions
@@ -1069,22 +992,9 @@
     }
 //  }
 
-    // Principled BSDF Components: the building blocks of a Disney-style physically-based surface model. These comprise Schlick's Fresnel approximation for view-dependent reflectivity, the GGX (Trowbridge-Reitz) microfacet Normal Distribution Function together with cosine-of-elevation importance sampling of its half-vectors, three interchangeable diffuse lobes (Lambert, Disney retro-reflective, Oren-Nayar), and the perfect reflect/refract operators. The full evaluation and PDF routines below compose these into a single energy-conserving model for realistic rough-surface scattering.
-//  // Principled BSDF Components: the building blocks of a Disney-style physically-based surface model. These comprise Schlick's Fresnel approximation for view-dependent reflectivity, the GGX (Trowbridge-Reitz) microfacet Normal Distribution Function together with cosine-of-elevation importance sampling of its half-vectors, three interchangeable diffuse lobes (Lambert, Disney retro-reflective, Oren-Nayar), and the perfect reflect/refract operators. The full evaluation and PDF routines below compose these into a single energy-conserving model for realistic rough-surface scattering.
-    vec3 schlickFresnel(float cosineIncidentAngle, vec3 reflectanceAtNormalIncidence) {
-//  vec3 schlickFresnel(float cosineIncidentAngle, vec3 reflectanceAtNormalIncidence) {
-        float oneMinusCosine = 1.0 - cosineIncidentAngle;
-//      float oneMinusCosine = 1.0 - cosineIncidentAngle;
-        float oneMinusCosinePow2 = oneMinusCosine * oneMinusCosine;
-//      float oneMinusCosinePow2 = oneMinusCosine * oneMinusCosine;
-        float oneMinusCosinePow4 = oneMinusCosinePow2 * oneMinusCosinePow2;
-//      float oneMinusCosinePow4 = oneMinusCosinePow2 * oneMinusCosinePow2;
-        float oneMinusCosinePow5 = oneMinusCosinePow4 * oneMinusCosine;
-//      float oneMinusCosinePow5 = oneMinusCosinePow4 * oneMinusCosine;
-        return reflectanceAtNormalIncidence + (1.0 - reflectanceAtNormalIncidence) * oneMinusCosinePow5;
-//      return reflectanceAtNormalIncidence + (1.0 - reflectanceAtNormalIncidence) * oneMinusCosinePow5;
-    }
-//  }
+    // Principled BSDF Components: the building blocks of a Disney-style physically-based surface model. These comprise Schlick's Fresnel approximation for view-dependent reflectivity, three interchangeable diffuse lobes (Lambert, Disney retro-reflective, Oren-Nayar), and the composed energy-conserving evaluation/PDF routine. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same BSDF this pass shades with.
+//  // Principled BSDF Components: the building blocks of a Disney-style physically-based surface model. These comprise Schlick's Fresnel approximation for view-dependent reflectivity, three interchangeable diffuse lobes (Lambert, Disney retro-reflective, Oren-Nayar), and the composed energy-conserving evaluation/PDF routine. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same BSDF this pass shades with.
+    #include "principled_bsdf.glsl"
 
     vec3 sampleGGX(vec3 normal, float roughness) {
 //  vec3 sampleGGX(vec3 normal, float roughness) {
@@ -1155,203 +1065,9 @@
     }
 //  }
 
-    vec3 evalDisneyDiffuse(vec3 surfaceNormal, vec3 viewDirection, vec3 lightDirection, vec3 albedo, float roughness) {
-//  vec3 evalDisneyDiffuse(vec3 surfaceNormal, vec3 viewDirection, vec3 lightDirection, vec3 albedo, float roughness) {
-        vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-//      vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-        vec3 halfVector;
-//      vec3 halfVector;
-        if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-//      if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-            halfVector = normalize(halfVectorUnnormalized);
-//          halfVector = normalize(halfVectorUnnormalized);
-        } else {
-//      } else {
-            halfVector = surfaceNormal;
-//          halfVector = surfaceNormal;
-        }
-//      }
-        float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-//      float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-        float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-//      float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-        float lightDotHalf = max(dot(lightDirection, halfVector), 0.0);
-//      float lightDotHalf = max(dot(lightDirection, halfVector), 0.0);
-
-        // Schlick weight for grazing angles
-//      // Schlick weight for grazing angles
-        float fresnelDiffuse90 = 0.5 + 2.0 * roughness * lightDotHalf * lightDotHalf;
-//      float fresnelDiffuse90 = 0.5 + 2.0 * roughness * lightDotHalf * lightDotHalf;
-
-        float oneMinusNormalDotLight = 1.0 - normalDotLight;
-//      float oneMinusNormalDotLight = 1.0 - normalDotLight;
-        float oneMinusNormalDotLightPow2 = oneMinusNormalDotLight * oneMinusNormalDotLight;
-//      float oneMinusNormalDotLightPow2 = oneMinusNormalDotLight * oneMinusNormalDotLight;
-        float oneMinusNormalDotLightPow5 = oneMinusNormalDotLightPow2 * oneMinusNormalDotLightPow2 * oneMinusNormalDotLight;
-//      float oneMinusNormalDotLightPow5 = oneMinusNormalDotLightPow2 * oneMinusNormalDotLightPow2 * oneMinusNormalDotLight;
-        float lightScatterFactor = 1.0 + (fresnelDiffuse90 - 1.0) * oneMinusNormalDotLightPow5;
-//      float lightScatterFactor = 1.0 + (fresnelDiffuse90 - 1.0) * oneMinusNormalDotLightPow5;
-
-        float oneMinusNormalDotView = 1.0 - normalDotView;
-//      float oneMinusNormalDotView = 1.0 - normalDotView;
-        float oneMinusNormalDotViewPow2 = oneMinusNormalDotView * oneMinusNormalDotView;
-//      float oneMinusNormalDotViewPow2 = oneMinusNormalDotView * oneMinusNormalDotView;
-        float oneMinusNormalDotViewPow5 = oneMinusNormalDotViewPow2 * oneMinusNormalDotViewPow2 * oneMinusNormalDotView;
-//      float oneMinusNormalDotViewPow5 = oneMinusNormalDotViewPow2 * oneMinusNormalDotViewPow2 * oneMinusNormalDotView;
-        float viewScatterFactor = 1.0 + (fresnelDiffuse90 - 1.0) * oneMinusNormalDotViewPow5;
-//      float viewScatterFactor = 1.0 + (fresnelDiffuse90 - 1.0) * oneMinusNormalDotViewPow5;
-
-        return (albedo / PI) * lightScatterFactor * viewScatterFactor;
-//      return (albedo / PI) * lightScatterFactor * viewScatterFactor;
-    }
-//  }
-
-    vec3 evalOrenNayarDiffuse(vec3 surfaceNormal, vec3 viewDirection, vec3 lightDirection, vec3 albedo, float roughness) {
-//  vec3 evalOrenNayarDiffuse(vec3 surfaceNormal, vec3 viewDirection, vec3 lightDirection, vec3 albedo, float roughness) {
-        float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-//      float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-        float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-//      float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-
-        float lightDotView = dot(lightDirection, viewDirection);
-//      float lightDotView = dot(lightDirection, viewDirection);
-        float geometricNumerator = lightDotView - normalDotLight * normalDotView;
-//      float geometricNumerator = lightDotView - normalDotLight * normalDotView;
-        float geometricDenominator = mix(1.0, max(normalDotLight, normalDotView), step(0.0, geometricNumerator));
-//      float geometricDenominator = mix(1.0, max(normalDotLight, normalDotView), step(0.0, geometricNumerator));
-
-        float sigmaSquared = roughness * roughness;
-//      float sigmaSquared = roughness * roughness;
-        float orenNayarTermA = 1.0 - 0.5 * (sigmaSquared / (sigmaSquared + 0.33));
-//      float orenNayarTermA = 1.0 - 0.5 * (sigmaSquared / (sigmaSquared + 0.33));
-        float orenNayarTermB = 0.45 * (sigmaSquared / (sigmaSquared + 0.09));
-//      float orenNayarTermB = 0.45 * (sigmaSquared / (sigmaSquared + 0.09));
-
-        return (albedo / PI) * (orenNayarTermA + orenNayarTermB * (geometricNumerator / (geometricDenominator + EPSILON_MATH)));
-//      return (albedo / PI) * (orenNayarTermA + orenNayarTermB * (geometricNumerator / (geometricDenominator + EPSILON_MATH)));
-    }
-//  }
-
-    vec3 evalLambertDiffuse(vec3 albedo) {
-//  vec3 evalLambertDiffuse(vec3 albedo) {
-        return albedo / PI;
-//      return albedo / PI;
-    }
-//  }
 
     // Fused BSDF + PDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair (the per-steradian throughput, before any cosine or PDF weighting) and, through the out parameter, the matching importance-sampling PDF. The BSDF sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel partitions energy between the lobes and the metallic mask removes the diffuse component from conductors. Every scatter and NEE sample needs both the value and the PDF, so fusing them shares the half-vector, dot products, Fresnel and GGX D terms the previously separate routines each recomputed, halving the per-sample shading math without changing a single term of either result.
 //  // Fused BSDF + PDF Evaluation: returns the bidirectional reflectance value f_r for a given view/light direction pair (the per-steradian throughput, before any cosine or PDF weighting) and, through the out parameter, the matching importance-sampling PDF. The BSDF sums a Disney diffuse lobe with a Cook-Torrance specular term — the GGX distribution D, the Smith geometry factor G, and the Schlick Fresnel F combined as D·F·G / (4·N·V·N·L) — where Fresnel partitions energy between the lobes and the metallic mask removes the diffuse component from conductors. Every scatter and NEE sample needs both the value and the PDF, so fusing them shares the half-vector, dot products, Fresnel and GGX D terms the previously separate routines each recomputed, halving the per-sample shading math without changing a single term of either result.
-    vec3 evalPrincipledBSDFAndPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission, out float outPdf) {
-//  vec3 evalPrincipledBSDFAndPDF(vec3 incomingDirection, vec3 outgoingDirection, vec3 normal, vec3 albedo, float roughness, float metallic, float transmission, out float outPdf) {
-        outPdf = 0.0;
-//      outPdf = 0.0;
-        vec3 surfaceNormal = normal;
-//      vec3 surfaceNormal = normal;
-        vec3 viewDirection = -incomingDirection;
-//      vec3 viewDirection = -incomingDirection;
-        vec3 lightDirection = outgoingDirection;
-//      vec3 lightDirection = outgoingDirection;
-        vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-//      vec3 halfVectorUnnormalized = viewDirection + lightDirection;
-        vec3 halfVector;
-//      vec3 halfVector;
-        if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-//      if (dot(halfVectorUnnormalized, halfVectorUnnormalized) > EPSILON_MATH) {
-            halfVector = normalize(halfVectorUnnormalized);
-//          halfVector = normalize(halfVectorUnnormalized);
-        } else {
-//      } else {
-            halfVector = surfaceNormal;
-//          halfVector = surfaceNormal;
-        }
-//      }
-
-        float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-//      float normalDotLight = max(dot(surfaceNormal, lightDirection), 0.0);
-        float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-//      float normalDotView = max(dot(surfaceNormal, viewDirection), 0.0);
-
-        if (normalDotLight <= 0.0 || normalDotView <= 0.0) return vec3(0.0);
-//      if (normalDotLight <= 0.0 || normalDotView <= 0.0) return vec3(0.0);
-
-        vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
-//      vec3 reflectanceAtNormalIncidence = mix(vec3(F0_DEFAULT), albedo, metallic);
-        // BSDF energy split uses Fresnel at the half-vector angle
-//      // BSDF energy split uses Fresnel at the half-vector angle
-        float halfDotView = max(dot(halfVector, viewDirection), 0.0);
-//      float halfDotView = max(dot(halfVector, viewDirection), 0.0);
-        vec3 fresnelReflectance = schlickFresnel(halfDotView, reflectanceAtNormalIncidence);
-//      vec3 fresnelReflectance = schlickFresnel(halfDotView, reflectanceAtNormalIncidence);
-
-        // Diffuse
-//      // Diffuse
-        vec3 specularWeight = fresnelReflectance;
-//      vec3 specularWeight = fresnelReflectance;
-        vec3 diffuseWeight = (vec3(1.0) - specularWeight) * (1.0 - metallic);
-//      vec3 diffuseWeight = (vec3(1.0) - specularWeight) * (1.0 - metallic);
-
-        // --- Try uncommenting one of these ---
-//      // --- Try uncommenting one of these ---
-
-        // 1. Original Lambert
-//      // 1. Original Lambert
-        // vec3 diffuseContribution = diffuseWeight * evalLambertDiffuse(albedo) * (1.0 - transmission);
-//      // vec3 diffuseContribution = diffuseWeight * evalLambertDiffuse(albedo) * (1.0 - transmission);
-
-        // 2. Disney Diffuse (Recommended)
-//      // 2. Disney Diffuse (Recommended)
-        vec3 diffuseContribution = diffuseWeight * evalDisneyDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
-//      vec3 diffuseContribution = diffuseWeight * evalDisneyDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
-
-        // 3. Oren-Nayar Diffuse
-//      // 3. Oren-Nayar Diffuse
-        // vec3 diffuseContribution = diffuseWeight * evalOrenNayarDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
-//      // vec3 diffuseContribution = diffuseWeight * evalOrenNayarDiffuse(surfaceNormal, viewDirection, lightDirection, albedo, roughness) * (1.0 - transmission);
-
-        // Specular (GGX distribution D is shared between the BSDF value and the specular PDF)
-//      // Specular (GGX distribution D is shared between the BSDF value and the specular PDF)
-        float ggxAlpha = roughness * roughness;
-//      float ggxAlpha = roughness * roughness;
-        float ggxAlphaSquared = ggxAlpha * ggxAlpha;
-//      float ggxAlphaSquared = ggxAlpha * ggxAlpha;
-        float normalDotHalf = max(dot(surfaceNormal, halfVector), 0.0);
-//      float normalDotHalf = max(dot(surfaceNormal, halfVector), 0.0);
-        float distributionDenominator = (normalDotHalf * normalDotHalf * (ggxAlphaSquared - 1.0) + 1.0);
-//      float distributionDenominator = (normalDotHalf * normalDotHalf * (ggxAlphaSquared - 1.0) + 1.0);
-        float normalDistribution = ggxAlphaSquared / (PI * distributionDenominator * distributionDenominator);
-//      float normalDistribution = ggxAlphaSquared / (PI * distributionDenominator * distributionDenominator);
-
-        float smithGeometryK = (roughness * roughness) / 2.0;
-//      float smithGeometryK = (roughness * roughness) / 2.0;
-        // Optimize G term calculation by factoring out normalDotView and normalDotLight
-//      // Optimize G term calculation by factoring out normalDotView and normalDotLight
-        float geometryViewTerm = normalDotView * (1.0 - smithGeometryK) + smithGeometryK;
-//      float geometryViewTerm = normalDotView * (1.0 - smithGeometryK) + smithGeometryK;
-        float geometryLightTerm = normalDotLight * (1.0 - smithGeometryK) + smithGeometryK;
-//      float geometryLightTerm = normalDotLight * (1.0 - smithGeometryK) + smithGeometryK;
-
-        vec3 specularContribution = (normalDistribution * fresnelReflectance) / (4.0 * geometryViewTerm * geometryLightTerm + EPSILON_MATH);
-//      vec3 specularContribution = (normalDistribution * fresnelReflectance) / (4.0 * geometryViewTerm * geometryLightTerm + EPSILON_MATH);
-
-        // PDF: the lobe-selection probability uses Fresnel at the view angle (matching the sampler)
-//      // PDF: the lobe-selection probability uses Fresnel at the view angle (matching the sampler)
-        float diffusePdf = normalDotLight / PI;
-//      float diffusePdf = normalDotLight / PI;
-        float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * halfDotView + EPSILON_DOT);
-//      float specularPdf = (normalDistribution * normalDotHalf) / (4.0 * halfDotView + EPSILON_DOT);
-        vec3 lobeSelectionFresnel = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
-//      vec3 lobeSelectionFresnel = schlickFresnel(normalDotView, reflectanceAtNormalIncidence);
-        float averageFresnel = (lobeSelectionFresnel.r + lobeSelectionFresnel.g + lobeSelectionFresnel.b) / 3.0;
-//      float averageFresnel = (lobeSelectionFresnel.r + lobeSelectionFresnel.g + lobeSelectionFresnel.b) / 3.0;
-        float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
-//      float specularSelectionProbability = max(mix(averageFresnel, 1.0, metallic), 0.15);
-        outPdf = mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
-//      outPdf = mix(diffusePdf * (1.0 - transmission), specularPdf, specularSelectionProbability);
-
-        return diffuseContribution + specularContribution;
-//      return diffuseContribution + specularContribution;
-    }
-//  }
 
     float calculateLuminance(vec3 color) {
 //  float calculateLuminance(vec3 color) {
@@ -1699,8 +1415,8 @@
 //      return heatColor;
     }
 //  }
-    LightSample generateLightSampleCandidate(vec3 hitPoint, vec3 shadingNormal) {
-//  LightSample generateLightSampleCandidate(vec3 hitPoint, vec3 shadingNormal) {
+    LightSample generateLightSampleCandidate(vec3 hitPoint) {
+//  LightSample generateLightSampleCandidate(vec3 hitPoint) {
         LightSample candidate;
 //      LightSample candidate;
         candidate.position = vec3(0.0);
@@ -2615,8 +2331,30 @@
 //          // Spatiotemporal ReSTIR Direct Illumination (ST-ReSTIR DI)
             bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
 //          bool isSpecularDelta = roughness < 0.05 && (metallic > 0.99 || material.transmission > 0.99);
-            bool skipNEE = isSpecularDelta;
-//          bool skipNEE = isSpecularDelta;
+            // The Neural Radiance Cache regresses total outgoing radiance, direct illumination included.
+//          // The Neural Radiance Cache regresses total outgoing radiance, direct illumination included.
+            // Deciding here -- before Next Event Estimation runs -- whether the cache will terminate the
+//          // Deciding here -- before Next Event Estimation runs -- whether the cache will terminate the
+            // path lets NEE be suppressed at that same vertex. Experiment001 runs both and counts the
+//          // path lets NEE be suppressed at that same vertex. Experiment001 runs both and counts the
+            // vertex's direct lighting twice; that error is louder here because the spurious base_color
+//          // vertex's direct lighting twice; that error is louder here because the spurious base_color
+            // that used to damp its cache term has (correctly) been removed.
+//          // that used to damp its cache term has (correctly) been removed.
+            //
+//          //
+            // The predicate deliberately depends only on pre-scatter state. Gating NEE on one condition
+//          // The predicate deliberately depends only on pre-scatter state. Gating NEE on one condition
+            // and the cache read on another would risk dropping the vertex's direct light entirely
+//          // and the cache read on another would risk dropping the vertex's direct light entirely
+            // instead of double counting it, so both now consult this single flag.
+//          // instead of double counting it, so both now consult this single flag.
+            bool nrcTerminatesPath = uNRCEnabled && diffuseBounceCount >= 1 && !isSpecularDelta
+//          bool nrcTerminatesPath = uNRCEnabled && diffuseBounceCount >= 1 && !isSpecularDelta
+                                  && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05;
+//                                && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05;
+            bool skipNEE = isSpecularDelta || nrcTerminatesPath;
+//          bool skipNEE = isSpecularDelta || nrcTerminatesPath;
             bool ranReSTIR = false;
 //          bool ranReSTIR = false;
             // Gate on the texture-resolved metallic, not material.metallic: the raw scalar is a 1.0
@@ -2625,8 +2363,43 @@
 //          // placeholder on every material that carries a metallic map, which would switch ReSTIR
             // off across most of the scene.
 //          // off across most of the scene.
-            bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !skipNEE && metallic < 0.99 && material.transmission < 0.01;
-//          bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !skipNEE && metallic < 0.99 && material.transmission < 0.01;
+            bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && material.transmission < 0.01;
+//          bool executeReSTIR = uReSTIREnabled && (uPointLightCount > 0) && (depth == 0) && !isSpecularDelta && metallic < 0.99 && material.transmission < 0.01;
+
+            // Variable Rate Tracing rate class for this pixel, and whether it owns the ray this frame.
+//          // Variable Rate Tracing rate class for this pixel, and whether it owns the ray this frame.
+            // Classified outside the ReSTIR gate on purpose. The rate only changes tracing behaviour
+//          // Classified outside the ReSTIR gate on purpose. The rate only changes tracing behaviour
+            // inside that block -- skipping a pixel's own light sample is only safe when reservoir reuse
+//          // inside that block -- skipping a pixel's own light sample is only safe when reservoir reuse
+            // can cover for it -- but the heatmap is a pure visualization and must still draw when
+//          // can cover for it -- but the heatmap is a pure visualization and must still draw when
+            // reuse is switched off, otherwise the uVRTVisualize toggle is a silent no-op.
+//          // reuse is switched off, otherwise the uVRTVisualize toggle is a silent no-op.
+            uint vrtRate = VRT_RATE_1X1;
+//          uint vrtRate = VRT_RATE_1X1;
+            bool isActiveTrace = true;
+//          bool isActiveTrace = true;
+            if (depth == 0) {
+//          if (depth == 0) {
+                // Pass the texture-resolved emission, not the raw material.emissive scalar, which is a
+//              // Pass the texture-resolved emission, not the raw material.emissive scalar, which is a
+                // placeholder on any material carrying an emissive map (same caveat as metallic above).
+//              // placeholder on any material carrying an emissive map (same caveat as metallic above).
+                // In practice this argument is always 0.0: scatterPrincipled returns false on an emissive
+//              // In practice this argument is always 0.0: scatterPrincipled returns false on an emissive
+                // surface, so the loop breaks before reaching here and the classifier's emitter branch is
+//              // surface, so the loop breaks before reaching here and the classifier's emitter branch is
+                // unreachable -- Experiment001's "emitters get full rate" rule holds trivially. Kept
+//              // unreachable -- Experiment001's "emitters get full rate" rule holds trivially. Kept
+                // correct-by-construction so the branch behaves if emitters ever stop terminating a path.
+//              // correct-by-construction so the branch behaves if emitters ever stop terminating a path.
+                vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, maxVec3(emission));
+//              vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, maxVec3(emission));
+                isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
+//              isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
+            }
+//          }
             if (executeReSTIR) {
 //          if (executeReSTIR) {
                 uint totalPixels = uint(uResolution.x * uResolution.y);
@@ -2638,12 +2411,6 @@
                 uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 //              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 
-                // Variable Rate Tracing: decide this pixel's rate class and whether it owns the ray this frame.
-//              // Variable Rate Tracing: decide this pixel's rate class and whether it owns the ray this frame.
-                uint vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, material.emissive);
-//              uint vrtRate = classifyPixelTracingRate(rayHitResult.hitSurfaceNormal, roughness, metallic, material.transmission, material.emissive);
-                bool isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
-//              bool isActiveTrace = isPixelActiveForVRT(uint(pixelCoordinates.x), uint(pixelCoordinates.y), vrtRate, uint(uFrameCount));
 
                 Reservoir pixelReservoir;
 //              Reservoir pixelReservoir;
@@ -2680,8 +2447,8 @@
 //              // Step 1: Initial Local Candidate Generation (only for the pixel that owns this frame's ray)
                 if (isActiveTrace) {
 //              if (isActiveTrace) {
-                    LightSample candidate = generateLightSampleCandidate(hitPoint, shadingNormal);
-//                  LightSample candidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+                    LightSample candidate = generateLightSampleCandidate(hitPoint);
+//                  LightSample candidate = generateLightSampleCandidate(hitPoint);
                     float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
 //                  float targetPdfCandidate = evaluateTargetPdf(candidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
                     float candidateWeight = (candidate.probability_density > 0.0) ? (targetPdfCandidate / candidate.probability_density) : 0.0;
@@ -2765,8 +2532,8 @@
 //              // Fallback candidate: a non-traced pixel with no usable history would otherwise stay black.
                 if (pixelReservoir.sample_count == 0.0) {
 //              if (pixelReservoir.sample_count == 0.0) {
-                    LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint, shadingNormal);
-//                  LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint, shadingNormal);
+                    LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint);
+//                  LightSample fallbackCandidate = generateLightSampleCandidate(hitPoint);
                     float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
 //                  float targetPdfFallback = evaluateTargetPdf(fallbackCandidate, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, material.transmission);
                     float fallbackWeight = (fallbackCandidate.probability_density > 0.0) ? (targetPdfFallback / fallbackCandidate.probability_density) : 0.0;
@@ -2784,6 +2551,26 @@
 //              float denom = pixelReservoir.sample_count * targetPdfFinal;
                 pixelReservoir.contribution_weight = (denom > 0.0) ? (pixelReservoir.sum_of_weights / denom) : 0.0;
 //              pixelReservoir.contribution_weight = (denom > 0.0) ? (pixelReservoir.sum_of_weights / denom) : 0.0;
+                // Quarantine non-finite weights before the reservoir is published. A NaN here would be
+//              // Quarantine non-finite weights before the reservoir is published. A NaN here would be
+                // written into the buffer, then picked up by every neighbour that samples this pixel as a
+//              // written into the buffer, then picked up by every neighbour that samples this pixel as a
+                // spatial tap, and the NaN guard at the end of main() would black out the whole spread.
+//              // spatial tap, and the NaN guard at the end of main() would black out the whole spread.
+                // Zeroing sample_count is what makes the next frame skip this entry outright.
+//              // Zeroing sample_count is what makes the next frame skip this entry outright.
+                if (isnan(pixelReservoir.sum_of_weights) || isinf(pixelReservoir.sum_of_weights)
+//              if (isnan(pixelReservoir.sum_of_weights) || isinf(pixelReservoir.sum_of_weights)
+                 || isnan(pixelReservoir.contribution_weight) || isinf(pixelReservoir.contribution_weight)) {
+//               || isnan(pixelReservoir.contribution_weight) || isinf(pixelReservoir.contribution_weight)) {
+                    pixelReservoir.sum_of_weights = 0.0;
+//                  pixelReservoir.sum_of_weights = 0.0;
+                    pixelReservoir.contribution_weight = 0.0;
+//                  pixelReservoir.contribution_weight = 0.0;
+                    pixelReservoir.sample_count = 0.0;
+//                  pixelReservoir.sample_count = 0.0;
+                }
+//              }
                 sampleReservoirs[currentFrameOffset + pixelIndex] = pixelReservoir;
 //              sampleReservoirs[currentFrameOffset + pixelIndex] = pixelReservoir;
 
@@ -2837,15 +2624,6 @@
                 }
 //              }
 
-                // Variable Rate Tracing heatmap overlay
-//              // Variable Rate Tracing heatmap overlay
-                if (uVRTVisualize) {
-//              if (uVRTVisualize) {
-                    accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
-//                  accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
-                }
-//              }
-
                 skipNEE = true;
 //              skipNEE = true;
                 ranReSTIR = true;
@@ -2860,6 +2638,15 @@
 //              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
                 sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
 //              sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
+            }
+//          }
+
+            // Variable Rate Tracing heatmap overlay
+//          // Variable Rate Tracing heatmap overlay
+            if (depth == 0 && uVRTVisualize) {
+//          if (depth == 0 && uVRTVisualize) {
+                accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
+//              accumulatedColor = mix(accumulatedColor, visualizeTracingRate(vrtRate, isActiveTrace) * 2.5, 0.75);
             }
 //          }
 
@@ -2998,10 +2785,12 @@
 //          // of the cache. The network regresses outgoing radiance, so it is added without re-applying
             // the surface albedo. Experiment001 multiplies by base_color here, which double counts the
 //          // the surface albedo. Experiment001 multiplies by base_color here, which double counts the
-            // albedo its own training target already baked in.
-//          // albedo its own training target already baked in.
-            if (uNRCEnabled && diffuseBounceCount >= 1 && !scatterIsDelta && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05) {
-//          if (uNRCEnabled && diffuseBounceCount >= 1 && !scatterIsDelta && metallic < 0.99 && material.transmission < 0.01 && roughness >= 0.05) {
+            // albedo its own training target already baked in. nrcTerminatesPath was decided before NEE
+//          // albedo its own training target already baked in. nrcTerminatesPath was decided before NEE
+            // so that this vertex's direct lighting is contributed by the cache alone.
+//          // so that this vertex's direct lighting is contributed by the cache alone.
+            if (nrcTerminatesPath) {
+//          if (nrcTerminatesPath) {
                 accumulatedColor += attenuation * evaluateNeuralRadianceCache(hitPoint, rayHitResult.hitSurfaceNormal);
 //              accumulatedColor += attenuation * evaluateNeuralRadianceCache(hitPoint, rayHitResult.hitSurfaceNormal);
                 break;

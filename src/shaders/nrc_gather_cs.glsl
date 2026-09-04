@@ -133,12 +133,27 @@
 //  uniform uint uTrainingStep;
     uniform ivec2 uResolution;
 //  uniform ivec2 uResolution;
+    // The training target evaluates a view-dependent BSDF, so this pass needs the direction each path
+//  // The training target evaluates a view-dependent BSDF, so this pass needs the direction each path
+    // vertex was reached along. For the first vertex, taken from the G-Buffer, that is the camera ray.
+//  // vertex was reached along. For the first vertex, taken from the G-Buffer, that is the camera ray.
+    uniform vec3 uCameraGlobalPosition;
+//  uniform vec3 uCameraGlobalPosition;
     // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_train_cs.glsl exactly.
 //  // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_train_cs.glsl exactly.
     uniform vec3 uNRCPositionOffset;
 //  uniform vec3 uNRCPositionOffset;
     uniform float uNRCPositionScale;
 //  uniform float uNRCPositionScale;
+
+    // Environment lighting inputs, required by sky_environment.glsl below. The cache regresses total
+//  // Environment lighting inputs, required by sky_environment.glsl below. The cache regresses total
+    // outgoing radiance, so the training target has to see the same sky hybrid_shading_cs.glsl gathers.
+//  // outgoing radiance, so the training target has to see the same sky hybrid_shading_cs.glsl gathers.
+    uniform sampler2D uHdriTexture;
+//  uniform sampler2D uHdriTexture;
+    uniform bool uUseHdri;
+//  uniform bool uUseHdri;
 
     // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
 //  // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
@@ -155,6 +170,27 @@
 //  const float EPSILON_OFFSET = 0.001;
     const float INF = 1e30;
 //  const float INF = 1e30;
+    // Required by principled_bsdf.glsl below; values mirror hybrid_shading_cs.glsl.
+//  // Required by principled_bsdf.glsl below; values mirror hybrid_shading_cs.glsl.
+    const float F0_DEFAULT = 0.04;
+//  const float F0_DEFAULT = 0.04;
+    const float EPSILON_MATH = 0.0001;
+//  const float EPSILON_MATH = 0.0001;
+    const float EPSILON_DOT = 0.001;
+//  const float EPSILON_DOT = 0.001;
+    // Required by sky_environment.glsl below; value mirrors hybrid_shading_cs.glsl.
+//  // Required by sky_environment.glsl below; value mirrors hybrid_shading_cs.glsl.
+    const float HDRI_CLAMP = 20.0;
+//  const float HDRI_CLAMP = 20.0;
+
+    // Shared with hybrid_shading_cs.glsl so the cache is trained against the same BSDF it is later
+    // evaluated with. The directive is deliberately not mirrored into a // comment: the AMD GLSL
+    // preprocessor still acts on #include inside a line comment.
+    #include "principled_bsdf.glsl"
+
+    // Shared with hybrid_shading_cs.glsl so the cache is trained against the same environment
+    // radiance the shading pass gathers. Not mirrored into a // comment, for the same reason as above.
+    #include "sky_environment.glsl"
 
     uint gRngState;
 //  uint gRngState;
@@ -655,90 +691,226 @@
     }
 //  }
 
-    // Direct + one-bounce-into-the-cache estimate of the outgoing radiance leaving a surface point.
-//  // Direct + one-bounce-into-the-cache estimate of the outgoing radiance leaving a surface point.
-    // This is the regression target: the network learns L_out, so callers add it as-is without
-//  // This is the regression target: the network learns L_out, so callers add it as-is without
-    // re-applying the surface albedo.
-//  // re-applying the surface albedo.
-    vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 albedo) {
-//  vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 albedo) {
-        vec3 targetRadiance = vec3(0.0);
-//      vec3 targetRadiance = vec3(0.0);
+    // Single-light direct illumination estimate at a surface point, using the same principled BSDF the
+//  // Single-light direct illumination estimate at a surface point, using the same principled BSDF the
+    // shading pass evaluates the cache with (principled_bsdf.glsl). A Lambert-only lobe here would train
+//  // shading pass evaluates the cache with (principled_bsdf.glsl). A Lambert-only lobe here would train
+    // the network on a target the renderer never asks for on anything glossy.
+//  // the network on a target the renderer never asks for on anything glossy.
+    //
+//  //
+    // The light is sampled analytically rather than stochastically: hybrid_shading_cs.glsl samples the
+//  // The light is sampled analytically rather than stochastically: hybrid_shading_cs.glsl samples the
+    // facing hemisphere (area 2*PI*r*r) and weights by cos at the light, whose expectation over that
+//  // facing hemisphere (area 2*PI*r*r) and weights by cos at the light, whose expectation over that
+    // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
+//  // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
+    vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
+//  vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
+                                vec3 albedo, float roughness, float metallic) {
+//                              vec3 albedo, float roughness, float metallic) {
+        if (uPointLightCount <= 0) return vec3(0.0);
+//      if (uPointLightCount <= 0) return vec3(0.0);
 
-        // 1. Direct illumination estimate (single stochastic light, Lambertian lobe)
-//      // 1. Direct illumination estimate (single stochastic light, Lambertian lobe)
-        if (uPointLightCount > 0) {
-//      if (uPointLightCount > 0) {
-            float lightRand = randFloat();
-//          float lightRand = randFloat();
-            int lightIndex = max(0, uPointLightCount - 1);
-//          int lightIndex = max(0, uPointLightCount - 1);
-            for (int i = 0; i < uPointLightCount; i++) {
-//          for (int i = 0; i < uPointLightCount; i++) {
-                if (lightRand <= uPointLights[i].cdf) {
-//              if (lightRand <= uPointLights[i].cdf) {
-                    lightIndex = i;
-//                  lightIndex = i;
-                    break;
-//                  break;
-                }
-//              }
-            }
-//          }
-
-            vec3 lightPos = uPointLights[lightIndex].position;
-//          vec3 lightPos = uPointLights[lightIndex].position;
-            float lightRadius = uPointLights[lightIndex].radius;
-//          float lightRadius = uPointLights[lightIndex].radius;
-            vec3 toLight = lightPos - surfacePoint;
-//          vec3 toLight = lightPos - surfacePoint;
-            float distToLight = length(toLight);
-//          float distToLight = length(toLight);
-            vec3 lightDir = toLight / max(distToLight, 1.0e-4);
-//          vec3 lightDir = toLight / max(distToLight, 1.0e-4);
-
-            float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
-//          float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
-            if (cosTheta > 0.0) {
-//          if (cosTheta > 0.0) {
-                if (!traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) {
-//              if (!traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) {
-                    float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
-//                  float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
-                    float lightProjectedArea = PI * lightRadius * lightRadius;
-//                  float lightProjectedArea = PI * lightRadius * lightRadius;
-                    float clampedDist = max(distToLight, lightRadius + 0.05);
-//                  float clampedDist = max(distToLight, lightRadius + 0.05);
-                    float distSq = clampedDist * clampedDist;
-//                  float distSq = clampedDist * clampedDist;
-                    targetRadiance += (albedo / PI) * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
-//                  targetRadiance += (albedo / PI) * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
-                }
-//              }
+        float lightRand = randFloat();
+//      float lightRand = randFloat();
+        int lightIndex = max(0, uPointLightCount - 1);
+//      int lightIndex = max(0, uPointLightCount - 1);
+        for (int i = 0; i < uPointLightCount; i++) {
+//      for (int i = 0; i < uPointLightCount; i++) {
+            if (lightRand <= uPointLights[i].cdf) {
+//          if (lightRand <= uPointLights[i].cdf) {
+                lightIndex = i;
+//              lightIndex = i;
+                break;
+//              break;
             }
 //          }
         }
 //      }
 
-        // 2. Indirect illumination bootstrapped from the current cache through one cosine-weighted bounce.
-//      // 2. Indirect illumination bootstrapped from the current cache through one cosine-weighted bounce.
+        vec3 lightPos = uPointLights[lightIndex].position;
+//      vec3 lightPos = uPointLights[lightIndex].position;
+        float lightRadius = uPointLights[lightIndex].radius;
+//      float lightRadius = uPointLights[lightIndex].radius;
+        vec3 toLight = lightPos - surfacePoint;
+//      vec3 toLight = lightPos - surfacePoint;
+        float distToLight = length(toLight);
+//      float distToLight = length(toLight);
+        vec3 lightDir = toLight / max(distToLight, 1.0e-4);
+//      vec3 lightDir = toLight / max(distToLight, 1.0e-4);
+
+        float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
+//      float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
+        if (cosTheta <= 0.0) return vec3(0.0);
+//      if (cosTheta <= 0.0) return vec3(0.0);
+        if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return vec3(0.0);
+//      if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return vec3(0.0);
+
+        float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
+//      float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
+        float lightProjectedArea = PI * lightRadius * lightRadius;
+//      float lightProjectedArea = PI * lightRadius * lightRadius;
+        float clampedDist = max(distToLight, lightRadius + 0.05);
+//      float clampedDist = max(distToLight, lightRadius + 0.05);
+        float distSq = clampedDist * clampedDist;
+//      float distSq = clampedDist * clampedDist;
+
+        float unusedPdf;
+//      float unusedPdf;
+        vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
+//      vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
+                                                  albedo, roughness, metallic, 0.0, unusedPdf);
+//                                                albedo, roughness, metallic, 0.0, unusedPdf);
+        return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
+//      return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
+    }
+//  }
+
+    // Estimate of the outgoing radiance leaving a surface point, and the regression target for the
+//  // Estimate of the outgoing radiance leaving a surface point, and the regression target for the
+    // network: direct illumination at this vertex, plus one cosine-weighted bounce that terminates at
+//  // network: direct illumination at this vertex, plus one cosine-weighted bounce that terminates at
+    // the first cacheable vertex with a bootstrap read of the current cache. The network learns L_out,
+//  // the first cacheable vertex with a bootstrap read of the current cache. The network learns L_out,
+    // so callers add the result as-is without re-applying the surface albedo.
+//  // so callers add the result as-is without re-applying the surface albedo.
+    //
+//  //
+    // No next event estimation runs at the bounce vertices, and that is deliberate: the cache already
+//  // No next event estimation runs at the bounce vertices, and that is deliberate: the cache already
+    // represents the full outgoing radiance at a vertex, direct light included, so an explicit
+//  // represents the full outgoing radiance at a vertex, direct light included, so an explicit
+    // direct-lighting estimate there would count one bounce of direct light twice (see the bootstrap
+//  // direct-lighting estimate there would count one bounce of direct light twice (see the bootstrap
+    // branch below). The loop runs up to three iterations only to trace through mirror and glass
+//  // branch below). The loop runs up to three iterations only to trace through mirror and glass
+    // vertices, where the cache is view dependent and cannot be read.
+//  // vertices, where the cache is view dependent and cannot be read.
+    //
+//  //
+    // A bounce that escapes the geometry ends on the environment, which is a genuine light source in
+//  // A bounce that escapes the geometry ends on the environment, which is a genuine light source in
+    // an open scene, so its radiance is added rather than dropped. Omitting it trains the network to
+//  // an open scene, so its radiance is added rather than dropped. Omitting it trains the network to
+    // ignore sky lighting, and every path hybrid_shading_cs.glsl terminates on the cache then loses
+//  // ignore sky lighting, and every path hybrid_shading_cs.glsl terminates on the cache then loses
+    // that contribution -- a bias that grows with how much of the scene sees the sky.
+//  // that contribution -- a bias that grows with how much of the scene sees the sky.
+    vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
+//  vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
+                               vec3 albedo, float roughness, float metallic) {
+//                             vec3 albedo, float roughness, float metallic) {
+        vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
+//      vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
+                                                     albedo, roughness, metallic);
+//                                                   albedo, roughness, metallic);
+
         // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
 //      // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
+        vec3 throughput = albedo;
+//      vec3 throughput = albedo;
+        vec3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
+//      vec3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
         vec3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
 //      vec3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
-        vec3 randomBounceDir = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6) ? normalize(bounceDirUnnormalized) : surfaceNormal;
-//      vec3 randomBounceDir = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6) ? normalize(bounceDirUnnormalized) : surfaceNormal;
-        vec3 nextHitPoint;
-//      vec3 nextHitPoint;
-        vec3 nextHitNormal;
-//      vec3 nextHitNormal;
-        int nextTriangleIndex;
-//      int nextTriangleIndex;
-        if (traverseClosestHit(surfacePoint + surfaceNormal * EPSILON_OFFSET, randomBounceDir, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
-//      if (traverseClosestHit(surfacePoint + surfaceNormal * EPSILON_OFFSET, randomBounceDir, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
-            targetRadiance += albedo * evaluateNeuralRadianceCache(nextHitPoint, nextHitNormal);
-//          targetRadiance += albedo * evaluateNeuralRadianceCache(nextHitPoint, nextHitNormal);
+        vec3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
+//      vec3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
+                          ? normalize(bounceDirUnnormalized) : surfaceNormal;
+//                        ? normalize(bounceDirUnnormalized) : surfaceNormal;
+
+        for (uint bounce = 0u; bounce < 3u; bounce++) {
+//      for (uint bounce = 0u; bounce < 3u; bounce++) {
+            vec3 nextHitPoint;
+//          vec3 nextHitPoint;
+            vec3 nextHitNormal;
+//          vec3 nextHitNormal;
+            int nextTriangleIndex;
+//          int nextTriangleIndex;
+            if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
+//          if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex)) {
+                // Escaped the geometry: the radiance left along this direction is the environment. The
+//              // Escaped the geometry: the radiance left along this direction is the environment. The
+                // bounce is cosine sampled, so throughput already carries albedo * cos / pdf.
+//              // bounce is cosine sampled, so throughput already carries albedo * cos / pdf.
+                targetRadiance += throughput * getSkyColor(rayDirection);
+//              targetRadiance += throughput * getSkyColor(rayDirection);
+                break;
+//              break;
+            }
+//          }
+            if (nextTriangleIndex < 0) break;
+//          if (nextTriangleIndex < 0) break;
+
+            int hitMaterialIndex = int(vertices[nextTriangleIndex * 3].tangentAndMaterialIndex.w);
+//          int hitMaterialIndex = int(vertices[nextTriangleIndex * 3].tangentAndMaterialIndex.w);
+            Material hitMaterial = materials[hitMaterialIndex];
+//          Material hitMaterial = materials[hitMaterialIndex];
+
+            // Emitters are seen directly by the path tracer; folding them in here would double count.
+//          // Emitters are seen directly by the path tracer; folding them in here would double count.
+            if (hitMaterial.emissive > 0.0 || hitMaterial.textureIndexEmissive >= 0.0) break;
+//          if (hitMaterial.emissive > 0.0 || hitMaterial.textureIndexEmissive >= 0.0) break;
+
+            // Same placeholder-scalar caveat as main(): a mapped roughness/metallic only exposes 1.0.
+//          // Same placeholder-scalar caveat as main(): a mapped roughness/metallic only exposes 1.0.
+            float hitRoughness = (hitMaterial.textureIndexRoughness < -0.5) ? hitMaterial.roughness : 0.5;
+//          float hitRoughness = (hitMaterial.textureIndexRoughness < -0.5) ? hitMaterial.roughness : 0.5;
+            float hitMetallic  = (hitMaterial.textureIndexMetallic  < -0.5) ? hitMaterial.metallic  : 0.0;
+//          float hitMetallic  = (hitMaterial.textureIndexMetallic  < -0.5) ? hitMaterial.metallic  : 0.0;
+            vec3 hitAlbedo = hitMaterial.albedo.rgb;
+//          vec3 hitAlbedo = hitMaterial.albedo.rgb;
+
+            bool isCacheableVertex = (hitMetallic <= 0.8 && hitMaterial.transmission <= 0.5 && hitRoughness >= 0.05);
+//          bool isCacheableVertex = (hitMetallic <= 0.8 && hitMaterial.transmission <= 0.5 && hitRoughness >= 0.05);
+            if (isCacheableVertex) {
+//          if (isCacheableVertex) {
+                // The cache already represents the full outgoing radiance at a vertex (its own target
+//              // The cache already represents the full outgoing radiance at a vertex (its own target
+                // is direct + indirect), which is exactly why hybrid_shading_cs.glsl skips next event
+//              // is direct + indirect), which is exactly why hybrid_shading_cs.glsl skips next event
+                // estimation on the vertex it terminates a path at. So the bootstrap adds the cache
+//              // estimation on the vertex it terminates a path at. So the bootstrap adds the cache
+                // lookup alone: adding an explicit direct-lighting estimate here as well would count
+//              // lookup alone: adding an explicit direct-lighting estimate here as well would count
+                // one bounce of direct light twice, and the surplus compounds through the recursion
+//              // one bounce of direct light twice, and the surplus compounds through the recursion
+                // the next training pass builds on top of this target.
+//              // the next training pass builds on top of this target.
+                targetRadiance += throughput * evaluateNeuralRadianceCache(nextHitPoint, nextHitNormal);
+//              targetRadiance += throughput * evaluateNeuralRadianceCache(nextHitPoint, nextHitNormal);
+                break;
+//              break;
+            }
+//          }
+
+            // Mirror or glass: the cache is view dependent there, so carry the path on instead. The
+//          // Mirror or glass: the cache is view dependent there, so carry the path on instead. The
+            // continuation lobe is cosine rather than BSDF-sampled for the same reason the material
+//          // continuation lobe is cosine rather than BSDF-sampled for the same reason the material
+            // scalars are approximated above, namely that this pass has no texture sampler.
+//          // scalars are approximated above, namely that this pass has no texture sampler.
+            throughput *= hitAlbedo;
+//          throughput *= hitAlbedo;
+            rayOrigin = nextHitPoint + nextHitNormal * EPSILON_OFFSET;
+//          rayOrigin = nextHitPoint + nextHitNormal * EPSILON_OFFSET;
+            vec3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
+//          vec3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
+            rayDirection = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6)
+//          rayDirection = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6)
+                         ? normalize(continueDirUnnormalized) : nextHitNormal;
+//                       ? normalize(continueDirUnnormalized) : nextHitNormal;
+
+            if (bounce > 0u && bounce + 1u < 3u) {
+//          if (bounce > 0u && bounce + 1u < 3u) {
+                float survivalProbability = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 1.0);
+//              float survivalProbability = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 1.0);
+                if (randFloat() > survivalProbability) break;
+//              if (randFloat() > survivalProbability) break;
+                throughput /= survivalProbability;
+//              throughput /= survivalProbability;
+            }
+//          }
         }
 //      }
 
@@ -746,6 +918,7 @@
 //      return min(targetRadiance, vec3(15.0));
     }
 //  }
+
 
     void main() {
 //  void main() {
@@ -801,6 +974,10 @@
 //      vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
         int currentTriangle = triangleIndex;
 //      int currentTriangle = triangleIndex;
+        vec3 toSurface = currentPoint - uCameraGlobalPosition;
+//      vec3 toSurface = currentPoint - uCameraGlobalPosition;
+        vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
+//      vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
 
         // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
 //      // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
@@ -844,8 +1021,10 @@
 
             if (isCacheable) {
 //          if (isCacheable) {
-                vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentAlbedo);
-//              vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentAlbedo);
+                vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
+//              vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
+                                                            currentAlbedo, effectiveRoughness, effectiveMetallic);
+//                                                          currentAlbedo, effectiveRoughness, effectiveMetallic);
 
                 float acceptanceProb = 1.0;
 //              float acceptanceProb = 1.0;
@@ -874,6 +1053,16 @@
 //              // record deeper along the path instead of throwing the whole path away.
                 if (randFloat() < acceptanceProb) {
 //              if (randFloat() < acceptanceProb) {
+                    // Capacity invariant: this pass is dispatched as 128 workgroups of 64 invocations
+//                  // Capacity invariant: this pass is dispatched as 128 workgroups of 64 invocations
+                    // (8192 total) and each invocation stores at most one record before breaking out of
+//                  // (8192 total) and each invocation stores at most one record before breaking out of
+                    // the path loop, so storeIndex never reaches the 8192-record capacity of
+//                  // the path loop, so storeIndex never reaches the 8192-record capacity of
+                    // nrcTrainingRecords. The bounds check below is the guard that keeps that true if
+//                  // nrcTrainingRecords. The bounds check below is the guard that keeps that true if
+                    // the dispatch size in hybrid_renderer.py is ever raised without resizing the buffer.
+//                  // the dispatch size in hybrid_renderer.py is ever raised without resizing the buffer.
                     uint storeIndex = atomicAdd(uTrainingRecordCount, 1u);
 //                  uint storeIndex = atomicAdd(uTrainingRecordCount, 1u);
 
@@ -932,6 +1121,8 @@
 //          currentNormal = nextNormal;
             currentTriangle = nextTriangle;
 //          currentTriangle = nextTriangle;
+            currentIncomingDir = continueDir;
+//          currentIncomingDir = continueDir;
             currentAlbedo = materials[int(vertices[nextTriangle * 3].tangentAndMaterialIndex.w)].albedo.rgb;
 //          currentAlbedo = materials[int(vertices[nextTriangle * 3].tangentAndMaterialIndex.w)].albedo.rgb;
         }

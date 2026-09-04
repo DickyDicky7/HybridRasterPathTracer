@@ -849,8 +849,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
 #       self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
 
-        # 6. NRC Training Records Buffer: 8192 records * 9 floats
-#       # 6. NRC Training Records Buffer: 8192 records * 9 floats
+        # 6. NRC Training Records Buffer: 8192 records * 9 floats, sized to match the 8192 paths the
+#       # 6. NRC Training Records Buffer: 8192 records * 9 floats, sized to match the 8192 paths the
+        #    gather pass dispatches (see program_nrc_gather.run below); one record per path maximum.
+#       #    gather pass dispatches (see program_nrc_gather.run below); one record per path maximum.
         self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
 #       self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
 
@@ -1717,6 +1719,17 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
 #       self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
 
+        # The G-Buffer just written by the rasterization pass is read back through imageLoad by both
+#       # The G-Buffer just written by the rasterization pass is read back through imageLoad by both
+        # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
+#       # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
+        # writes once here, ahead of either consumer, instead of only on the Neural Radiance Cache path
+#       # writes once here, ahead of either consumer, instead of only on the Neural Radiance Cache path
+        # (where the barrier used to live and left the shading pass uncovered whenever NRC was off).
+#       # (where the barrier used to live and left the shading pass uncovered whenever NRC was off).
+        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+
         if "uRenderMode" in self.program_renderer:
 #       if "uRenderMode" in self.program_renderer:
             self.program_renderer["uRenderMode"] = self.render_mode.value
@@ -2024,6 +2037,22 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if "uResolution" in self.program_nrc_gather:
                 self.program_nrc_gather["uResolution"] = (w, h)
 #               self.program_nrc_gather["uResolution"] = (w, h)
+            if "uCameraGlobalPosition" in self.program_nrc_gather:
+#           if "uCameraGlobalPosition" in self.program_nrc_gather:
+                self.program_nrc_gather["uCameraGlobalPosition"] = tuple(self.camera.look_from)
+#               self.program_nrc_gather["uCameraGlobalPosition"] = tuple(self.camera.look_from)
+            # texture_hdri is already bound to texture unit 8 above for the shading pass, and unit
+#           # texture_hdri is already bound to texture unit 8 above for the shading pass, and unit
+            # bindings are global GL state, so the gather program only needs the sampler index.
+#           # bindings are global GL state, so the gather program only needs the sampler index.
+            if "uHdriTexture" in self.program_nrc_gather:
+#           if "uHdriTexture" in self.program_nrc_gather:
+                self.program_nrc_gather["uHdriTexture"] = 8
+#               self.program_nrc_gather["uHdriTexture"] = 8
+            if "uUseHdri" in self.program_nrc_gather:
+#           if "uUseHdri" in self.program_nrc_gather:
+                self.program_nrc_gather["uUseHdri"] = self.use_hdri
+#               self.program_nrc_gather["uUseHdri"] = self.use_hdri
             if "uPointLightCount" in self.program_nrc_gather:
 #           if "uPointLightCount" in self.program_nrc_gather:
                 self.program_nrc_gather["uPointLightCount"] = len(point_lights)
@@ -2059,6 +2088,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
                             self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
 #                           self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
 
+            # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.glsl records at most one
+#           # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.glsl records at most one
+            # vertex per path, which is exactly the capacity of ssbo_nrc_training_records. Raising this
+#           # vertex per path, which is exactly the capacity of ssbo_nrc_training_records. Raising this
+            # count without resizing that buffer silently discards the surplus records.
+#           # count without resizing that buffer silently discards the surplus records.
             self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
 #           self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
             self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
