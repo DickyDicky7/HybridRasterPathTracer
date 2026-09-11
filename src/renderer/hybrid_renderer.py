@@ -80,6 +80,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.cache_frame_counter: int = 0
         self.last_view_matrix: rr.Matrix44 = None
 #       self.last_view_matrix: rr.Matrix44 = None
+        self.last_view_proj_matrix: typing.Optional[rr.Matrix44] = None
+#       self.last_view_proj_matrix: typing.Optional[rr.Matrix44] = None
+        self.last_camera_position: typing.Optional[tuple[float, float, float]] = None
+#       self.last_camera_position: typing.Optional[tuple[float, float, float]] = None
+        self.is_scene_reset: bool = True
+#       self.is_scene_reset: bool = True
         self.render_mode: RenderMode = RenderMode.PATH_TRACE
 #       self.render_mode: RenderMode = RenderMode.PATH_TRACE
         self.is_nrc_enabled: bool = True
@@ -1709,6 +1715,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       transform_view: rr.Matrix44 = current_view_matrix
         transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
 #       transform_projection: rr.Matrix44 = self.camera.get_projection_matrix(jitter=(jitter_x, jitter_y), window_size=self.window_size)
+        current_view_proj: rr.Matrix44 = np.array(transform_view, dtype=np.float32) @ np.array(transform_projection, dtype=np.float32)
+#       current_view_proj: rr.Matrix44 = np.array(transform_view, dtype=np.float32) @ np.array(transform_projection, dtype=np.float32)
+        if self.last_view_proj_matrix is None:
+#       if self.last_view_proj_matrix is None:
+            self.last_view_proj_matrix = current_view_proj
+#           self.last_view_proj_matrix = current_view_proj
+            self.last_camera_position = tuple(self.camera.look_from)
+#           self.last_camera_position = tuple(self.camera.look_from)
 
         # 1. Rasterize to G-Buffer
 #       # 1. Rasterize to G-Buffer
@@ -2023,6 +2037,18 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uResolution" in self.program_shading:
             self.program_shading["uResolution"] = (w, h)
 #           self.program_shading["uResolution"] = (w, h)
+        if "uPreviousTransformViewProjection" in self.program_shading and self.last_view_proj_matrix is not None:
+#       if "uPreviousTransformViewProjection" in self.program_shading and self.last_view_proj_matrix is not None:
+            typing.cast(mgl.Uniform, self.program_shading["uPreviousTransformViewProjection"]).write(self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
+#           typing.cast(mgl.Uniform, self.program_shading["uPreviousTransformViewProjection"]).write(self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
+        if "uPreviousCameraPosition" in self.program_shading and self.last_camera_position is not None:
+#       if "uPreviousCameraPosition" in self.program_shading and self.last_camera_position is not None:
+            self.program_shading["uPreviousCameraPosition"] = self.last_camera_position
+#           self.program_shading["uPreviousCameraPosition"] = self.last_camera_position
+        if "uResetHistory" in self.program_shading:
+#       if "uResetHistory" in self.program_shading:
+            self.program_shading["uResetHistory"] = self.is_scene_reset
+#           self.program_shading["uResetHistory"] = self.is_scene_reset
 
         # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
 #       # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
@@ -2173,6 +2199,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
         self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
 #       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
+        self.last_view_proj_matrix = current_view_proj
+#       self.last_view_proj_matrix = current_view_proj
+        self.last_camera_position = tuple(self.camera.look_from)
+#       self.last_camera_position = tuple(self.camera.look_from)
+        self.is_scene_reset = False
+#       self.is_scene_reset = False
 
         # 3. Post Processing Pipeline
 #       # 3. Post Processing Pipeline
@@ -2295,6 +2327,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #               self.is_vrt_visualize = not self.is_vrt_visualize
                 self.frame_count = 0
 #               self.frame_count = 0
+            if self.frame_count == 0:
+#           if self.frame_count == 0:
+                self.is_scene_reset = True
+#               self.is_scene_reset = True
+                self.last_view_proj_matrix = None
+#               self.last_view_proj_matrix = None
+                self.last_camera_position = None
+#               self.last_camera_position = None
             pass
 #           pass
         pass

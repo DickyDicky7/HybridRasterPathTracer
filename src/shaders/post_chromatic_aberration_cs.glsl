@@ -26,10 +26,12 @@
 //  // Bilinear Texel Gather: The input is bound as a raw storage image rather than a hardware-filtered sampler, so fractional sample positions must be resolved manually by fetching the four surrounding texels and blending them along both axes. This upgrades the previous nearest-neighbour integer reads to sub-pixel-accurate fetches, eliminating the stair-step aliasing that would otherwise crawl along the chromatic fringes.
     vec3 sampleInputBilinear(vec2 samplePosition, ivec2 imageSizeInTexels) {
 //  vec3 sampleInputBilinear(vec2 samplePosition, ivec2 imageSizeInTexels) {
-        vec2 texelFraction = fract(samplePosition);
-//      vec2 texelFraction = fract(samplePosition);
-        ivec2 baseTexel = ivec2(floor(samplePosition));
-//      ivec2 baseTexel = ivec2(floor(samplePosition));
+        vec2 continuousTexel = samplePosition - 0.5;
+//      vec2 continuousTexel = samplePosition - 0.5;
+        vec2 texelFraction = fract(continuousTexel);
+//      vec2 texelFraction = fract(continuousTexel);
+        ivec2 baseTexel = ivec2(floor(continuousTexel));
+//      ivec2 baseTexel = ivec2(floor(continuousTexel));
 
         ivec2 texelTopLeft     = clamp(baseTexel,                ivec2(0), imageSizeInTexels - ivec2(1));
 //      ivec2 texelTopLeft     = clamp(baseTexel,                ivec2(0), imageSizeInTexels - ivec2(1));
@@ -63,8 +65,8 @@
         }
 //      }
 
-        vec2 centerUv = vec2(destinationPixelCoord) / vec2(outputImageSize);
-//      vec2 centerUv = vec2(destinationPixelCoord) / vec2(outputImageSize);
+        vec2 centerUv = (vec2(destinationPixelCoord) + 0.5) / vec2(outputImageSize);
+//      vec2 centerUv = (vec2(destinationPixelCoord) + 0.5) / vec2(outputImageSize);
         vec2 directionFromCenter = centerUv - 0.5;
 //      vec2 directionFromCenter = centerUv - 0.5;
 

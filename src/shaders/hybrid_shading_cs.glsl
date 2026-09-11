@@ -278,6 +278,12 @@
 //  uniform bool uVRTVisualize;
     uniform ivec2 uResolution;
 //  uniform ivec2 uResolution;
+    uniform mat4 uPreviousTransformViewProjection;
+//  uniform mat4 uPreviousTransformViewProjection;
+    uniform vec3 uPreviousCameraPosition;
+//  uniform vec3 uPreviousCameraPosition;
+    uniform bool uResetHistory;
+//  uniform bool uResetHistory;
     // NRC input-domain normalisation. The frequency positional encoding below is only well conditioned
 //  // NRC input-domain normalisation. The frequency positional encoding below is only well conditioned
     // when the encoded position spans roughly [-0.75, 0.75] (which is what Experiment001's unit-scale
@@ -1523,12 +1529,14 @@
 
     void updateReservoirSample(inout Reservoir reservoir, LightSample candidate, float weight, float countMultiplier) {
 //  void updateReservoirSample(inout Reservoir reservoir, LightSample candidate, float weight, float countMultiplier) {
+        if (weight <= 0.0 || isnan(weight) || isinf(weight)) return;
+//      if (weight <= 0.0 || isnan(weight) || isinf(weight)) return;
         reservoir.sum_of_weights += weight;
 //      reservoir.sum_of_weights += weight;
         reservoir.sample_count += countMultiplier;
 //      reservoir.sample_count += countMultiplier;
-        if (weight > 0.0 && rand() * reservoir.sum_of_weights < weight) {
-//      if (weight > 0.0 && rand() * reservoir.sum_of_weights < weight) {
+        if (rand() * reservoir.sum_of_weights < weight) {
+//      if (rand() * reservoir.sum_of_weights < weight) {
             reservoir.selected_sample = candidate;
 //          reservoir.selected_sample = candidate;
         }
@@ -2100,8 +2108,8 @@
 //              if (uReSTIREnabled) {
                     uint totalPixels = uint(uResolution.x * uResolution.y);
 //                  uint totalPixels = uint(uResolution.x * uResolution.y);
-                    uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
-//                  uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                    uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
+//                  uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
                     uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 //                  uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
                     sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
@@ -2273,8 +2281,8 @@
 //              if (depth == 0 && uReSTIREnabled) {
                     uint totalPixels = uint(uResolution.x * uResolution.y);
 //                  uint totalPixels = uint(uResolution.x * uResolution.y);
-                    uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
-//                  uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                    uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
+//                  uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
                     uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 //                  uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
                     sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
@@ -2458,10 +2466,10 @@
 //          if (executeReSTIR) {
                 uint totalPixels = uint(uResolution.x * uResolution.y);
 //              uint totalPixels = uint(uResolution.x * uResolution.y);
-                uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
-//              uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
-                uint previousFrameOffset = ((uint(uFrameCount) + 1u) % 2u) * totalPixels;
-//              uint previousFrameOffset = ((uint(uFrameCount) + 1u) % 2u) * totalPixels;
+                uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
+//              uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
+                uint previousFrameOffset = ((uCacheFrameCounter + 1u) % 2u) * totalPixels;
+//              uint previousFrameOffset = ((uCacheFrameCounter + 1u) % 2u) * totalPixels;
                 uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 //              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 
@@ -2514,28 +2522,48 @@
 
                 // Step 2: Spatiotemporal Reuse
 //              // Step 2: Spatiotemporal Reuse
-                if (uFrameCount > 1) {
-//              if (uFrameCount > 1) {
-                    Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + pixelIndex];
-//                  Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + pixelIndex];
-                    if (previousReservoir.sample_count > 0.0) {
-//                  if (previousReservoir.sample_count > 0.0) {
-                        float depthDiff = abs(previousReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
-//                      float depthDiff = abs(previousReservoir.surface_depth - rayHitResult.hitDistance) / max(rayHitResult.hitDistance, 1.0e-4);
-                        float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
-//                      float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
-                        if (depthDiff < 0.1 && normalDot > 0.9) {
-//                      if (depthDiff < 0.1 && normalDot > 0.9) {
-                            // Pixels that skipped their own trace this frame are allowed a longer history.
-//                          // Pixels that skipped their own trace this frame are allowed a longer history.
-                            float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
-//                          float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
-                            previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
-//                          previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
-                            float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
-//                          float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
-                            updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
-//                          updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
+                if (uCacheFrameCounter > 1u && !uResetHistory) {
+//              if (uCacheFrameCounter > 1u && !uResetHistory) {
+                    vec4 prevClipPos = uPreviousTransformViewProjection * vec4(hitPoint, 1.0);
+//                  vec4 prevClipPos = uPreviousTransformViewProjection * vec4(hitPoint, 1.0);
+                    if (prevClipPos.w > 0.0) {
+//                  if (prevClipPos.w > 0.0) {
+                        vec3 prevNdc = prevClipPos.xyz / prevClipPos.w;
+//                      vec3 prevNdc = prevClipPos.xyz / prevClipPos.w;
+                        vec2 prevScreenUv = prevNdc.xy * 0.5 + 0.5;
+//                      vec2 prevScreenUv = prevNdc.xy * 0.5 + 0.5;
+                        ivec2 prevPixelCoord = ivec2(prevScreenUv * vec2(uResolution));
+//                      ivec2 prevPixelCoord = ivec2(prevScreenUv * vec2(uResolution));
+                        if (prevPixelCoord.x >= 0 && prevPixelCoord.x < uResolution.x && prevPixelCoord.y >= 0 && prevPixelCoord.y < uResolution.y) {
+//                      if (prevPixelCoord.x >= 0 && prevPixelCoord.x < uResolution.x && prevPixelCoord.y >= 0 && prevPixelCoord.y < uResolution.y) {
+                            uint prevPixelIndex = uint(prevPixelCoord.y * uResolution.x + prevPixelCoord.x);
+//                          uint prevPixelIndex = uint(prevPixelCoord.y * uResolution.x + prevPixelCoord.x);
+                            Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + prevPixelIndex];
+//                          Reservoir previousReservoir = sampleReservoirs[previousFrameOffset + prevPixelIndex];
+                            if (previousReservoir.sample_count > 0.0) {
+//                          if (previousReservoir.sample_count > 0.0) {
+                                float prevHitDistance = length(hitPoint - uPreviousCameraPosition);
+//                              float prevHitDistance = length(hitPoint - uPreviousCameraPosition);
+                                float depthDiff = abs(previousReservoir.surface_depth - prevHitDistance) / max(prevHitDistance, 1.0e-4);
+//                              float depthDiff = abs(previousReservoir.surface_depth - prevHitDistance) / max(prevHitDistance, 1.0e-4);
+                                float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+//                              float normalDot = dot(previousReservoir.surface_normal, rayHitResult.hitSurfaceNormal);
+                                if (depthDiff < 0.1 && normalDot > 0.9) {
+//                              if (depthDiff < 0.1 && normalDot > 0.9) {
+                                    // Pixels that skipped their own trace this frame are allowed a longer history.
+//                                  // Pixels that skipped their own trace this frame are allowed a longer history.
+                                    float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
+//                                  float maxHistoryM = isActiveTrace ? 20.0 : 30.0;
+                                    previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
+//                                  previousReservoir.sample_count = min(previousReservoir.sample_count, maxHistoryM);
+                                    float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+//                                  float targetPdfTemporal = evaluateTargetPdf(previousReservoir.selected_sample, hitPoint, shadingNormal, viewDirection, albedo, roughness, metallic, transmission);
+                                    updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
+//                                  updateReservoirSample(pixelReservoir, previousReservoir.selected_sample, targetPdfTemporal * previousReservoir.contribution_weight * previousReservoir.sample_count, previousReservoir.sample_count);
+                                }
+//                              }
+                            }
+//                          }
                         }
 //                      }
                     }
@@ -2686,8 +2714,8 @@
 //          } else if (depth == 0 && uReSTIREnabled) {
                 uint totalPixels = uint(uResolution.x * uResolution.y);
 //              uint totalPixels = uint(uResolution.x * uResolution.y);
-                uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
-//              uint currentFrameOffset = (uint(uFrameCount) % 2u) * totalPixels;
+                uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
+//              uint currentFrameOffset = (uCacheFrameCounter % 2u) * totalPixels;
                 uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
 //              uint pixelIndex = uint(pixelCoordinates.y * uResolution.x + pixelCoordinates.x);
                 sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
