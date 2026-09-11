@@ -1758,30 +1758,32 @@
             vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 //          vec3 specularReflectedDirection = reflectPrincipled(incomingRay.direction, microfacetNormal);
 
-            if (dot(specularReflectedDirection, shadingNormal) > 0.0 && dot(specularReflectedDirection, hitResult.hitSurfaceNormal) > 0.0) {
-//          if (dot(specularReflectedDirection, shadingNormal) > 0.0 && dot(specularReflectedDirection, hitResult.hitSurfaceNormal) > 0.0) {
-                outScatteredDirection = specularReflectedDirection;
-//              outScatteredDirection = specularReflectedDirection;
-                float pdfValue;
-//              float pdfValue;
-                vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
-//              vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
-                float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
-//              float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
-                outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
-//              outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
-                outIsDelta = false;
-//              outIsDelta = false;
-                outPdf = pdfValue;
-//              outPdf = pdfValue;
-            } else {
-//          } else {
-                // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-//              // Current/Recent ray is/was absorbed (next ray is scattering into surface)
-                return false;
-//              return false;
+            if (dot(specularReflectedDirection, hitResult.hitSurfaceNormal) <= 0.0) {
+//          if (dot(specularReflectedDirection, hitResult.hitSurfaceNormal) <= 0.0) {
+                specularReflectedDirection = normalize(specularReflectedDirection - 2.0 * dot(specularReflectedDirection, hitResult.hitSurfaceNormal) * hitResult.hitSurfaceNormal);
+//              specularReflectedDirection = normalize(specularReflectedDirection - 2.0 * dot(specularReflectedDirection, hitResult.hitSurfaceNormal) * hitResult.hitSurfaceNormal);
             }
 //          }
+            if (dot(specularReflectedDirection, shadingNormal) <= 0.0) {
+//          if (dot(specularReflectedDirection, shadingNormal) <= 0.0) {
+                specularReflectedDirection = normalize(specularReflectedDirection + hitResult.hitSurfaceNormal * 0.2);
+//              specularReflectedDirection = normalize(specularReflectedDirection + hitResult.hitSurfaceNormal * 0.2);
+            }
+//          }
+            outScatteredDirection = specularReflectedDirection;
+//          outScatteredDirection = specularReflectedDirection;
+            float pdfValue;
+//          float pdfValue;
+            vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
+//          vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingRay.direction, specularReflectedDirection, shadingNormal, albedo, roughness, metallic, material.transmission, pdfValue);
+            float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
+//          float cosOutgoingAngle = max(dot(shadingNormal, specularReflectedDirection), 0.0);
+            outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
+//          outAttenuation = bsdfValue * cosOutgoingAngle / max(pdfValue, EPSILON_MATH);
+            outIsDelta = false;
+//          outIsDelta = false;
+            outPdf = pdfValue;
+//          outPdf = pdfValue;
         } else {
 //      } else {
             // --- PATH B: DIELECTRIC (DIFFUSE OR TRANSMISSION) ---
@@ -1901,8 +1903,14 @@
 
                 if (dot(diffuseDirection, hitResult.hitSurfaceNormal) <= 0.0) {
 //              if (dot(diffuseDirection, hitResult.hitSurfaceNormal) <= 0.0) {
-                    return false;
-//                  return false;
+                    diffuseDirection = normalize(diffuseDirection - 2.0 * dot(diffuseDirection, hitResult.hitSurfaceNormal) * hitResult.hitSurfaceNormal);
+//                  diffuseDirection = normalize(diffuseDirection - 2.0 * dot(diffuseDirection, hitResult.hitSurfaceNormal) * hitResult.hitSurfaceNormal);
+                }
+//              }
+                if (dot(diffuseDirection, shadingNormal) <= 0.0) {
+//              if (dot(diffuseDirection, shadingNormal) <= 0.0) {
+                    diffuseDirection = normalize(diffuseDirection + hitResult.hitSurfaceNormal * 0.2);
+//                  diffuseDirection = normalize(diffuseDirection + hitResult.hitSurfaceNormal * 0.2);
                 }
 //              }
 

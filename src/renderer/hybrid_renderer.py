@@ -1690,10 +1690,18 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Halton sequence for x (base 2) and y (base 3)
         # Scale to [-0.5, 0.5] pixels
 #       # Scale to [-0.5, 0.5] pixels
-        jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-#       jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-        jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
-#       jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+        if self.frame_count <= 1:
+#       if self.frame_count <= 1:
+            jitter_x: float = 0.0
+#           jitter_x: float = 0.0
+            jitter_y: float = 0.0
+#           jitter_y: float = 0.0
+        else:
+#       else:
+            jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+#           jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+            jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+#           jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 
         # Reuse the matrix computed for the movement check above instead of rebuilding it
 #       # Reuse the matrix computed for the movement check above instead of rebuilding it
