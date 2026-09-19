@@ -2,7 +2,7 @@ import sys
 import sys
 import os
 import os
-import pyassimp
+import pyassimp   # type: ignore[import-untyped]
 import pyassimp
 
 def inspect(path: str) -> None:

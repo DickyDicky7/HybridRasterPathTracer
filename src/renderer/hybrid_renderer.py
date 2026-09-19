@@ -30,6 +30,8 @@ from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.camera import Camera
 from src.scene.camera import Camera
+from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
+from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
 
@@ -66,11 +68,11 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #   aspect_ratio: float = window_size[0] / window_size[1]
     resizable: bool = False
 #   resizable: bool = False
-    resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
-#   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
+    resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False) # type: ignore[assignment]
+#   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False) # type: ignore[assignment]
 
-    def __init__(self, **kwargs: dict[str, typing.Any]) -> None:
-#   def __init__(self, **kwargs: dict[str, typing.Any]) -> None:
+    def __init__(self, **kwargs: typing.Any) -> None:
+#   def __init__(self, **kwargs: typing.Any) -> None:
         super().__init__(**kwargs)
 #       super().__init__(**kwargs)
 
@@ -188,40 +190,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # HDRI Texture Loading
 #       # HDRI Texture Loading
-        hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
-#       hdri_path: pl.Path = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
-        self.use_hdri: bool = False # hdri_path.exists()
-#       self.use_hdri: bool = False # hdri_path.exists()
-        if self.use_hdri:
-#       if self.use_hdri:
-            loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
-#           loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
-            if loaded_data is None:
-#           if loaded_data is None:
-                raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
-#               raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
-            hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
-#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
-            hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
-#           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
-            hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
-#           hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
-            h, w, c = hdri_data.shape
-#           h, w, c = hdri_data.shape
-            self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-#           self.texture_hdri: mgl.Texture = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
-#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
-            self.texture_hdri.repeat_x = True
-#           self.texture_hdri.repeat_x = True
-            self.texture_hdri.repeat_y = False
-#           self.texture_hdri.repeat_y = False
-        else:
-#       else:
-            # Create dummy 1x1 texture
-#           # Create dummy 1x1 texture
-            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
-#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
+        self.texture_hdri: mgl.Texture = typing.cast(mgl.Texture, None)
+#       self.texture_hdri: mgl.Texture = typing.cast(mgl.Texture, None)
+        self.use_hdri: bool = False
+#       self.use_hdri: bool = False
 
         # Texture Array for Scene Materials
 #       # Texture Array for Scene Materials
@@ -231,8 +203,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # how many layers are needed, so no VRAM is wasted on unused layers.
         self.texture_array_size: int = 2048
 #       self.texture_array_size: int = 2048
-        self.texture_array: mgl.TextureArray = None
-#       self.texture_array: mgl.TextureArray = None
+        self.texture_array: mgl.TextureArray = typing.cast(mgl.TextureArray, None)
+#       self.texture_array: mgl.TextureArray = typing.cast(mgl.TextureArray, None)
 
         self.texture_cache: dict[str, float] = {}
 #       self.texture_cache: dict[str, float] = {}
@@ -360,474 +332,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # -----------------------------
 #       # -----------------------------
-        # 5. Scene Geometry
-#       # 5. Scene Geometry
+        # 5. Scene Management
+#       # 5. Scene Management
         # -----------------------------
 #       # -----------------------------
-
-        self.materials: list[Material] = [
-#       self.materials: list[Material] = [
-            {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-#           {"albedo": (1.0, 1.0, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 9.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-            {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-#           {"albedo": (0.5, 1.0, 0.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-            {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-#           {"albedo": (0.0, 0.5, 1.0), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (1.0, 1.0)},
-            {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (10.0, 10.0)},
-#           {"albedo": (0.5, 0.5, 0.5), "roughness": 1.0, "metallic": 0.0, "transmission": 0.0, "ior": 1.5, "texture_index_albedo": -1, "texture_index_roughness": -1, "texture_index_metallic": -1, "texture_index_normal": -1, "emissive": 0.0, "texture_index_emissive": -1, "texture_index_transmission": -1, "uv_scale": (10.0, 10.0)},
-        ]
-#       ]
-
-        self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
-#       self.scene_builder: SceneBuilder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
-
-        self.scene_builder.add_cube(position=(-5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-#       self.scene_builder.add_cube(position=(-5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-        self.scene_builder.add_cube(position=(5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-#       self.scene_builder.add_cube(position=(5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-        self.scene_builder.add_cube(position=(5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-#       self.scene_builder.add_cube(position=(5.0, 1.0, 5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-        self.scene_builder.add_cube(position=(-5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-#       self.scene_builder.add_cube(position=(-5.0, 1.0, -5.0), rotation=(0.0, 0.0, 0.0), scale=(1.0, 1.0, 1.0), material_index=0)
-
-        self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3)
-#       self.scene_builder.add_plane(position=(0.0, -0.5, 0.0), rotation=(0.0, 0.0, 0.0), scale=(20.0, 1.0, 20.0), material_index=3)
-
-        # Load Vase
-#       # Load Vase
-        vase_albedo_idx = self.load_texture(self.resource_dir / "../assets/ChinaVase.jpg", is_srgb=True)
-#       vase_albedo_idx = self.load_texture(self.resource_dir / "../assets/ChinaVase.jpg", is_srgb=True)
-        # vase_roughness_idx = self.load_texture(self.resource_dir / "../assets/vase_base_roughness.jpg")
-#       # vase_roughness_idx = self.load_texture(self.resource_dir / "../assets/vase_base_roughness.jpg")
-        # vase_metallic_idx = self.load_texture(self.resource_dir / "../assets/vase_base_metallic.jpg")
-#       # vase_metallic_idx = self.load_texture(self.resource_dir / "../assets/vase_base_metallic.jpg")
-        # vase_normal_idx = self.load_texture(self.resource_dir / "../assets/vase_base_normal.png")
-#       # vase_normal_idx = self.load_texture(self.resource_dir / "../assets/vase_base_normal.png")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 0.0,
-#           "metallic": 0.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": vase_albedo_idx,
-#           "texture_index_albedo": vase_albedo_idx,
-            "texture_index_roughness": -1.0,
-#           "texture_index_roughness": -1.0,
-            "texture_index_metallic": -1.0,
-#           "texture_index_metallic": -1.0,
-            "texture_index_normal": -1.0,
-#           "texture_index_normal": -1.0,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        vase_material_index = len(self.materials) - 1
-#       vase_material_index = len(self.materials) - 1
-
-        vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
-#       vase_path = str(self.resource_dir / "../assets/ChinaVase.obj")
-        self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
-#       self.scene_builder.load_model(path=vase_path, position=(0.0, 0.5, 0.0), rotation=(np.pi / 4.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=vase_material_index)
-
-        # Load Pistol
-#       # Load Pistol
-        pistol_base_path = self.resource_dir / "../assets/pistol"
-#       pistol_base_path = self.resource_dir / "../assets/pistol"
-        pistol_material_indices = []
-#       pistol_material_indices = []
-
-        # Material 0: glock
-#       # Material 0: glock
-        idx_albedo_pistol = self.load_texture(pistol_base_path / "pistol_albedo.png", is_srgb=True)
-#       idx_albedo_pistol = self.load_texture(pistol_base_path / "pistol_albedo.png", is_srgb=True)
-        idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
-#       idx_normal_pistol = self.load_texture(pistol_base_path / "pistol_normal.png")
-        _, idx_met_sm_pistol, _ = self.load_packed_orm(metallic_path=pistol_base_path / "pistol_metallic_smoothness.png")
-#       _, idx_met_sm_pistol, _ = self.load_packed_orm(metallic_path=pistol_base_path / "pistol_metallic_smoothness.png")
-
-        # Material 0: lambert4
-#       # Material 0: lambert4
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 0.5,
-#           "roughness": 0.5,
-            "metallic": 0.0,
-#           "metallic": 0.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_pistol,
-#           "texture_index_albedo": idx_albedo_pistol,
-            "texture_index_roughness": -1.0,
-#           "texture_index_roughness": -1.0,
-            "texture_index_metallic": -1.0,
-#           "texture_index_metallic": -1.0,
-            "texture_index_normal": idx_normal_pistol,
-#           "texture_index_normal": idx_normal_pistol,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        pistol_material_indices.append(len(self.materials) - 1)
-#       pistol_material_indices.append(len(self.materials) - 1)
-
-        # Material 1: glock
-#       # Material 1: glock
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_pistol,
-#           "texture_index_albedo": idx_albedo_pistol,
-            "texture_index_roughness": -1.0,
-#           "texture_index_roughness": -1.0,
-            "texture_index_metallic": idx_met_sm_pistol,
-#           "texture_index_metallic": idx_met_sm_pistol,
-            "texture_index_normal": idx_normal_pistol,
-#           "texture_index_normal": idx_normal_pistol,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        pistol_material_indices.append(len(self.materials) - 1)
-#       pistol_material_indices.append(len(self.materials) - 1)
-
-        pistol_path = str(self.resource_dir / "../assets/pistol/pistol.fbx")
-#       pistol_path = str(self.resource_dir / "../assets/pistol/pistol.fbx")
-        self.scene_builder.load_model(path=pistol_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.2, 0.2, 0.2), material_indices=pistol_material_indices)
-#       self.scene_builder.load_model(path=pistol_path, position=(5.0, 10.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.2, 0.2, 0.2), material_indices=pistol_material_indices)
-
-        # Load Rifle (SLR AR-15)
-#       # Load Rifle (SLR AR-15)
-        rifle_base_path = self.resource_dir / "../assets/slr-ar-15"
-#       rifle_base_path = self.resource_dir / "../assets/slr-ar-15"
-        rifle_material_indices = []
-#       rifle_material_indices = []
-
-        # Material 0: Upper Receiver
-#       # Material 0: Upper Receiver
-        idx_albedo_0 = self.load_texture(rifle_base_path / "low_UpperReciever_BaseColor.jpg", is_srgb=True)
-#       idx_albedo_0 = self.load_texture(rifle_base_path / "low_UpperReciever_BaseColor.jpg", is_srgb=True)
-        idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
-#       idx_normal_0 = self.load_texture(rifle_base_path / "low_UpperReciever_Normal.jpg")
-        idx_roughness_0, _, _ = self.load_packed_orm(roughness_path=rifle_base_path / "UR_R.jpg")
-#       idx_roughness_0, _, _ = self.load_packed_orm(roughness_path=rifle_base_path / "UR_R.jpg")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0, # Assume metallic
-#           "metallic": 1.0, # Assume metallic
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_0,
-#           "texture_index_albedo": idx_albedo_0,
-            "texture_index_roughness": idx_roughness_0,
-#           "texture_index_roughness": idx_roughness_0,
-            "texture_index_metallic": -1.0,
-#           "texture_index_metallic": -1.0,
-            "texture_index_normal": idx_normal_0,
-#           "texture_index_normal": idx_normal_0,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        rifle_material_indices.append(len(self.materials) - 1)
-#       rifle_material_indices.append(len(self.materials) - 1)
-
-        # Material 1: Lower Receiver
-#       # Material 1: Lower Receiver
-        idx_albedo_1 = self.load_texture(rifle_base_path / "low_LowerReciever_BaseColor.jpg", is_srgb=True)
-#       idx_albedo_1 = self.load_texture(rifle_base_path / "low_LowerReciever_BaseColor.jpg", is_srgb=True)
-        idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
-#       idx_normal_1 = self.load_texture(rifle_base_path / "low_LowerReciever_Normal.jpg")
-        idx_roughness_1, idx_metallic_1, _ = self.load_packed_orm(roughness_path=rifle_base_path / "LR_R.png", metallic_path=rifle_base_path / "LR_M.png")
-#       idx_roughness_1, idx_metallic_1, _ = self.load_packed_orm(roughness_path=rifle_base_path / "LR_R.png", metallic_path=rifle_base_path / "LR_M.png")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_1,
-#           "texture_index_albedo": idx_albedo_1,
-            "texture_index_roughness": idx_roughness_1,
-#           "texture_index_roughness": idx_roughness_1,
-            "texture_index_metallic": idx_metallic_1,
-#           "texture_index_metallic": idx_metallic_1,
-            "texture_index_normal": idx_normal_1,
-#           "texture_index_normal": idx_normal_1,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        rifle_material_indices.append(len(self.materials) - 1)
-#       rifle_material_indices.append(len(self.materials) - 1)
-
-        # Material 2: Magazine
-#       # Material 2: Magazine
-        idx_albedo_2 = self.load_texture(rifle_base_path / "low_Magazine_BaseColor.jpg", is_srgb=True)
-#       idx_albedo_2 = self.load_texture(rifle_base_path / "low_Magazine_BaseColor.jpg", is_srgb=True)
-        idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
-#       idx_normal_2 = self.load_texture(rifle_base_path / "low_Magazine_Normal.jpg")
-        idx_roughness_2, idx_metallic_2, _ = self.load_packed_orm(roughness_path=rifle_base_path / "M_R.png", metallic_path=rifle_base_path / "M_M.png")
-#       idx_roughness_2, idx_metallic_2, _ = self.load_packed_orm(roughness_path=rifle_base_path / "M_R.png", metallic_path=rifle_base_path / "M_M.png")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_2,
-#           "texture_index_albedo": idx_albedo_2,
-            "texture_index_roughness": idx_roughness_2,
-#           "texture_index_roughness": idx_roughness_2,
-            "texture_index_metallic": idx_metallic_2,
-#           "texture_index_metallic": idx_metallic_2,
-            "texture_index_normal": idx_normal_2,
-#           "texture_index_normal": idx_normal_2,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        rifle_material_indices.append(len(self.materials) - 1)
-#       rifle_material_indices.append(len(self.materials) - 1)
-
-        # Material 3: Trijicon MRO
-#       # Material 3: Trijicon MRO
-        idx_albedo_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_BaseColor.jpg", is_srgb=True)
-#       idx_albedo_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_BaseColor.jpg", is_srgb=True)
-        idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
-#       idx_normal_3 = self.load_texture(rifle_base_path / "low_TrijiconMRO_Normal.jpg")
-        idx_roughness_3, idx_metallic_3, _ = self.load_packed_orm(roughness_path=rifle_base_path / "T_R.png", metallic_path=rifle_base_path / "T_M.png")
-#       idx_roughness_3, idx_metallic_3, _ = self.load_packed_orm(roughness_path=rifle_base_path / "T_R.png", metallic_path=rifle_base_path / "T_M.png")
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_3,
-#           "texture_index_albedo": idx_albedo_3,
-            "texture_index_roughness": idx_roughness_3,
-#           "texture_index_roughness": idx_roughness_3,
-            "texture_index_metallic": idx_metallic_3,
-#           "texture_index_metallic": idx_metallic_3,
-            "texture_index_normal": idx_normal_3,
-#           "texture_index_normal": idx_normal_3,
-            "emissive": 0.0,
-#           "emissive": 0.0,
-            "texture_index_emissive": -1.0,
-#           "texture_index_emissive": -1.0,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        rifle_material_indices.append(len(self.materials) - 1)
-#       rifle_material_indices.append(len(self.materials) - 1)
-
-        rifle_path = str(self.resource_dir / "../assets/slr-ar-15/AR-15.fbx")
-#       rifle_path = str(self.resource_dir / "../assets/slr-ar-15/AR-15.fbx")
-        self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
-#       self.scene_builder.load_model(path=rifle_path, position=(-5.0, 5.0, 0.0), rotation=(0.0, 0.0, 0.0), scale=(0.1, 0.1, 0.1), material_indices=rifle_material_indices)
-
-        # Load MP9
-#       # Load MP9
-        mp9_base_path = self.resource_dir / "../assets/mp9"
-#       mp9_base_path = self.resource_dir / "../assets/mp9"
-        mp9_material_indices = []
-#       mp9_material_indices = []
-
-        # Material 0: M_MP9
-#       # Material 0: M_MP9
-        idx_albedo_mp9 = self.load_texture(mp9_base_path / "M_MP9_Base_color.png", is_srgb=True)
-#       idx_albedo_mp9 = self.load_texture(mp9_base_path / "M_MP9_Base_color.png", is_srgb=True)
-        idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
-#       idx_normal_mp9 = self.load_texture(mp9_base_path / "M_MP9_Normal_OpenGL.png")
-        idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
-#       idx_roughness_mp9, idx_metallic_mp9, _ = self.load_packed_orm(roughness_path=mp9_base_path / "M_MP9_Roughness.png", metallic_path=mp9_base_path / "M_MP9_Metallic.png")
-        idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png", is_srgb=True)
-#       idx_emissive_mp9 = self.load_texture(mp9_base_path / "M_MP9_Emissive.png", is_srgb=True)
-
-        self.materials.append({
-#       self.materials.append({
-            "albedo": (1.0, 1.0, 1.0),
-#           "albedo": (1.0, 1.0, 1.0),
-            "roughness": 1.0,
-#           "roughness": 1.0,
-            "metallic": 1.0,
-#           "metallic": 1.0,
-            "transmission": 0.0,
-#           "transmission": 0.0,
-            "ior": 1.5,
-#           "ior": 1.5,
-            "texture_index_albedo": idx_albedo_mp9,
-#           "texture_index_albedo": idx_albedo_mp9,
-            "texture_index_roughness": idx_roughness_mp9,
-#           "texture_index_roughness": idx_roughness_mp9,
-            "texture_index_metallic": idx_metallic_mp9,
-#           "texture_index_metallic": idx_metallic_mp9,
-            "texture_index_normal": idx_normal_mp9,
-#           "texture_index_normal": idx_normal_mp9,
-            "emissive": 1.0,
-#           "emissive": 1.0,
-            "texture_index_emissive": idx_emissive_mp9,
-#           "texture_index_emissive": idx_emissive_mp9,
-            "texture_index_transmission": -1.0,
-#           "texture_index_transmission": -1.0,
-            "uv_scale": (1.0, 1.0),
-#           "uv_scale": (1.0, 1.0),
-        })
-#       })
-        mp9_material_indices.append(len(self.materials) - 1)
-#       mp9_material_indices.append(len(self.materials) - 1)
-
-        mp9_path = str(self.resource_dir / "../assets/mp9/MP9_Sketchfab.fbx")
-#       mp9_path = str(self.resource_dir / "../assets/mp9/MP9_Sketchfab.fbx")
-        self.scene_builder.load_model(path=mp9_path, position=(0.0, 5.0, 5.0), rotation=(np.pi * 0.25, 0.0, np.pi * -0.5), scale=(0.1, 0.1, 0.1), material_indices=mp9_material_indices)
-#       self.scene_builder.load_model(path=mp9_path, position=(0.0, 5.0, 5.0), rotation=(np.pi * 0.25, 0.0, np.pi * -0.5), scale=(0.1, 0.1, 0.1), material_indices=mp9_material_indices)
-
-
-
-
-        self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
-#       self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
-
-        # Upload to buffers
-#       # Upload to buffers
-        # 1. Nodes (already bytes)
-#       # 1. Nodes (already bytes)
-        self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
-#       self.ssbo_bvh_nodes: mgl.Buffer = self.ctx.buffer(data=bvh_data)
-
-        # 2. Single global geometry buffer serving as both VBO and SSBO
-#       # 2. Single global geometry buffer serving as both VBO and SSBO
-        self.buffer_global_vertices: mgl.Buffer = self.ctx.buffer(data=vertices_data)
-#       self.buffer_global_vertices: mgl.Buffer = self.ctx.buffer(data=vertices_data)
-
-        # 3. Materials
-#       # 3. Materials
-        self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
-#       self.ssbo_materials: mgl.Buffer = self.ctx.buffer(data=materials_data)
-
-        # NRC input-domain normalisation, derived from the BVH root AABB (bvh_data node 0 is
-#       # NRC input-domain normalisation, derived from the BVH root AABB (bvh_data node 0 is
-        # [aabb_min.xyz, left_child, aabb_max.xyz, right_child] as float32).
-#       # [aabb_min.xyz, left_child, aabb_max.xyz, right_child] as float32).
-        # The MLP's frequency positional encoding was designed in Experiment001 for a unit-scale
-#       # The MLP's frequency positional encoding was designed in Experiment001 for a unit-scale
-        # Cornell box, where a bare position * 0.5 landed inside roughly [-0.75, 0.75]. This scene is
-#       # Cornell box, where a bare position * 0.5 landed inside roughly [-0.75, 0.75]. This scene is
-        # ~20 units across, so the same constant would make sin/cos of the position alias many times
-#       # ~20 units across, so the same constant would make sin/cos of the position alias many times
-        # over and the network could not fit it. Map the scene AABB onto that same range instead.
-#       # over and the network could not fit it. Map the scene AABB onto that same range instead.
-        if len(bvh_data) >= 32:
-#       if len(bvh_data) >= 32:
-            bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
-#           bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
-            scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
-#           scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
-            scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
-#           scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
-        else:
-#       else:
-            scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
-#           scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
-            scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-#           scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-        scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
-#       scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
-        scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
-#       scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
-        self.nrc_position_offset: vec3f32 = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
-#       self.nrc_position_offset: vec3f32 = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
-        self.nrc_position_scale: float = 1.5 / scene_max_extent
-#       self.nrc_position_scale: float = 1.5 / scene_max_extent
-        print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
-#       print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
+        self.materials: list[Material] = []
+#       self.materials: list[Material] = []
+        self.scene_builder: SceneBuilder = typing.cast(SceneBuilder, None)
+#       self.scene_builder: SceneBuilder = typing.cast(SceneBuilder, None)
+        self.num_triangles: int = 0
+#       self.num_triangles: int = 0
+        self.ssbo_bvh_nodes: mgl.Buffer = typing.cast(mgl.Buffer, None)
+#       self.ssbo_bvh_nodes: mgl.Buffer = typing.cast(mgl.Buffer, None)
+        self.buffer_global_vertices: mgl.Buffer = typing.cast(mgl.Buffer, None)
+#       self.buffer_global_vertices: mgl.Buffer = typing.cast(mgl.Buffer, None)
+        self.ssbo_materials: mgl.Buffer = typing.cast(mgl.Buffer, None)
+#       self.ssbo_materials: mgl.Buffer = typing.cast(mgl.Buffer, None)
+        self.vao_scene: mgl.VertexArray = typing.cast(mgl.VertexArray, None)
+#       self.vao_scene: mgl.VertexArray = typing.cast(mgl.VertexArray, None)
+        self.nrc_position_offset: vec3f32 = (0.0, 0.0, 0.0)
+#       self.nrc_position_offset: vec3f32 = (0.0, 0.0, 0.0)
+        self.nrc_position_scale: float = 1.0
+#       self.nrc_position_scale: float = 1.0
         cache_entry_count: int = 131072
 #       cache_entry_count: int = 131072
         # 3 vec4s per entry (radiance+count, position+key, normal+frame): the reserved 4th vec4
@@ -869,21 +395,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         self.reset_neural_cache_weights()
 #       self.reset_neural_cache_weights()
-
-        # Single VAO for the entire scene
-#       # Single VAO for the entire scene
-        self.vao_scene: mgl.VertexArray = self.ctx.vertex_array(
-#       self.vao_scene: mgl.VertexArray = self.ctx.vertex_array(
-            self.program_geometry,
-#           self.program_geometry,
-            [
-#           [
-                (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
-#               (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
-            ],
-#           ],
-        )
-#       )
 
         self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 #       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
@@ -943,21 +454,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         ]
 #       ]
 
-        # Camera
-#       # Camera
-        self.camera: Camera = Camera(
-#       self.camera: Camera = Camera(
-            position=(-28.284, 0.0, -28.284),
-#           position=(-28.284, 0.0, -28.284),
-            look_at=(0.0, 0.0, 0.0),
-#           look_at=(0.0, 0.0, 0.0),
-            up=(0.0, 1.0, 0.0),
-#           up=(0.0, 1.0, 0.0),
-            aspect_ratio=self.aspect_ratio
-#           aspect_ratio=self.aspect_ratio
-        )
-#       )
-
+        # Key states for first-person camera movement
+#       # Key states for first-person camera movement
         self.key_state: dict[str, bool] = {
 #       self.key_state: dict[str, bool] = {
             "W": False, "A": False, "S": False, "D": False,
@@ -969,8 +467,27 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         }
 #       }
 
-        self.upload_pending_textures()
-#       self.upload_pending_textures()
+        # Camera instance (initialized by set_scene)
+#       # Camera instance (initialized by set_scene)
+        self.camera: Camera = typing.cast(Camera, None)
+#       self.camera: Camera = typing.cast(Camera, None)
+
+        # Scenes Collection
+#       # Scenes Collection
+        self.scenes: list[BaseScene] = [
+#       self.scenes: list[BaseScene] = [
+            CornellBoxScene(resource_dir=self.resource_dir),
+#           CornellBoxScene(resource_dir=self.resource_dir),
+            ShowcaseScene(resource_dir=self.resource_dir),
+#           ShowcaseScene(resource_dir=self.resource_dir),
+        ]
+#       ]
+        self.current_scene_index: int = 0
+#       self.current_scene_index: int = 0
+        self.current_scene: BaseScene = typing.cast(BaseScene, None)
+#       self.current_scene: BaseScene = typing.cast(BaseScene, None)
+        self.set_scene(scene=self.scenes[self.current_scene_index])
+#       self.set_scene(scene=self.scenes[self.current_scene_index])
         pass
 #       pass
 
@@ -1127,8 +644,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
             interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
 #           interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
-            channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
-#           channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+            channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation).astype(dtype=np.float32)
+#           channel_float = cv2.resize(channel_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation).astype(dtype=np.float32)
 
         return channel_float
 #       return channel_float
@@ -1203,6 +720,229 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # history with undefined (usually black) albedo.
         self.texture_array.use(location=9)
 #       self.texture_array.use(location=9)
+        pass
+#       pass
+
+    def setup_hdri(self, hdri_path: pl.Path | None = None, use_hdri: bool = False) -> None:
+#   def setup_hdri(self, hdri_path: pl.Path | None = None, use_hdri: bool = False) -> None:
+        self.use_hdri = use_hdri and hdri_path is not None and hdri_path.exists()
+#       self.use_hdri = use_hdri and hdri_path is not None and hdri_path.exists()
+        if self.texture_hdri is not None:
+#       if self.texture_hdri is not None:
+            self.texture_hdri.release()
+#           self.texture_hdri.release()
+        if self.use_hdri and hdri_path is not None:
+#       if self.use_hdri and hdri_path is not None:
+            loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
+#           loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
+            if loaded_data is None:
+#           if loaded_data is None:
+                raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
+#               raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
+            hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
+#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
+            hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
+#           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
+            hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
+#           hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
+            h, w, c = hdri_data.shape
+#           h, w, c = hdri_data.shape
+            self.texture_hdri = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
+#           self.texture_hdri = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
+            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
+            self.texture_hdri.repeat_x = True
+#           self.texture_hdri.repeat_x = True
+            self.texture_hdri.repeat_y = False
+#           self.texture_hdri.repeat_y = False
+        else:
+#       else:
+            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
+#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
+        pass
+#       pass
+
+    def set_scene(self, scene: BaseScene) -> None:
+#   def set_scene(self, scene: BaseScene) -> None:
+        # Load and activate a scene, uploading its geometry, materials, textures,
+#       # Load and activate a scene, uploading its geometry, materials, textures,
+        # and configuring the camera, lights, and NRC bounding box.
+#       # and configuring the camera, lights, and NRC bounding box.
+        print(f"[SCENE] Loading scene: {scene.name} (Index: {self.current_scene_index})")
+#       print(f"[SCENE] Loading scene: {scene.name} (Index: {self.current_scene_index})")
+        self.current_scene = scene
+#       self.current_scene = scene
+
+        # Reset texture registration state
+#       # Reset texture registration state
+        self.texture_cache = {}
+#       self.texture_cache = {}
+        self.pending_textures = []
+#       self.pending_textures = []
+        self.pending_packed_textures = []
+#       self.pending_packed_textures = []
+        self.next_texture_layer = 0
+#       self.next_texture_layer = 0
+
+        # Build scene materials and geometry
+#       # Build scene materials and geometry
+        self.materials = []
+#       self.materials = []
+        self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+#       self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+        scene.build(scene_builder=self.scene_builder, renderer=self)
+#       scene.build(scene_builder=self.scene_builder, renderer=self)
+
+        # Build BVH and pack vertex / material buffers
+#       # Build BVH and pack vertex / material buffers
+        self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
+#       self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
+
+        # Upload to GPU buffers
+#       # Upload to GPU buffers
+        if self.ssbo_bvh_nodes is not None:
+#       if self.ssbo_bvh_nodes is not None:
+            self.ssbo_bvh_nodes.release()
+#           self.ssbo_bvh_nodes.release()
+        self.ssbo_bvh_nodes = self.ctx.buffer(data=bvh_data)
+#       self.ssbo_bvh_nodes = self.ctx.buffer(data=bvh_data)
+
+        if self.buffer_global_vertices is not None:
+#       if self.buffer_global_vertices is not None:
+            self.buffer_global_vertices.release()
+#           self.buffer_global_vertices.release()
+        self.buffer_global_vertices = self.ctx.buffer(data=vertices_data)
+#       self.buffer_global_vertices = self.ctx.buffer(data=vertices_data)
+
+        if self.ssbo_materials is not None:
+#       if self.ssbo_materials is not None:
+            self.ssbo_materials.release()
+#           self.ssbo_materials.release()
+        self.ssbo_materials = self.ctx.buffer(data=materials_data)
+#       self.ssbo_materials = self.ctx.buffer(data=materials_data)
+
+        if self.vao_scene is not None:
+#       if self.vao_scene is not None:
+            self.vao_scene.release()
+#           self.vao_scene.release()
+        self.vao_scene = self.ctx.vertex_array(
+#       self.vao_scene = self.ctx.vertex_array(
+            self.program_geometry,
+#           self.program_geometry,
+            [
+#           [
+                (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
+#               (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
+            ],
+#           ],
+        )
+#       )
+
+        # Upload all registered textures to the texture array
+#       # Upload all registered textures to the texture array
+        if self.texture_array is not None:
+#       if self.texture_array is not None:
+            self.texture_array.release()
+#           self.texture_array.release()
+        self.upload_pending_textures()
+#       self.upload_pending_textures()
+
+        # NRC input-domain normalisation, derived from the BVH root AABB
+#       # NRC input-domain normalisation, derived from the BVH root AABB
+        if len(bvh_data) >= 32:
+#       if len(bvh_data) >= 32:
+            bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
+#           bvh_root: npt.NDArray[np.float32] = np.frombuffer(bvh_data, dtype=np.float32, count=8)
+            scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
+#           scene_aabb_min: npt.NDArray[np.float32] = bvh_root[0:3]
+            scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
+#           scene_aabb_max: npt.NDArray[np.float32] = bvh_root[4:7]
+        else:
+#       else:
+            scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+#           scene_aabb_min = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+            scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+#           scene_aabb_max = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
+#       scene_center: npt.NDArray[np.float32] = (scene_aabb_min + scene_aabb_max) * 0.5
+        scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
+#       scene_max_extent: float = float(max(np.max(scene_aabb_max - scene_aabb_min), 1.0e-3))
+        self.nrc_position_offset = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
+#       self.nrc_position_offset = (float(scene_center[0]), float(scene_center[1]), float(scene_center[2]))
+        self.nrc_position_scale = 1.5 / scene_max_extent
+#       self.nrc_position_scale = 1.5 / scene_max_extent
+        print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
+#       print(f"[NRC] scene aabb min={scene_aabb_min} max={scene_aabb_max} offset={self.nrc_position_offset} scale={self.nrc_position_scale:.5f}")
+
+        # Reset Neural Radiance Cache weights
+#       # Reset Neural Radiance Cache weights
+        self.reset_neural_cache_weights()
+#       self.reset_neural_cache_weights()
+
+        # Flush reservoirs and cache
+#       # Flush reservoirs and cache
+        w_res, h_res = self.window_size
+#       w_res, h_res = self.window_size
+        reservoir_floats_per_item: int = 20
+#       reservoir_floats_per_item: int = 20
+        self.ssbo_sample_reservoirs.write(np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+#       self.ssbo_sample_reservoirs.write(np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+        cache_entry_count: int = 131072
+#       cache_entry_count: int = 131072
+        cache_floats_per_entry: int = 12
+#       cache_floats_per_entry: int = 12
+        self.ssbo_radiance_cache.write(np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+#       self.ssbo_radiance_cache.write(np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+
+        # Setup HDRI / Environment
+#       # Setup HDRI / Environment
+        self.setup_hdri(hdri_path=scene.hdri_path, use_hdri=scene.use_hdri)
+#       self.setup_hdri(hdri_path=scene.hdri_path, use_hdri=scene.use_hdri)
+
+        # Setup Camera
+#       # Setup Camera
+        self.camera = Camera(
+#       self.camera = Camera(
+            position=scene.camera_position,
+#           position=scene.camera_position,
+            look_at=scene.camera_look_at,
+#           look_at=scene.camera_look_at,
+            up=scene.camera_up,
+#           up=scene.camera_up,
+            aspect_ratio=self.aspect_ratio,
+#           aspect_ratio=self.aspect_ratio,
+            fov=scene.camera_fov,
+#           fov=scene.camera_fov,
+            speed=scene.camera_speed,
+#           speed=scene.camera_speed,
+        )
+#       )
+
+        # Reset history and frame counters
+#       # Reset history and frame counters
+        self.frame_count = 0
+#       self.frame_count = 0
+        self.cache_frame_counter = 0
+#       self.cache_frame_counter = 0
+        self.is_scene_reset = True
+#       self.is_scene_reset = True
+        self.last_view_matrix = None
+#       self.last_view_matrix = None
+        self.last_view_proj_matrix = None
+#       self.last_view_proj_matrix = None
+        self.last_camera_position = None
+#       self.last_camera_position = None
+        pass
+#       pass
+
+    def set_scene_by_index(self, index: int) -> None:
+#   def set_scene_by_index(self, index: int) -> None:
+        self.current_scene_index = index % len(self.scenes)
+#       self.current_scene_index = index % len(self.scenes)
+        self.set_scene(scene=self.scenes[self.current_scene_index])
+#       self.set_scene(scene=self.scenes[self.current_scene_index])
+        pass
+#       pass
 
     def reset_neural_cache_weights(self) -> None:
 #   def reset_neural_cache_weights(self) -> None:
@@ -1328,8 +1068,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           is_shrinking: bool = self.texture_array_size < src_width or self.texture_array_size < src_height
             interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
 #           interpolation: int = cv2.INTER_AREA if is_shrinking else cv2.INTER_LINEAR
-            data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
-#           data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation)
+            data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation).astype(dtype=np.float32)
+#           data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation).astype(dtype=np.float32)
 
         # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
         # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
@@ -1645,8 +1385,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Poll keys (Backup for key_event)
 #       # Poll keys (Backup for key_event)
-        keys: BaseKeys = self.wnd.keys
-#       keys: BaseKeys = self.wnd.keys
+        keys: type[BaseKeys] = self.wnd.keys
+#       keys: type[BaseKeys] = self.wnd.keys
         try:
 #       try:
             self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
@@ -1704,10 +1444,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           jitter_y: float = 0.0
         else:
 #       else:
-            jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-#           jitter_x: float = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
-            jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
-#           jitter_y: float = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+            jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+#           jitter_x = (self.get_halton_jitter(index=self.frame_count, base=2) - 0.5)
+            jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
+#           jitter_y = (self.get_halton_jitter(index=self.frame_count, base=3) - 0.5)
 
         # Reuse the matrix computed for the movement check above instead of rebuilding it
 #       # Reuse the matrix computed for the movement check above instead of rebuilding it
@@ -1825,23 +1565,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Point Lights Setup
 #       # Point Lights Setup
-        radius: float = 10.0
-#       radius: float = 10.0
-        x: float = np.cos(time) * radius
-#       x: float = np.cos(time) * radius
-        z: float = np.sin(time) * radius
-#       z: float = np.sin(time) * radius
-
-        point_lights: list[PointLight] = [
-#       point_lights: list[PointLight] = [
-            {"position": (x, 10.0, z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
-#           {"position": (x, 10.0, z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
-            {"position": (-x, 5.0, -z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
-#           {"position": (-x, 5.0, -z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
-            {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
-#           {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
-        ]
-#       ]
+        point_lights: list[PointLight] = self.current_scene.get_point_lights(time=time)
+#       point_lights: list[PointLight] = self.current_scene.get_point_lights(time=time)
 
         # Optimize by sorting lights by emission strength
 #       # Optimize by sorting lights by emission strength
@@ -2325,6 +2050,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           elif key == self.wnd.keys.H:
                 self.is_vrt_visualize = not self.is_vrt_visualize
 #               self.is_vrt_visualize = not self.is_vrt_visualize
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.TAB:
+#           elif key == self.wnd.keys.TAB:
+                self.set_scene_by_index(index=self.current_scene_index + 1)
+#               self.set_scene_by_index(index=self.current_scene_index + 1)
                 self.frame_count = 0
 #               self.frame_count = 0
             if self.frame_count == 0:
