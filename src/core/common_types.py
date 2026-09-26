@@ -122,3 +122,23 @@ class PointLight(typing.TypedDict):
 #   color: vec3f32
     radius: float
 #   radius: float
+
+class MediumVolume(typing.TypedDict):
+    # Defines the CPU-side structure for an in-scene participating medium (fog or cloud volume).
+#   # Defines the CPU-side structure for an in-scene participating medium (fog or cloud volume).
+    # Uploaded as uniforms; must match the MediumVolume struct in participating_media.glsl.
+#   # Uploaded as uniforms; must match the MediumVolume struct in participating_media.glsl.
+    aabb_min: vec3f32
+#   aabb_min: vec3f32
+    aabb_max: vec3f32
+#   aabb_max: vec3f32
+    density: float
+#   density: float
+    albedo: vec3f32
+#   albedo: vec3f32
+    anisotropy: float
+#   anisotropy: float
+    noise_frequency: float
+#   noise_frequency: float
+    kind: typing.Literal["fog", "cloud"]
+#   kind: typing.Literal["fog", "cloud"]

@@ -255,6 +255,20 @@
 //  uniform sampler2DArray uSceneTextureArray;
     uniform bool uUseHdri;
 //  uniform bool uUseHdri;
+    // Volumetric sky cloud layer: the baked equirectangular layer (secondary lookups) plus the noise
+//  // Volumetric sky cloud layer: the baked equirectangular layer (secondary lookups) plus the noise
+    // volume and parameters the live primary-ray march needs.
+//  // volume and parameters the live primary-ray march needs.
+    uniform bool uSkyCloudsEnabled;
+//  uniform bool uSkyCloudsEnabled;
+    uniform sampler2D uSkyCloudTexture;
+//  uniform sampler2D uSkyCloudTexture;
+    uniform sampler3D uCloudNoiseTexture;
+//  uniform sampler3D uCloudNoiseTexture;
+    uniform float uSkyCloudCoverage;
+//  uniform float uSkyCloudCoverage;
+    uniform float uSkyCloudDensity;
+//  uniform float uSkyCloudDensity;
 
     uniform vec3 uPixel00Coordinates;
 //  uniform vec3 uPixel00Coordinates;
@@ -528,6 +542,18 @@
     // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same sky this pass gathers.
 //  // Environment Lighting: evaluates the infinitely distant background radiance arriving along a ray's direction, serving as both the visible backdrop and the scene's image-based light source. When an HDR map is bound, the direction is projected into equirectangular (latitude-longitude) UVs and sampled, with the result clamped to suppress fireflies seeded by a few extreme-intensity texels. Otherwise it synthesizes a sky analytically — a Rayleigh-style zenith-to-horizon gradient, an exponential Mie horizon haze, and layered power-of-cosine glows that build a soft-to-sharp sun disk. Shared with nrc_gather_cs.glsl so the Neural Radiance Cache trains against the same sky this pass gathers.
     #include "sky_environment.glsl"
+
+    // Volumetrics: shared phase/noise helpers, the ray-marched sky cloud layer, and the in-scene
+//  // Volumetrics: shared phase/noise helpers, the ray-marched sky cloud layer, and the in-scene
+    // participating media the path tracer scatters inside. Media sampling draws from this pass's RNG.
+//  // participating media the path tracer scatters inside. Media sampling draws from this pass's RNG.
+    #include "volumetric_common.glsl"
+
+    #include "sky_clouds.glsl"
+
+    #define MEDIA_RAND rand
+//  #define MEDIA_RAND rand
+    #include "participating_media.glsl"
 
     // New Structs and Helper Functions
 //  // New Structs and Helper Functions
@@ -2203,6 +2229,159 @@
             }
 //          }
 
+            // Participating media: sample a free flight along the segment up to whatever the ray hits
+//          // Participating media: sample a free flight along the segment up to whatever the ray hits
+            // (surface, light, or nothing). A real collision turns this bounce into a medium vertex:
+//          // (surface, light, or nothing). A real collision turns this bounce into a medium vertex:
+            // next event estimation through the phase function, then a phase-sampled continuation.
+//          // next event estimation through the phase function, then a phase-sampled continuation.
+            // This runs at depth 0 too, so a medium in front of the G-Buffer surface pre-empts it; the
+//          // This runs at depth 0 too, so a medium in front of the G-Buffer surface pre-empts it; the
+            // pixel's ReSTIR reservoir was already cleared at the top of depth 0 and stays empty.
+//          // pixel's ReSTIR reservoir was already cleared at the top of depth 0 and stays empty.
+            float mediumScatterDistance;
+//          float mediumScatterDistance;
+            int mediumVolumeIndex;
+//          int mediumVolumeIndex;
+            float mediumSegmentEnd = hitLight ? lightHit.distanceToHit : ((rayHitResult.hitTriangleIndex != -1) ? rayHitResult.hitDistance : INF);
+//          float mediumSegmentEnd = hitLight ? lightHit.distanceToHit : ((rayHitResult.hitTriangleIndex != -1) ? rayHitResult.hitDistance : INF);
+            if (sampleMediumScattering(currentRay.origin, currentRay.direction, mediumSegmentEnd, mediumScatterDistance, mediumVolumeIndex)) {
+//          if (sampleMediumScattering(currentRay.origin, currentRay.direction, mediumSegmentEnd, mediumScatterDistance, mediumVolumeIndex)) {
+                hitPoint = currentRay.origin + currentRay.direction * mediumScatterDistance;
+//              hitPoint = currentRay.origin + currentRay.direction * mediumScatterDistance;
+                vec3 mediumAlbedo = uMediumVolumes[mediumVolumeIndex].albedo;
+//              vec3 mediumAlbedo = uMediumVolumes[mediumVolumeIndex].albedo;
+                float mediumAnisotropy = uMediumVolumes[mediumVolumeIndex].anisotropy;
+//              float mediumAnisotropy = uMediumVolumes[mediumVolumeIndex].anisotropy;
+
+                if (uPointLightCount > 0) {
+//              if (uPointLightCount > 0) {
+                    float lightSelectionRandom = rand();
+//                  float lightSelectionRandom = rand();
+                    int selectedLightIndex = max(0, uPointLightCount - 1);
+//                  int selectedLightIndex = max(0, uPointLightCount - 1);
+                    for (int lightSearchIndex = 0; lightSearchIndex < uPointLightCount; lightSearchIndex++) {
+//                  for (int lightSearchIndex = 0; lightSearchIndex < uPointLightCount; lightSearchIndex++) {
+                        if (lightSelectionRandom <= uPointLights[lightSearchIndex].cdf) {
+//                      if (lightSelectionRandom <= uPointLights[lightSearchIndex].cdf) {
+                            selectedLightIndex = lightSearchIndex;
+//                          selectedLightIndex = lightSearchIndex;
+                            break;
+//                          break;
+                        }
+//                      }
+                    }
+//                  }
+                    vec3 lightPosition = uPointLights[selectedLightIndex].position;
+//                  vec3 lightPosition = uPointLights[selectedLightIndex].position;
+                    float lightRadius = uPointLights[selectedLightIndex].radius;
+//                  float lightRadius = uPointLights[selectedLightIndex].radius;
+                    // Same facing-hemisphere light sampling as the surface NEE below, so the BRDF-hit MIS
+//                  // Same facing-hemisphere light sampling as the surface NEE below, so the BRDF-hit MIS
+                    // branch above weighs medium and surface vertices against one light pdf.
+//                  // branch above weighs medium and surface vertices against one light pdf.
+                    vec3 lightSampleNormal = randomUnitVector();
+//                  vec3 lightSampleNormal = randomUnitVector();
+                    if (dot(lightSampleNormal, normalize(hitPoint - lightPosition)) < 0.0) lightSampleNormal = -lightSampleNormal;
+//                  if (dot(lightSampleNormal, normalize(hitPoint - lightPosition)) < 0.0) lightSampleNormal = -lightSampleNormal;
+                    vec3 sampledLightPoint = lightPosition + lightSampleNormal * lightRadius;
+//                  vec3 sampledLightPoint = lightPosition + lightSampleNormal * lightRadius;
+                    vec3 shadowRayDirection = sampledLightPoint - hitPoint;
+//                  vec3 shadowRayDirection = sampledLightPoint - hitPoint;
+                    float actualDistanceToLight = length(shadowRayDirection);
+//                  float actualDistanceToLight = length(shadowRayDirection);
+                    float clampedDistanceToLight = max(actualDistanceToLight, lightRadius + 0.05);
+//                  float clampedDistanceToLight = max(actualDistanceToLight, lightRadius + 0.05);
+                    shadowRayDirection = normalize(shadowRayDirection);
+//                  shadowRayDirection = normalize(shadowRayDirection);
+                    float cosLightAngle = dot(lightSampleNormal, -shadowRayDirection);
+//                  float cosLightAngle = dot(lightSampleNormal, -shadowRayDirection);
+                    if (cosLightAngle > 0.0) {
+//                  if (cosLightAngle > 0.0) {
+                        Ray shadowRay;
+//                      Ray shadowRay;
+                        shadowRay.origin = hitPoint;
+//                      shadowRay.origin = hitPoint;
+                        shadowRay.direction = shadowRayDirection;
+//                      shadowRay.direction = shadowRayDirection;
+                        Interval shadowInterval;
+//                      Interval shadowInterval;
+                        shadowInterval.min = EPSILON_OFFSET;
+//                      shadowInterval.min = EPSILON_OFFSET;
+                        shadowInterval.max = actualDistanceToLight - EPSILON_OFFSET;
+//                      shadowInterval.max = actualDistanceToLight - EPSILON_OFFSET;
+                        if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+//                      if (!traverseBVHAnyHit(shadowRay, shadowInterval)) {
+                            float shadowTransmittance = estimateMediumTransmittance(hitPoint, shadowRayDirection, actualDistanceToLight);
+//                          float shadowTransmittance = estimateMediumTransmittance(hitPoint, shadowRayDirection, actualDistanceToLight);
+                            float lightSurfaceArea = 2.0 * PI * lightRadius * lightRadius;
+//                          float lightSurfaceArea = 2.0 * PI * lightRadius * lightRadius;
+                            float pdfLightArea = uPointLights[selectedLightIndex].pdf / lightSurfaceArea;
+//                          float pdfLightArea = uPointLights[selectedLightIndex].pdf / lightSurfaceArea;
+                            float lightPdfSolidAngle = (pdfLightArea * clampedDistanceToLight * clampedDistanceToLight) / max(cosLightAngle, 1.0e-5);
+//                          float lightPdfSolidAngle = (pdfLightArea * clampedDistanceToLight * clampedDistanceToLight) / max(cosLightAngle, 1.0e-5);
+                            float phaseValue = henyeyGreenstein(dot(currentRay.direction, shadowRayDirection), mediumAnisotropy);
+//                          float phaseValue = henyeyGreenstein(dot(currentRay.direction, shadowRayDirection), mediumAnisotropy);
+                            float sumOfSquaredPdfs = lightPdfSolidAngle * lightPdfSolidAngle + phaseValue * phaseValue;
+//                          float sumOfSquaredPdfs = lightPdfSolidAngle * lightPdfSolidAngle + phaseValue * phaseValue;
+                            float misWeightNee = (sumOfSquaredPdfs > 0.0) ? (lightPdfSolidAngle * lightPdfSolidAngle) / sumOfSquaredPdfs : 0.0;
+//                          float misWeightNee = (sumOfSquaredPdfs > 0.0) ? (lightPdfSolidAngle * lightPdfSolidAngle) / sumOfSquaredPdfs : 0.0;
+                            vec3 directLight = uPointLights[selectedLightIndex].color * phaseValue * shadowTransmittance / max(lightPdfSolidAngle, NEE_PDF_EPSILON);
+//                          vec3 directLight = uPointLights[selectedLightIndex].color * phaseValue * shadowTransmittance / max(lightPdfSolidAngle, NEE_PDF_EPSILON);
+                            directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
+//                          directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
+                            accumulatedColor += attenuation * mediumAlbedo * directLight * misWeightNee;
+//                          accumulatedColor += attenuation * mediumAlbedo * directLight * misWeightNee;
+                        }
+//                      }
+                    }
+//                  }
+                }
+//              }
+
+                // Phase sampling is exact, so phase / pdf = 1 and only the albedo enters the throughput.
+//              // Phase sampling is exact, so phase / pdf = 1 and only the albedo enters the throughput.
+                vec3 mediumScatteredDirection = sampleHenyeyGreenstein(currentRay.direction, mediumAnisotropy, rand(), rand());
+//              vec3 mediumScatteredDirection = sampleHenyeyGreenstein(currentRay.direction, mediumAnisotropy, rand(), rand());
+                float phasePdf = henyeyGreenstein(dot(currentRay.direction, mediumScatteredDirection), mediumAnisotropy);
+//              float phasePdf = henyeyGreenstein(dot(currentRay.direction, mediumScatteredDirection), mediumAnisotropy);
+                attenuation *= mediumAlbedo;
+//              attenuation *= mediumAlbedo;
+
+                if (depth >= int(RR_MIN_BOUNCES)) {
+//              if (depth >= int(RR_MIN_BOUNCES)) {
+                    float survivalProbability = clamp(maxVec3(attenuation), RR_MIN_PROBABILITY, RR_MAX_PROBABILITY);
+//                  float survivalProbability = clamp(maxVec3(attenuation), RR_MIN_PROBABILITY, RR_MAX_PROBABILITY);
+                    if (rand() > survivalProbability) break;
+//                  if (rand() > survivalProbability) break;
+                    attenuation *= 1.0 / survivalProbability;
+//                  attenuation *= 1.0 / survivalProbability;
+                }
+//              }
+
+                currentRay.origin = hitPoint;
+//              currentRay.origin = hitPoint;
+                currentRay.direction = mediumScatteredDirection;
+//              currentRay.direction = mediumScatteredDirection;
+                lastBrdfPdfSolidAngle = phasePdf;
+//              lastBrdfPdfSolidAngle = phasePdf;
+                lastWasDelta = false;
+//              lastWasDelta = false;
+                lastSkippedNEE = false;
+//              lastSkippedNEE = false;
+                lastRanReSTIR = false;
+//              lastRanReSTIR = false;
+                // Counts as a diffuse bounce: a scattered path is already blurred enough that the
+//              // Counts as a diffuse bounce: a scattered path is already blurred enough that the
+                // Neural Radiance Cache may terminate it at the next surface.
+//              // Neural Radiance Cache may terminate it at the next surface.
+                diffuseBounceCount++;
+//              diffuseBounceCount++;
+                continue;
+//              continue;
+            }
+//          }
+
             if (hitLight) {
 //          if (hitLight) {
                 vec3 emittedRadiance = uPointLights[lightHit.lightIndex].color;
@@ -2289,8 +2468,12 @@
 //                  sampleReservoirs[currentFrameOffset + pixelIndex].sample_count = 0.0;
                 }
 //              }
-                vec3 skyRadiance = getSkyColor(currentRay.direction);
-//              vec3 skyRadiance = getSkyColor(currentRay.direction);
+                // Directly visible sky (camera ray, or a chain of perfect mirrors/glass) marches the cloud
+//              // Directly visible sky (camera ray, or a chain of perfect mirrors/glass) marches the cloud
+                // layer live at full resolution; blurrier bounces read the baked layer instead.
+//              // layer live at full resolution; blurrier bounces read the baked layer instead.
+                vec3 skyRadiance = (depth == 0 || lastWasDelta) ? getSkyColorRayMarched(currentRay.direction, rand()) : getSkyColor(currentRay.direction);
+//              vec3 skyRadiance = (depth == 0 || lastWasDelta) ? getSkyColorRayMarched(currentRay.direction, rand()) : getSkyColor(currentRay.direction);
                 accumulatedColor += attenuation * skyRadiance;
 //              accumulatedColor += attenuation * skyRadiance;
                 break;
@@ -2693,6 +2876,12 @@
 //                          vec3 bsdfValue = evalPrincipledBSDFAndPDF(currentRay.direction, lightDirection, shadingNormal, albedo, roughness, metallic, transmission, unusedPdf);
                             vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
 //                          vec3 directLight = bsdfValue * surfaceCosine * pixelReservoir.selected_sample.emission * (lightCosine / max(distanceToLight * distanceToLight, 1.0e-4)) * pixelReservoir.contribution_weight;
+                            // Media shadowing enters at resolve only: the target pdf stays visibility-free,
+//                          // Media shadowing enters at resolve only: the target pdf stays visibility-free,
+                            // exactly like the BVH occlusion test above.
+//                          // exactly like the BVH occlusion test above.
+                            directLight *= estimateMediumTransmittance(hitPoint, lightDirection, distanceToLight);
+//                          directLight *= estimateMediumTransmittance(hitPoint, lightDirection, distanceToLight);
                             directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
 //                          directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));
                             accumulatedColor += attenuation * directLight;
@@ -2846,6 +3035,8 @@
 //                      // Radiance emitted by the point light's surface
                         vec3 directLight = uPointLights[selectedLightIndex].color * bsdfValue * cosSurfaceAngle / max(lightPdfSolidAngle, NEE_PDF_EPSILON);
 //                      vec3 directLight = uPointLights[selectedLightIndex].color * bsdfValue * cosSurfaceAngle / max(lightPdfSolidAngle, NEE_PDF_EPSILON);
+                        directLight *= estimateMediumTransmittance(hitPoint, shadowRayDirection, actualDistanceToLight);
+//                      directLight *= estimateMediumTransmittance(hitPoint, shadowRayDirection, actualDistanceToLight);
                         // Clamp direct light to prevent fireflies from extreme NEE contributions
 //                      // Clamp direct light to prevent fireflies from extreme NEE contributions
                         directLight = min(directLight, vec3(NEE_DIRECT_LIGHT_CLAMP));

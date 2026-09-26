@@ -162,6 +162,18 @@
 //  uniform sampler2D uHdriTexture;
     uniform bool uUseHdri;
 //  uniform bool uUseHdri;
+    // The baked volumetric cloud layer getSkyColor composites over the procedural sky, so the cache
+//  // The baked volumetric cloud layer getSkyColor composites over the procedural sky, so the cache
+    // trains against the same cloudy sky the shading pass sees on its secondary bounces.
+//  // trains against the same cloudy sky the shading pass sees on its secondary bounces.
+    uniform bool uSkyCloudsEnabled;
+//  uniform bool uSkyCloudsEnabled;
+    uniform sampler2D uSkyCloudTexture;
+//  uniform sampler2D uSkyCloudTexture;
+    // Noise volume sampled by participating_media.glsl for cloud-shaped scene volumes.
+//  // Noise volume sampled by participating_media.glsl for cloud-shaped scene volumes.
+    uniform sampler3D uCloudNoiseTexture;
+//  uniform sampler3D uCloudNoiseTexture;
 
     // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
 //  // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
@@ -252,6 +264,18 @@
 //      return vec3(sinPolar * cos(azimuthAngle), sinPolar * sin(azimuthAngle), cosPolar);
     }
 //  }
+
+    // In-scene participating media, included here rather than beside the other includes because its
+//  // In-scene participating media, included here rather than beside the other includes because its
+    // trackers draw from randFloat above. Only the shadow-ray transmittance is used: the training target
+//  // trackers draw from randFloat above. Only the shadow-ray transmittance is used: the training target
+    // then carries media shadows on the direct light, while its bounce rays still cross media unscattered.
+//  // then carries media shadows on the direct light, while its bounce rays still cross media unscattered.
+    #include "volumetric_common.glsl"
+
+    #define MEDIA_RAND randFloat
+//  #define MEDIA_RAND randFloat
+    #include "participating_media.glsl"
 
     float calculateLuminance(vec3 color) {
 //  float calculateLuminance(vec3 color) {
@@ -881,8 +905,10 @@
 //      vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
                                                   albedo, roughness, metallic, transmission, unusedPdf);
 //                                                albedo, roughness, metallic, transmission, unusedPdf);
-        return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
-//      return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf;
+        float shadowTransmittance = estimateMediumTransmittance(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
+//      float shadowTransmittance = estimateMediumTransmittance(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
+        return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf * shadowTransmittance;
+//      return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf * shadowTransmittance;
     }
 //  }
 

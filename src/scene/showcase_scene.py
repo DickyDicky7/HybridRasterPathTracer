@@ -4,8 +4,8 @@ import pathlib as pl
 import pathlib as pl
 import typing
 import typing
-from src.core.common_types import vec3f32, Material, PointLight
-from src.core.common_types import vec3f32, Material, PointLight
+from src.core.common_types import vec3f32, Material, PointLight, MediumVolume
+from src.core.common_types import vec3f32, Material, PointLight, MediumVolume
 from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.base_scene import BaseScene
@@ -28,6 +28,14 @@ class ShowcaseScene(BaseScene):
 #       self.camera_up: vec3f32 = (0.0, 1.0, 0.0)
         self.camera_fov: float = 60.0
 #       self.camera_fov: float = 60.0
+        # Scattered fair-weather cumulus over the procedural sky.
+#       # Scattered fair-weather cumulus over the procedural sky.
+        self.sky_clouds_enabled: bool = True
+#       self.sky_clouds_enabled: bool = True
+        self.sky_cloud_coverage: float = 0.5
+#       self.sky_cloud_coverage: float = 0.5
+        self.sky_cloud_density: float = 0.02
+#       self.sky_cloud_density: float = 0.02
         self.camera_speed: float = 10.0
 #       self.camera_speed: float = 10.0
         self.hdri_path: pl.Path | None = self.resource_dir / "../assets/wasteland_clouds_puresky_4k.exr"
@@ -454,5 +462,16 @@ class ShowcaseScene(BaseScene):
 #           {"position": (-x, 5.0, -z), "color": (100.0, 100.0, 100.0), "radius": 0.5},
             {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
 #           {"position": (0.0, 5.0, 0.0), "color": (100.0, 100.0, 100.0), "radius": 1.0},
+        ]
+#       ]
+
+    def get_medium_volumes(self) -> list[MediumVolume]:
+#   def get_medium_volumes(self) -> list[MediumVolume]:
+        # A low cloud drifting over the weapons, lit from below by the orbiting lights and from above by the sky.
+#       # A low cloud drifting over the weapons, lit from below by the orbiting lights and from above by the sky.
+        return [
+#       return [
+            {"aabb_min": (-9.0, 12.5, -7.0), "aabb_max": (9.0, 19.5, 7.0), "density": 2.5, "albedo": (0.97, 0.97, 0.97), "anisotropy": 0.4, "noise_frequency": 0.05, "kind": "cloud"},
+#           {"aabb_min": (-9.0, 12.5, -7.0), "aabb_max": (9.0, 19.5, 7.0), "density": 2.5, "albedo": (0.97, 0.97, 0.97), "anisotropy": 0.4, "noise_frequency": 0.05, "kind": "cloud"},
         ]
 #       ]

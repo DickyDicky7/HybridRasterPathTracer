@@ -32,8 +32,8 @@ from src.scene.camera import Camera
 from src.scene.camera import Camera
 from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
 from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
-from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
-from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight, MediumVolume
+from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight, MediumVolume
 
 class RenderMode(enum.IntEnum):
     PATH_TRACE = 0
@@ -98,6 +98,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.is_vrt_enabled: bool = True
         self.is_vrt_visualize: bool = False
 #       self.is_vrt_visualize: bool = False
+        # Volumetrics: the ray-marched sky cloud layer and the in-scene participating media. Each only
+#       # Volumetrics: the ray-marched sky cloud layer and the in-scene participating media. Each only
+        # takes effect in scenes that define it (BaseScene.sky_clouds_enabled / get_medium_volumes).
+#       # takes effect in scenes that define it (BaseScene.sky_clouds_enabled / get_medium_volumes).
+        self.is_sky_clouds_enabled: bool = True
+#       self.is_sky_clouds_enabled: bool = True
+        self.is_media_enabled: bool = True
+#       self.is_media_enabled: bool = True
         self.nrc_training_step: int = 0
 #       self.nrc_training_step: int = 0
 
@@ -278,6 +286,72 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       nrc_train_cs_code: str = resolve_includes(nrc_train_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
         self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
 #       self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
+
+        # -----------------------------
+#       # -----------------------------
+        # 3c. Compute Shaders (Volumetrics)
+#       # 3c. Compute Shaders (Volumetrics)
+        # -----------------------------
+#       # -----------------------------
+        cloud_noise_cs_path: pl.Path = self.resource_dir / "../shaders/cloud_noise_cs.glsl"
+#       cloud_noise_cs_path: pl.Path = self.resource_dir / "../shaders/cloud_noise_cs.glsl"
+        cloud_noise_cs_code: str = resolve_includes(cloud_noise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       cloud_noise_cs_code: str = resolve_includes(cloud_noise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_cloud_noise: mgl.ComputeShader = self.ctx.compute_shader(source=cloud_noise_cs_code)
+#       self.program_cloud_noise: mgl.ComputeShader = self.ctx.compute_shader(source=cloud_noise_cs_code)
+
+        sky_clouds_bake_cs_path: pl.Path = self.resource_dir / "../shaders/sky_clouds_bake_cs.glsl"
+#       sky_clouds_bake_cs_path: pl.Path = self.resource_dir / "../shaders/sky_clouds_bake_cs.glsl"
+        sky_clouds_bake_cs_code: str = resolve_includes(sky_clouds_bake_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+#       sky_clouds_bake_cs_code: str = resolve_includes(sky_clouds_bake_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
+        self.program_sky_clouds_bake: mgl.ComputeShader = self.ctx.compute_shader(source=sky_clouds_bake_cs_code)
+#       self.program_sky_clouds_bake: mgl.ComputeShader = self.ctx.compute_shader(source=sky_clouds_bake_cs_code)
+
+        # Tileable Perlin-Worley / Worley noise volume shared by the sky cloud layer and every
+#       # Tileable Perlin-Worley / Worley noise volume shared by the sky cloud layer and every
+        # cloud-shaped scene volume. It never changes, so it is generated once, here, and every
+#       # cloud-shaped scene volume. It never changes, so it is generated once, here, and every
+        # ray-march step afterwards is a single hardware-filtered fetch instead of procedural noise.
+#       # ray-march step afterwards is a single hardware-filtered fetch instead of procedural noise.
+        cloud_noise_size: int = 128
+#       cloud_noise_size: int = 128
+        self.texture_cloud_noise: mgl.Texture3D = self.ctx.texture3d(size=(cloud_noise_size, cloud_noise_size, cloud_noise_size), components=4, dtype="f1")
+#       self.texture_cloud_noise: mgl.Texture3D = self.ctx.texture3d(size=(cloud_noise_size, cloud_noise_size, cloud_noise_size), components=4, dtype="f1")
+        self.texture_cloud_noise.filter = (mgl.LINEAR, mgl.LINEAR)
+#       self.texture_cloud_noise.filter = (mgl.LINEAR, mgl.LINEAR)
+        self.texture_cloud_noise.repeat_x = True
+#       self.texture_cloud_noise.repeat_x = True
+        self.texture_cloud_noise.repeat_y = True
+#       self.texture_cloud_noise.repeat_y = True
+        self.texture_cloud_noise.repeat_z = True
+#       self.texture_cloud_noise.repeat_z = True
+        self.texture_cloud_noise.bind_to_image(0, read=False, write=True)
+#       self.texture_cloud_noise.bind_to_image(0, read=False, write=True)
+        self.program_cloud_noise["uNoiseSize"] = cloud_noise_size
+#       self.program_cloud_noise["uNoiseSize"] = cloud_noise_size
+        cloud_noise_groups: int = (cloud_noise_size + 7) // 8
+#       cloud_noise_groups: int = (cloud_noise_size + 7) // 8
+        self.program_cloud_noise.run(group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
+#       self.program_cloud_noise.run(group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
+        self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # Baked sky cloud layer, equirectangular like the HDRI (rgb: in-scattering, a: transmittance).
+#       # Baked sky cloud layer, equirectangular like the HDRI (rgb: in-scattering, a: transmittance).
+        # Only secondary bounces and NRC training read it, so half the HDRI's typical resolution is plenty.
+#       # Only secondary bounces and NRC training read it, so half the HDRI's typical resolution is plenty.
+        self.texture_sky_clouds: mgl.Texture = self.ctx.texture(size=(1024, 512), components=4, dtype="f2")
+#       self.texture_sky_clouds: mgl.Texture = self.ctx.texture(size=(1024, 512), components=4, dtype="f2")
+        self.texture_sky_clouds.filter = (mgl.LINEAR, mgl.LINEAR)
+#       self.texture_sky_clouds.filter = (mgl.LINEAR, mgl.LINEAR)
+        self.texture_sky_clouds.repeat_x = True
+#       self.texture_sky_clouds.repeat_x = True
+        self.texture_sky_clouds.repeat_y = False
+#       self.texture_sky_clouds.repeat_y = False
+        # Whether the current frame composites the sky cloud layer (toggle, scene, and no HDRI all agree).
+#       # Whether the current frame composites the sky cloud layer (toggle, scene, and no HDRI all agree).
+        self.is_sky_clouds_active: bool = False
+#       self.is_sky_clouds_active: bool = False
 
         # -----------------------------
 #       # -----------------------------
@@ -762,6 +836,114 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         pass
 #       pass
 
+    def bake_sky_clouds(self) -> None:
+#   def bake_sky_clouds(self) -> None:
+        # Re-integrate the sky cloud layer into texture_sky_clouds. The layer is static, so this only
+#       # Re-integrate the sky cloud layer into texture_sky_clouds. The layer is static, so this only
+        # runs when the scene or the cloud toggle changes, never per frame.
+#       # runs when the scene or the cloud toggle changes, never per frame.
+        self.is_sky_clouds_active = self.is_sky_clouds_enabled and self.current_scene.sky_clouds_enabled and not self.use_hdri
+#       self.is_sky_clouds_active = self.is_sky_clouds_enabled and self.current_scene.sky_clouds_enabled and not self.use_hdri
+        if not self.is_sky_clouds_active:
+#       if not self.is_sky_clouds_active:
+            return
+#           return
+        self.texture_cloud_noise.use(location=11)
+#       self.texture_cloud_noise.use(location=11)
+        if "uCloudNoiseTexture" in self.program_sky_clouds_bake:
+#       if "uCloudNoiseTexture" in self.program_sky_clouds_bake:
+            self.program_sky_clouds_bake["uCloudNoiseTexture"] = 11
+#           self.program_sky_clouds_bake["uCloudNoiseTexture"] = 11
+        if "uSkyCloudCoverage" in self.program_sky_clouds_bake:
+#       if "uSkyCloudCoverage" in self.program_sky_clouds_bake:
+            self.program_sky_clouds_bake["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
+#           self.program_sky_clouds_bake["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
+        if "uSkyCloudDensity" in self.program_sky_clouds_bake:
+#       if "uSkyCloudDensity" in self.program_sky_clouds_bake:
+            self.program_sky_clouds_bake["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
+#           self.program_sky_clouds_bake["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
+        self.texture_sky_clouds.bind_to_image(0, read=False, write=True)
+#       self.texture_sky_clouds.bind_to_image(0, read=False, write=True)
+        bake_width, bake_height = self.texture_sky_clouds.size
+#       bake_width, bake_height = self.texture_sky_clouds.size
+        self.program_sky_clouds_bake.run(group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
+#       self.program_sky_clouds_bake.run(group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
+        self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+#       self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        pass
+#       pass
+
+    def upload_volumetric_uniforms(self, program: mgl.ComputeShader) -> None:
+#   def upload_volumetric_uniforms(self, program: mgl.ComputeShader) -> None:
+        # Sky cloud layer and participating media uniforms, shared by the shading and NRC gather passes.
+#       # Sky cloud layer and participating media uniforms, shared by the shading and NRC gather passes.
+        # texture_sky_clouds / texture_cloud_noise are bound to units 10 / 11 once per frame in on_render.
+#       # texture_sky_clouds / texture_cloud_noise are bound to units 10 / 11 once per frame in on_render.
+        if "uSkyCloudsEnabled" in program:
+#       if "uSkyCloudsEnabled" in program:
+            program["uSkyCloudsEnabled"] = self.is_sky_clouds_active
+#           program["uSkyCloudsEnabled"] = self.is_sky_clouds_active
+        if "uSkyCloudTexture" in program:
+#       if "uSkyCloudTexture" in program:
+            program["uSkyCloudTexture"] = 10
+#           program["uSkyCloudTexture"] = 10
+        if "uCloudNoiseTexture" in program:
+#       if "uCloudNoiseTexture" in program:
+            program["uCloudNoiseTexture"] = 11
+#           program["uCloudNoiseTexture"] = 11
+        if "uSkyCloudCoverage" in program:
+#       if "uSkyCloudCoverage" in program:
+            program["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
+#           program["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
+        if "uSkyCloudDensity" in program:
+#       if "uSkyCloudDensity" in program:
+            program["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
+#           program["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
+        # Must match MAX_MEDIUM_VOLUMES in participating_media.glsl.
+#       # Must match MAX_MEDIUM_VOLUMES in participating_media.glsl.
+        medium_volumes: list[MediumVolume] = self.current_scene.get_medium_volumes()[:4]
+#       medium_volumes: list[MediumVolume] = self.current_scene.get_medium_volumes()[:4]
+        if "uMediaEnabled" in program:
+#       if "uMediaEnabled" in program:
+            program["uMediaEnabled"] = self.is_media_enabled and len(medium_volumes) > 0
+#           program["uMediaEnabled"] = self.is_media_enabled and len(medium_volumes) > 0
+        if "uMediumVolumeCount" in program:
+#       if "uMediumVolumeCount" in program:
+            program["uMediumVolumeCount"] = len(medium_volumes)
+#           program["uMediumVolumeCount"] = len(medium_volumes)
+        for i, volume in enumerate(medium_volumes):
+#       for i, volume in enumerate(medium_volumes):
+            # Checked member by member: the NRC gather pass only estimates transmittance, so the
+#           # Checked member by member: the NRC gather pass only estimates transmittance, so the
+            # compiler strips the scattering members (albedo, anisotropy) out of that program.
+#           # compiler strips the scattering members (albedo, anisotropy) out of that program.
+            volume_members: dict[str, typing.Any] = {
+#           volume_members: dict[str, typing.Any] = {
+                "aabbMin": volume["aabb_min"],
+#               "aabbMin": volume["aabb_min"],
+                "aabbMax": volume["aabb_max"],
+#               "aabbMax": volume["aabb_max"],
+                "density": volume["density"],
+#               "density": volume["density"],
+                "albedo": volume["albedo"],
+#               "albedo": volume["albedo"],
+                "anisotropy": volume["anisotropy"],
+#               "anisotropy": volume["anisotropy"],
+                "noiseFrequency": volume["noise_frequency"],
+#               "noiseFrequency": volume["noise_frequency"],
+                "kind": 0 if volume["kind"] == "fog" else 1,
+#               "kind": 0 if volume["kind"] == "fog" else 1,
+            }
+#           }
+            for member_name, member_value in volume_members.items():
+#           for member_name, member_value in volume_members.items():
+                if f"uMediumVolumes[{i}].{member_name}" in program:
+#               if f"uMediumVolumes[{i}].{member_name}" in program:
+                    program[f"uMediumVolumes[{i}].{member_name}"] = member_value
+#                   program[f"uMediumVolumes[{i}].{member_name}"] = member_value
+        pass
+#       pass
+
     def set_scene(self, scene: BaseScene) -> None:
 #   def set_scene(self, scene: BaseScene) -> None:
         # Load and activate a scene, uploading its geometry, materials, textures,
@@ -898,6 +1080,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Setup HDRI / Environment
         self.setup_hdri(hdri_path=scene.hdri_path, use_hdri=scene.use_hdri)
 #       self.setup_hdri(hdri_path=scene.hdri_path, use_hdri=scene.use_hdri)
+        # After setup_hdri: an HDRI scene skips the procedural cloud layer entirely.
+#       # After setup_hdri: an HDRI scene skips the procedural cloud layer entirely.
+        self.bake_sky_clouds()
+#       self.bake_sky_clouds()
 
         # Setup Camera
 #       # Setup Camera
@@ -1676,6 +1862,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uUseHdri" in self.program_shading:
             self.program_shading["uUseHdri"] = self.use_hdri
 #           self.program_shading["uUseHdri"] = self.use_hdri
+        # Volumetrics: baked sky cloud layer and cloud noise volume (units stay bound for the gather pass too)
+#       # Volumetrics: baked sky cloud layer and cloud noise volume (units stay bound for the gather pass too)
+        self.texture_sky_clouds.use(location=10)
+#       self.texture_sky_clouds.use(location=10)
+        self.texture_cloud_noise.use(location=11)
+#       self.texture_cloud_noise.use(location=11)
+        self.upload_volumetric_uniforms(program=self.program_shading)
+#       self.upload_volumetric_uniforms(program=self.program_shading)
 
 
         w, h = self.window_size
@@ -1836,6 +2030,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if "uUseHdri" in self.program_nrc_gather:
                 self.program_nrc_gather["uUseHdri"] = self.use_hdri
 #               self.program_nrc_gather["uUseHdri"] = self.use_hdri
+            # Same units 10 / 11 bound above for the shading pass: the training target sees the cloudy
+#           # Same units 10 / 11 bound above for the shading pass: the training target sees the cloudy
+            # sky and the media shadows the shading pass renders.
+#           # sky and the media shadows the shading pass renders.
+            self.upload_volumetric_uniforms(program=self.program_nrc_gather)
+#           self.upload_volumetric_uniforms(program=self.program_nrc_gather)
             # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
 #           # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
             # the HDRI above, the gather program only needs the sampler index. Without it the training
@@ -2050,6 +2250,20 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           elif key == self.wnd.keys.H:
                 self.is_vrt_visualize = not self.is_vrt_visualize
 #               self.is_vrt_visualize = not self.is_vrt_visualize
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.C:
+#           elif key == self.wnd.keys.C:
+                self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
+#               self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
+                self.bake_sky_clouds()
+#               self.bake_sky_clouds()
+                self.frame_count = 0
+#               self.frame_count = 0
+            elif key == self.wnd.keys.M:
+#           elif key == self.wnd.keys.M:
+                self.is_media_enabled = not self.is_media_enabled
+#               self.is_media_enabled = not self.is_media_enabled
                 self.frame_count = 0
 #               self.frame_count = 0
             elif key == self.wnd.keys.TAB:

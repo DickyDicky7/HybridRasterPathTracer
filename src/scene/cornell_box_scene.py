@@ -2,8 +2,8 @@ import pathlib as pl
 import pathlib as pl
 import typing
 import typing
-from src.core.common_types import vec3f32, Material, PointLight
-from src.core.common_types import vec3f32, Material, PointLight
+from src.core.common_types import vec3f32, Material, PointLight, MediumVolume
+from src.core.common_types import vec3f32, Material, PointLight, MediumVolume
 from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.base_scene import BaseScene
@@ -273,5 +273,16 @@ class CornellBoxScene(BaseScene):
 #       return [
             {"position": (0.0, 9.4, 0.0), "color": (100.0, 98.0, 95.0), "radius": 0.8},
 #           {"position": (0.0, 9.4, 0.0), "color": (100.0, 98.0, 95.0), "radius": 0.8},
+        ]
+#       ]
+
+    def get_medium_volumes(self) -> list[MediumVolume]:
+#   def get_medium_volumes(self) -> list[MediumVolume]:
+        # A smoke-like cloud puff hanging between the two blocks, under the ceiling light.
+#       # A smoke-like cloud puff hanging between the two blocks, under the ceiling light.
+        return [
+#       return [
+            {"aabb_min": (-3.7, 4.2, -2.1), "aabb_max": (2.7, 7.8, 3.1), "density": 5.0, "albedo": (0.95, 0.95, 0.95), "anisotropy": 0.3, "noise_frequency": 0.12, "kind": "cloud"},
+#           {"aabb_min": (-3.7, 4.2, -2.1), "aabb_max": (2.7, 7.8, 3.1), "density": 5.0, "albedo": (0.95, 0.95, 0.95), "anisotropy": 0.3, "noise_frequency": 0.12, "kind": "cloud"},
         ]
 #       ]
