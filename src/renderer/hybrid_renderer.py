@@ -194,16 +194,26 @@ class HybridRenderer:
 #       # The shading pass binds eight storage buffers (the WebGPU default ceiling) and large scenes outgrow
         # the default buffer sizes, so those limits are raised to whatever the adapter supports.
 #       # the default buffer sizes, so those limits are raised to whatever the adapter supports.
+        # subgroup + 1024-invocation workgroups: nrc_train_cs.slang trains the network as one 1024-invocation workgroup
+#       # subgroup + 1024-invocation workgroups: nrc_train_cs.slang trains the network as one 1024-invocation workgroup
+        # in which each record is shared by a quad of subgroup lanes (the WebGPU default ceiling is 256 invocations).
+#       # in which each record is shared by a quad of subgroup lanes (the WebGPU default ceiling is 256 invocations).
         required_limits: dict[str, int] = {
 #       required_limits: dict[str, int] = {
             limit_name: self.adapter.limits[limit_name]
 #           limit_name: self.adapter.limits[limit_name]
-            for limit_name in ("max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers")
-#           for limit_name in ("max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers")
+            for limit_name in (
+#           for limit_name in (
+                "max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers",
+#               "max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers",
+                "max-compute-invocations-per-workgroup", "max-compute-workgroup-size-x",
+#               "max-compute-invocations-per-workgroup", "max-compute-workgroup-size-x",
+            )
+#           )
         }
 #       }
-        self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
-#       self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
+        self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable", "subgroup"], required_limits=required_limits)
+#       self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable", "subgroup"], required_limits=required_limits)
 
         canvas_size: vec2i32 = window_options.size if window_options.size is not None else self.window_size
 #       canvas_size: vec2i32 = window_options.size if window_options.size is not None else self.window_size

@@ -284,6 +284,14 @@ def run_slangc(shader_dir: pl.Path, stages: list[tuple[str, str, str]]) -> Slang
 #           print(f"[SLANG] {[file_name for file_name, _, _ in stages]}:\n{diagnostics}")
         wgsl_code: str = wgsl_path.read_text(encoding="utf-8")
 #       wgsl_code: str = wgsl_path.read_text(encoding="utf-8")
+        # Slang opens a program that uses subgroup (wave) operations with the standard "enable subgroups;" directive,
+#       # Slang opens a program that uses subgroup (wave) operations with the standard "enable subgroups;" directive,
+        # which this wgpu's WGSL front end (naga) does not parse yet. naga gates the same builtins on the device's
+#       # which this wgpu's WGSL front end (naga) does not parse yet. naga gates the same builtins on the device's
+        # "subgroup" feature instead, so the directive is dropped and the operations themselves are left untouched.
+#       # "subgroup" feature instead, so the directive is dropped and the operations themselves are left untouched.
+        wgsl_code = wgsl_code.replace("enable subgroups;\n", "", 1)
+#       wgsl_code = wgsl_code.replace("enable subgroups;\n", "", 1)
         reflection: dict[str, typing.Any] = json.loads(reflection_path.read_text(encoding="utf-8"))
 #       reflection: dict[str, typing.Any] = json.loads(reflection_path.read_text(encoding="utf-8"))
 
