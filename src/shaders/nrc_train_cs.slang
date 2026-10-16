@@ -1,9 +1,3 @@
-    #version 430
-//  #version 430
-
-    layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-//  layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
     // Memory Layout for the NRC weights buffer (4556 floats total):
 //  // Memory Layout for the NRC weights buffer (4556 floats total):
     // [0, 1138]:       Active weights being trained
@@ -14,75 +8,67 @@
 //  // [2278, 3416]:    Adam Optimizer Momentum (m)
     // [3417, 4555]:    Adam Optimizer Velocity (v)
 //  // [3417, 4555]:    Adam Optimizer Velocity (v)
-    layout(std430, binding = 11) buffer NRCWeights {
-//  layout(std430, binding = 11) buffer NRCWeights {
-        float neuralNetworkWeights[];
-//      float neuralNetworkWeights[];
-    };
-//  };
+    RWStructuredBuffer<float> neuralNetworkWeights;
+//  RWStructuredBuffer<float> neuralNetworkWeights;
 
-    layout(std430, binding = 12) buffer NRCTrainingRecords {
-//  layout(std430, binding = 12) buffer NRCTrainingRecords {
-        float nrcTrainingRecords[];
-//      float nrcTrainingRecords[];
-    };
-//  };
+    StructuredBuffer<float> nrcTrainingRecords;
+//  StructuredBuffer<float> nrcTrainingRecords;
 
-    layout(std430, binding = 13) buffer NRCTrainingCounter {
-//  layout(std430, binding = 13) buffer NRCTrainingCounter {
-        uint uTrainingRecordCount;
-//      uint uTrainingRecordCount;
-    };
-//  };
+    RWStructuredBuffer<uint> trainingRecordCounter;
+//  RWStructuredBuffer<uint> trainingRecordCounter;
 
     uniform uint uTrainingStep;
 //  uniform uint uTrainingStep;
-    // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_gather_cs.glsl exactly.
-//  // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_gather_cs.glsl exactly.
-    uniform vec3 uNRCPositionOffset;
-//  uniform vec3 uNRCPositionOffset;
+    // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_gather_cs.slang exactly.
+//  // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_gather_cs.slang exactly.
+    uniform float3 uNRCPositionOffset;
+//  uniform float3 uNRCPositionOffset;
     uniform float uNRCPositionScale;
 //  uniform float uNRCPositionScale;
 
-    const float PI = 3.14159265359;
-//  const float PI = 3.14159265359;
-    const float TWO_PI = 6.28318530718;
-//  const float TWO_PI = 6.28318530718;
+    static const float PI = 3.14159265359;
+//  static const float PI = 3.14159265359;
+    static const float TWO_PI = 6.28318530718;
+//  static const float TWO_PI = 6.28318530718;
 
-    shared float shared_network_weights[1139];
-//  shared float shared_network_weights[1139];
-    shared float batch_input_features[256];
-//  shared float batch_input_features[256];
-    shared float batch_hidden_layer_1[256];
-//  shared float batch_hidden_layer_1[256];
-    shared float batch_hidden_layer_2[256];
-//  shared float batch_hidden_layer_2[256];
-    shared float batch_hidden_layer_3[256];
-//  shared float batch_hidden_layer_3[256];
-    shared float batch_hidden_layer_4[256];
-//  shared float batch_hidden_layer_4[256];
-    shared float batch_gradient_output_layer[48];
-//  shared float batch_gradient_output_layer[48];
-    shared float batch_gradient_hidden_4[256];
-//  shared float batch_gradient_hidden_4[256];
-    shared float batch_gradient_hidden_3[256];
-//  shared float batch_gradient_hidden_3[256];
-    shared float batch_gradient_hidden_2[256];
-//  shared float batch_gradient_hidden_2[256];
-    shared float batch_gradient_hidden_1[256];
-//  shared float batch_gradient_hidden_1[256];
-    shared uint shared_max_records;
-//  shared uint shared_max_records;
+    groupshared float shared_network_weights[1139];
+//  groupshared float shared_network_weights[1139];
+    groupshared float batch_input_features[256];
+//  groupshared float batch_input_features[256];
+    groupshared float batch_hidden_layer_1[256];
+//  groupshared float batch_hidden_layer_1[256];
+    groupshared float batch_hidden_layer_2[256];
+//  groupshared float batch_hidden_layer_2[256];
+    groupshared float batch_hidden_layer_3[256];
+//  groupshared float batch_hidden_layer_3[256];
+    groupshared float batch_hidden_layer_4[256];
+//  groupshared float batch_hidden_layer_4[256];
+    groupshared float batch_gradient_output_layer[48];
+//  groupshared float batch_gradient_output_layer[48];
+    groupshared float batch_gradient_hidden_4[256];
+//  groupshared float batch_gradient_hidden_4[256];
+    groupshared float batch_gradient_hidden_3[256];
+//  groupshared float batch_gradient_hidden_3[256];
+    groupshared float batch_gradient_hidden_2[256];
+//  groupshared float batch_gradient_hidden_2[256];
+    groupshared float batch_gradient_hidden_1[256];
+//  groupshared float batch_gradient_hidden_1[256];
+    groupshared uint shared_max_records;
+//  groupshared uint shared_max_records;
 
-    void main() {
-//  void main() {
-        uint localIndex = gl_LocalInvocationIndex;
-//      uint localIndex = gl_LocalInvocationIndex;
+    [shader("compute")]
+//  [shader("compute")]
+    [numthreads(256, 1, 1)]
+//  [numthreads(256, 1, 1)]
+    void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+//  void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+        uint localIndex = localInvocationIndex;
+//      uint localIndex = localInvocationIndex;
 
         if (localIndex == 0u) {
 //      if (localIndex == 0u) {
-            shared_max_records = min(uTrainingRecordCount, 8192u);
-//          shared_max_records = min(uTrainingRecordCount, 8192u);
+            shared_max_records = min(trainingRecordCounter[0], 8192u);
+//          shared_max_records = min(trainingRecordCounter[0], 8192u);
         }
 //      }
 
@@ -94,8 +80,8 @@
 //          shared_network_weights[i] = neuralNetworkWeights[i];
         }
 //      }
-        barrier();
-//      barrier();
+        GroupMemoryBarrierWithGroupSync();
+//      GroupMemoryBarrierWithGroupSync();
 
         uint maxRecords = shared_max_records;
 //      uint maxRecords = shared_max_records;
@@ -130,6 +116,8 @@
             float localGradHidden1[16];
 //          float localGradHidden1[16];
 
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint k = 0u; k < 16u; k++) {
 //          for (uint k = 0u; k < 16u; k++) {
                 localInput[k] = 0.0;
@@ -163,12 +151,12 @@
 //          if (isActiveThread) {
                 uint baseOffset = recordIndex * 9u;
 //              uint baseOffset = recordIndex * 9u;
-                vec3 targetRadiance = vec3(nrcTrainingRecords[baseOffset + 6u], nrcTrainingRecords[baseOffset + 7u], nrcTrainingRecords[baseOffset + 8u]);
-//              vec3 targetRadiance = vec3(nrcTrainingRecords[baseOffset + 6u], nrcTrainingRecords[baseOffset + 7u], nrcTrainingRecords[baseOffset + 8u]);
-                vec3 position = (vec3(nrcTrainingRecords[baseOffset + 0u], nrcTrainingRecords[baseOffset + 1u], nrcTrainingRecords[baseOffset + 2u]) - uNRCPositionOffset) * uNRCPositionScale;
-//              vec3 position = (vec3(nrcTrainingRecords[baseOffset + 0u], nrcTrainingRecords[baseOffset + 1u], nrcTrainingRecords[baseOffset + 2u]) - uNRCPositionOffset) * uNRCPositionScale;
-                vec3 normal = vec3(nrcTrainingRecords[baseOffset + 3u], nrcTrainingRecords[baseOffset + 4u], nrcTrainingRecords[baseOffset + 5u]);
-//              vec3 normal = vec3(nrcTrainingRecords[baseOffset + 3u], nrcTrainingRecords[baseOffset + 4u], nrcTrainingRecords[baseOffset + 5u]);
+                float3 targetRadiance = float3(nrcTrainingRecords[baseOffset + 6u], nrcTrainingRecords[baseOffset + 7u], nrcTrainingRecords[baseOffset + 8u]);
+//              float3 targetRadiance = float3(nrcTrainingRecords[baseOffset + 6u], nrcTrainingRecords[baseOffset + 7u], nrcTrainingRecords[baseOffset + 8u]);
+                float3 position = (float3(nrcTrainingRecords[baseOffset + 0u], nrcTrainingRecords[baseOffset + 1u], nrcTrainingRecords[baseOffset + 2u]) - uNRCPositionOffset) * uNRCPositionScale;
+//              float3 position = (float3(nrcTrainingRecords[baseOffset + 0u], nrcTrainingRecords[baseOffset + 1u], nrcTrainingRecords[baseOffset + 2u]) - uNRCPositionOffset) * uNRCPositionScale;
+                float3 normal = float3(nrcTrainingRecords[baseOffset + 3u], nrcTrainingRecords[baseOffset + 4u], nrcTrainingRecords[baseOffset + 5u]);
+//              float3 normal = float3(nrcTrainingRecords[baseOffset + 3u], nrcTrainingRecords[baseOffset + 4u], nrcTrainingRecords[baseOffset + 5u]);
 
                 // Reconstruct 16 Input Features
 //              // Reconstruct 16 Input Features
@@ -207,10 +195,14 @@
 
                 // Forward Pass
 //              // Forward Pass
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = shared_network_weights[256u + i];
 //                  float sum = shared_network_weights[256u + i];
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localInput[j] * shared_network_weights[i * 16u + j];
@@ -222,10 +214,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = shared_network_weights[528u + i];
 //                  float sum = shared_network_weights[528u + i];
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localHidden1[j] * shared_network_weights[272u + i * 16u + j];
@@ -237,10 +233,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = shared_network_weights[800u + i];
 //                  float sum = shared_network_weights[800u + i];
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localHidden2[j] * shared_network_weights[544u + i * 16u + j];
@@ -252,10 +252,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = shared_network_weights[1072u + i];
 //                  float sum = shared_network_weights[1072u + i];
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localHidden3[j] * shared_network_weights[816u + i * 16u + j];
@@ -269,10 +273,14 @@
 
                 // Output Error Calculation (L2 Loss Gradient)
 //              // Output Error Calculation (L2 Loss Gradient)
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 3u; i++) {
 //              for (uint i = 0u; i < 3u; i++) {
                     float sum = shared_network_weights[1136u + i];
 //                  float sum = shared_network_weights[1136u + i];
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localHidden4[j] * shared_network_weights[1088u + i * 16u + j];
@@ -286,10 +294,14 @@
 
                 // Backward Pass (Backpropagation with ReLU derivatives)
 //              // Backward Pass (Backpropagation with ReLU derivatives)
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = 0.0;
 //                  float sum = 0.0;
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 3u; j++) {
 //                  for (uint j = 0u; j < 3u; j++) {
                         sum += localGradOutput[j] * shared_network_weights[1088u + j * 16u + i];
@@ -301,10 +313,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = 0.0;
 //                  float sum = 0.0;
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localGradHidden4[j] * shared_network_weights[816u + j * 16u + i];
@@ -316,10 +332,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = 0.0;
 //                  float sum = 0.0;
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localGradHidden3[j] * shared_network_weights[544u + j * 16u + i];
@@ -331,10 +351,14 @@
                 }
 //              }
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint i = 0u; i < 16u; i++) {
 //              for (uint i = 0u; i < 16u; i++) {
                     float sum = 0.0;
 //                  float sum = 0.0;
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint j = 0u; j < 16u; j++) {
 //                  for (uint j = 0u; j < 16u; j++) {
                         sum += localGradHidden2[j] * shared_network_weights[272u + j * 16u + i];
@@ -352,6 +376,8 @@
 //          // Collaborative Gradient Accumulation via Shared Memory
             float accumulatedGradients[5];
 //          float accumulatedGradients[5];
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint p = 0u; p < 5u; p++) {
 //          for (uint p = 0u; p < 5u; p++) {
                 accumulatedGradients[p] = 0.0;
@@ -365,6 +391,8 @@
 //              if (localIndex / 16u == chunk) {
                     uint subId = localIndex % 16u;
 //                  uint subId = localIndex % 16u;
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint i = 0u; i < 16u; i++) {
 //                  for (uint i = 0u; i < 16u; i++) {
                         batch_input_features[subId * 16u + i] = localInput[i];
@@ -379,12 +407,16 @@
 //                      batch_hidden_layer_4[subId * 16u + i] = localHidden4[i];
                     }
 //                  }
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint i = 0u; i < 3u; i++) {
 //                  for (uint i = 0u; i < 3u; i++) {
                         batch_gradient_output_layer[subId * 3u + i] = localGradOutput[i];
 //                      batch_gradient_output_layer[subId * 3u + i] = localGradOutput[i];
                     }
 //                  }
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint i = 0u; i < 16u; i++) {
 //                  for (uint i = 0u; i < 16u; i++) {
                         batch_gradient_hidden_4[subId * 16u + i] = localGradHidden4[i];
@@ -399,13 +431,15 @@
 //                  }
                 }
 //              }
-                barrier();
-//              barrier();
+                GroupMemoryBarrierWithGroupSync();
+//              GroupMemoryBarrierWithGroupSync();
 
                 uint activeBatchSize = isActiveThread ? 16u : 0u;
 //              uint activeBatchSize = isActiveThread ? 16u : 0u;
                 if (activeBatchSize > 0u) {
 //              if (activeBatchSize > 0u) {
+                    [ForceUnroll]
+//                  [ForceUnroll]
                     for (uint p = 0u; p < 5u; p++) {
 //                  for (uint p = 0u; p < 5u; p++) {
                         uint parameterIndex = localIndex + p * 256u;
@@ -534,8 +568,8 @@
 //                  }
                 }
 //              }
-                barrier();
-//              barrier();
+                GroupMemoryBarrierWithGroupSync();
+//              GroupMemoryBarrierWithGroupSync();
             }
 //          }
 
@@ -548,6 +582,8 @@
                 float globalTrainingStep = min(float(uTrainingStep * 32u + step) + 1.0, 50000.0);
 //              float globalTrainingStep = min(float(uTrainingStep * 32u + step) + 1.0, 50000.0);
 
+                [ForceUnroll]
+//              [ForceUnroll]
                 for (uint p = 0u; p < 5u; p++) {
 //              for (uint p = 0u; p < 5u; p++) {
                     uint parameterIndex = localIndex + p * 256u;
@@ -592,8 +628,8 @@
 //              }
             }
 //          }
-            barrier();
-//          barrier();
+            GroupMemoryBarrierWithGroupSync();
+//          GroupMemoryBarrierWithGroupSync();
         }
 //      }
 
@@ -614,8 +650,8 @@
 
         if (localIndex == 0u) {
 //      if (localIndex == 0u) {
-            uTrainingRecordCount = 0u;
-//          uTrainingRecordCount = 0u;
+            trainingRecordCounter[0] = 0u;
+//          trainingRecordCounter[0] = 0u;
         }
 //      }
     }

@@ -1,5 +1,5 @@
-import moderngl as mgl
-import moderngl as mgl
+import wgpu # type: ignore[import-untyped]
+import wgpu
 import numpy as np
 import numpy as np
 import numpy.typing as npt
@@ -12,6 +12,8 @@ from src.scene import bvh
 from src.scene import bvh
 from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
 from src.core.common_types import vec2f32, vec3f32, vec4f32, Material
+from src.renderer.shader_compiler import RenderProgram
+from src.renderer.shader_compiler import RenderProgram
 
 class SceneBuilder:
     # The SceneBuilder is the central coordinator for preparing geometry for the Hybrid Renderer.
@@ -22,12 +24,12 @@ class SceneBuilder:
 #   # 1. Rasterization Resources: A unified VBO containing the global interleaved vertex buffer.
     # 2. Ray Tracing Resources: The same VBO bound as an SSBO, plus BVH and Material data.
 #   # 2. Ray Tracing Resources: The same VBO bound as an SSBO, plus BVH and Material data.
-    def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
-#   def __init__(self, ctx: mgl.Context, program_geometry: mgl.Program, materials: list[Material] | None = None) -> None:
-        self.ctx = ctx
-#       self.ctx = ctx
-        self.program_geometry = program_geometry
-#       self.program_geometry = program_geometry
+    def __init__(self, device: wgpu.GPUDevice, program_geometry: RenderProgram, materials: list[Material] | None = None) -> None:
+#   def __init__(self, device: wgpu.GPUDevice, program_geometry: RenderProgram, materials: list[Material] | None = None) -> None:
+        self.device: wgpu.GPUDevice = device
+#       self.device: wgpu.GPUDevice = device
+        self.program_geometry: RenderProgram = program_geometry
+#       self.program_geometry: RenderProgram = program_geometry
         self.materials: list[Material] = materials if materials is not None else []
 #       self.materials: list[Material] = materials if materials is not None else []
         self.cube_instance_data: list[npt.NDArray[np.float32]] = []

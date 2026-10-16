@@ -16,55 +16,72 @@
 //  //
     // The layer is kilometres away, so like the rest of the sky it is a function of direction only:
 //  // The layer is kilometres away, so like the rest of the sky it is a function of direction only:
-    // every camera position sees the same clouds, which is what lets sky_clouds_bake_cs.glsl
-//  // every camera position sees the same clouds, which is what lets sky_clouds_bake_cs.glsl
+    // every camera position sees the same clouds, which is what lets sky_clouds_bake_cs.slang
+//  // every camera position sees the same clouds, which is what lets sky_clouds_bake_cs.slang
     // pre-integrate it into an equirectangular texture for every non-primary lookup.
 //  // pre-integrate it into an equirectangular texture for every non-primary lookup.
     //
 //  //
-    // Requires the includer to have already included sky_environment.glsl and volumetric_common.glsl,
-//  // Requires the includer to have already included sky_environment.glsl and volumetric_common.glsl,
-    // and to have defined uSkyCloudCoverage and uSkyCloudDensity.
-//  // and to have defined uSkyCloudCoverage and uSkyCloudDensity.
+    // Builds on sky_environment (procedural sky, sun direction) and volumetric_common (noise, phase),
+//  // Builds on sky_environment (procedural sky, sun direction) and volumetric_common (noise, phase),
+    // and owns the layer's coverage and density parameters.
+//  // and owns the layer's coverage and density parameters.
     // ============================================================================
 //  // ============================================================================
-    const float SKY_PLANET_RADIUS = 6360000.0;           // metres
-//  const float SKY_PLANET_RADIUS = 6360000.0;           // metres
-    const float SKY_CLOUD_LAYER_BOTTOM = 1500.0;         // metres above ground
-//  const float SKY_CLOUD_LAYER_BOTTOM = 1500.0;         // metres above ground
-    const float SKY_CLOUD_LAYER_TOP = 4000.0;            // metres above ground
-//  const float SKY_CLOUD_LAYER_TOP = 4000.0;            // metres above ground
-    const float SKY_CLOUD_MAX_MARCH_DISTANCE = 30000.0;  // caps the grazing march near the horizon
-//  const float SKY_CLOUD_MAX_MARCH_DISTANCE = 30000.0;  // caps the grazing march near the horizon
-    const float SKY_CLOUD_FADE_DISTANCE = 45000.0;       // aerial perspective: clouds dissolve into the haze
-//  const float SKY_CLOUD_FADE_DISTANCE = 45000.0;       // aerial perspective: clouds dissolve into the haze
-    const float SKY_CLOUD_WEATHER_SCALE = 1.0 / 36000.0; // noise tiles per metre (coverage map)
-//  const float SKY_CLOUD_WEATHER_SCALE = 1.0 / 36000.0; // noise tiles per metre (coverage map)
-    const float SKY_CLOUD_SHAPE_SCALE = 1.0 / 9000.0;    // noise tiles per metre (billow shape)
-//  const float SKY_CLOUD_SHAPE_SCALE = 1.0 / 9000.0;    // noise tiles per metre (billow shape)
-    const float SKY_CLOUD_DETAIL_SCALE = 1.0 / 1800.0;   // noise tiles per metre (edge erosion)
-//  const float SKY_CLOUD_DETAIL_SCALE = 1.0 / 1800.0;   // noise tiles per metre (edge erosion)
-    const float SKY_CLOUD_DETAIL_EROSION = 0.45;
-//  const float SKY_CLOUD_DETAIL_EROSION = 0.45;
-    const vec3 SKY_CLOUD_SUN_RADIANCE = vec3(32.0, 30.7, 28.6);
-//  const vec3 SKY_CLOUD_SUN_RADIANCE = vec3(32.0, 30.7, 28.6);
-    const int SKY_CLOUD_PRIMARY_STEPS = 48;              // live march for directly visible sky
-//  const int SKY_CLOUD_PRIMARY_STEPS = 48;              // live march for directly visible sky
-    const int SKY_CLOUD_BAKE_STEPS = 128;                // one-off bake, so it can afford many more
-//  const int SKY_CLOUD_BAKE_STEPS = 128;                // one-off bake, so it can afford many more
-    const int SKY_CLOUD_LIGHT_STEPS = 6;
-//  const int SKY_CLOUD_LIGHT_STEPS = 6;
-    const float SKY_CLOUD_LIGHT_FIRST_STEP = 80.0;       // metres, doubled every light-march step
-//  const float SKY_CLOUD_LIGHT_FIRST_STEP = 80.0;       // metres, doubled every light-march step
-    const float SKY_CLOUD_TRANSMITTANCE_CUTOFF = 0.01;
-//  const float SKY_CLOUD_TRANSMITTANCE_CUTOFF = 0.01;
-    const int SKY_CLOUD_SCATTERING_OCTAVES = 4;
-//  const int SKY_CLOUD_SCATTERING_OCTAVES = 4;
+    module sky_clouds;
+//  module sky_clouds;
+
+    import math_constants;
+//  import math_constants;
+    import sky_environment;
+//  import sky_environment;
+    import volumetric_common;
+//  import volumetric_common;
+
+    // Fraction of the sky the weather map lets clouds form in, and the layer's peak extinction per metre.
+//  // Fraction of the sky the weather map lets clouds form in, and the layer's peak extinction per metre.
+    public uniform float uSkyCloudCoverage;
+//  public uniform float uSkyCloudCoverage;
+    public uniform float uSkyCloudDensity;
+//  public uniform float uSkyCloudDensity;
+
+    public static const float SKY_PLANET_RADIUS = 6360000.0;           // metres
+//  public static const float SKY_PLANET_RADIUS = 6360000.0;           // metres
+    public static const float SKY_CLOUD_LAYER_BOTTOM = 1500.0;         // metres above ground
+//  public static const float SKY_CLOUD_LAYER_BOTTOM = 1500.0;         // metres above ground
+    public static const float SKY_CLOUD_LAYER_TOP = 4000.0;            // metres above ground
+//  public static const float SKY_CLOUD_LAYER_TOP = 4000.0;            // metres above ground
+    public static const float SKY_CLOUD_MAX_MARCH_DISTANCE = 30000.0;  // caps the grazing march near the horizon
+//  public static const float SKY_CLOUD_MAX_MARCH_DISTANCE = 30000.0;  // caps the grazing march near the horizon
+    public static const float SKY_CLOUD_FADE_DISTANCE = 45000.0;       // aerial perspective: clouds dissolve into the haze
+//  public static const float SKY_CLOUD_FADE_DISTANCE = 45000.0;       // aerial perspective: clouds dissolve into the haze
+    public static const float SKY_CLOUD_WEATHER_SCALE = 1.0 / 36000.0; // noise tiles per metre (coverage map)
+//  public static const float SKY_CLOUD_WEATHER_SCALE = 1.0 / 36000.0; // noise tiles per metre (coverage map)
+    public static const float SKY_CLOUD_SHAPE_SCALE = 1.0 / 9000.0;    // noise tiles per metre (billow shape)
+//  public static const float SKY_CLOUD_SHAPE_SCALE = 1.0 / 9000.0;    // noise tiles per metre (billow shape)
+    public static const float SKY_CLOUD_DETAIL_SCALE = 1.0 / 1800.0;   // noise tiles per metre (edge erosion)
+//  public static const float SKY_CLOUD_DETAIL_SCALE = 1.0 / 1800.0;   // noise tiles per metre (edge erosion)
+    public static const float SKY_CLOUD_DETAIL_EROSION = 0.45;
+//  public static const float SKY_CLOUD_DETAIL_EROSION = 0.45;
+    public static const float3 SKY_CLOUD_SUN_RADIANCE = float3(32.0, 30.7, 28.6);
+//  public static const float3 SKY_CLOUD_SUN_RADIANCE = float3(32.0, 30.7, 28.6);
+    public static const int SKY_CLOUD_PRIMARY_STEPS = 48;              // live march for directly visible sky
+//  public static const int SKY_CLOUD_PRIMARY_STEPS = 48;              // live march for directly visible sky
+    public static const int SKY_CLOUD_BAKE_STEPS = 128;                // one-off bake, so it can afford many more
+//  public static const int SKY_CLOUD_BAKE_STEPS = 128;                // one-off bake, so it can afford many more
+    public static const int SKY_CLOUD_LIGHT_STEPS = 6;
+//  public static const int SKY_CLOUD_LIGHT_STEPS = 6;
+    public static const float SKY_CLOUD_LIGHT_FIRST_STEP = 80.0;       // metres, doubled every light-march step
+//  public static const float SKY_CLOUD_LIGHT_FIRST_STEP = 80.0;       // metres, doubled every light-march step
+    public static const float SKY_CLOUD_TRANSMITTANCE_CUTOFF = 0.01;
+//  public static const float SKY_CLOUD_TRANSMITTANCE_CUTOFF = 0.01;
+    public static const int SKY_CLOUD_SCATTERING_OCTAVES = 4;
+//  public static const int SKY_CLOUD_SCATTERING_OCTAVES = 4;
 
     // Far intersection of a ray starting inside a sphere centred on the planet.
 //  // Far intersection of a ray starting inside a sphere centred on the planet.
-    float raySphereExitDistance(vec3 rayOrigin, vec3 rayDirection, float sphereRadius) {
-//  float raySphereExitDistance(vec3 rayOrigin, vec3 rayDirection, float sphereRadius) {
+    public float raySphereExitDistance(float3 rayOrigin, float3 rayDirection, float sphereRadius) {
+//  public float raySphereExitDistance(float3 rayOrigin, float3 rayDirection, float sphereRadius) {
         float projectedDistance = dot(rayOrigin, rayDirection);
 //      float projectedDistance = dot(rayOrigin, rayDirection);
         float discriminant = projectedDistance * projectedDistance - (dot(rayOrigin, rayOrigin) - sphereRadius * sphereRadius);
@@ -76,8 +93,8 @@
 
     // Cumulus vertical profile: a sharp flat base, rounded tops.
 //  // Cumulus vertical profile: a sharp flat base, rounded tops.
-    float skyCloudHeightGradient(float heightFraction) {
-//  float skyCloudHeightGradient(float heightFraction) {
+    public float skyCloudHeightGradient(float heightFraction) {
+//  public float skyCloudHeightGradient(float heightFraction) {
         return clamp(remapValue(heightFraction, 0.0, 0.08, 0.0, 1.0), 0.0, 1.0)
 //      return clamp(remapValue(heightFraction, 0.0, 0.08, 0.0, 1.0), 0.0, 1.0)
              * clamp(remapValue(heightFraction, 0.35, 1.0, 1.0, 0.0), 0.0, 1.0);
@@ -89,8 +106,8 @@
 //  // Normalized cloud density in [0, 1] at a point measured from the observer (the planet centre is
     // SKY_PLANET_RADIUS straight down). Detail erosion is optional: the light march skips it.
 //  // SKY_PLANET_RADIUS straight down). Detail erosion is optional: the light march skips it.
-    float skyCloudDensity(vec3 observerRelativePosition, float heightFraction, bool erodeDetail) {
-//  float skyCloudDensity(vec3 observerRelativePosition, float heightFraction, bool erodeDetail) {
+    public float skyCloudDensity(float3 observerRelativePosition, float heightFraction, bool erodeDetail) {
+//  public float skyCloudDensity(float3 observerRelativePosition, float heightFraction, bool erodeDetail) {
         if (heightFraction <= 0.0 || heightFraction >= 1.0) {
 //      if (heightFraction <= 0.0 || heightFraction >= 1.0) {
             return 0.0;
@@ -101,16 +118,16 @@
 //      // The low-frequency Worley channel doubles as the weather map: its cellular blobs read as
         // separate cloud clusters, where the Perlin-Worley channel is too uniform and turns overcast.
 //      // separate cloud clusters, where the Perlin-Worley channel is too uniform and turns overcast.
-        float weather = textureLod(uCloudNoiseTexture, vec3(observerRelativePosition.xz * SKY_CLOUD_WEATHER_SCALE, 0.5).xzy, 0.0).g;
-//      float weather = textureLod(uCloudNoiseTexture, vec3(observerRelativePosition.xz * SKY_CLOUD_WEATHER_SCALE, 0.5).xzy, 0.0).g;
+        float weather = uCloudNoiseTexture.SampleLevel(float3(observerRelativePosition.xz * SKY_CLOUD_WEATHER_SCALE, 0.5).xzy, 0.0).g;
+//      float weather = uCloudNoiseTexture.SampleLevel(float3(observerRelativePosition.xz * SKY_CLOUD_WEATHER_SCALE, 0.5).xzy, 0.0).g;
         float coverageThreshold = 1.0 - uSkyCloudCoverage;
 //      float coverageThreshold = 1.0 - uSkyCloudCoverage;
         float coverage = clamp(remapValue(weather, coverageThreshold - 0.1, coverageThreshold + 0.25, 0.0, 1.0), 0.0, 1.0);
 //      float coverage = clamp(remapValue(weather, coverageThreshold - 0.1, coverageThreshold + 0.25, 0.0, 1.0), 0.0, 1.0);
         // Coverage also lifts the tops, so thick patches tower and thin patches stay flat.
 //      // Coverage also lifts the tops, so thick patches tower and thin patches stay flat.
-        float heightGradient = skyCloudHeightGradient(heightFraction / mix(0.45, 1.0, coverage));
-//      float heightGradient = skyCloudHeightGradient(heightFraction / mix(0.45, 1.0, coverage));
+        float heightGradient = skyCloudHeightGradient(heightFraction / lerp(0.45, 1.0, coverage));
+//      float heightGradient = skyCloudHeightGradient(heightFraction / lerp(0.45, 1.0, coverage));
         float cloudCoverage = coverage * heightGradient;
 //      float cloudCoverage = coverage * heightGradient;
         if (cloudCoverage <= 0.0) {
@@ -129,8 +146,8 @@
 //          float detail = sampleCloudDetail(observerRelativePosition * SKY_CLOUD_DETAIL_SCALE);
             // Wispy at the base, billowy at the top.
 //          // Wispy at the base, billowy at the top.
-            float detailModifier = mix(detail, 1.0 - detail, clamp(heightFraction * 5.0, 0.0, 1.0));
-//          float detailModifier = mix(detail, 1.0 - detail, clamp(heightFraction * 5.0, 0.0, 1.0));
+            float detailModifier = lerp(detail, 1.0 - detail, clamp(heightFraction * 5.0, 0.0, 1.0));
+//          float detailModifier = lerp(detail, 1.0 - detail, clamp(heightFraction * 5.0, 0.0, 1.0));
             density = clamp(remapValue(density, detailModifier * SKY_CLOUD_DETAIL_EROSION, 1.0, 0.0, 1.0), 0.0, 1.0);
 //          density = clamp(remapValue(density, detailModifier * SKY_CLOUD_DETAIL_EROSION, 1.0, 0.0, 1.0), 0.0, 1.0);
         }
@@ -144,10 +161,10 @@
 //  // Dual-lobe phase: a strong forward lobe for the silver lining, a weak back lobe so clouds facing
     // away from the sun are not flat. Octave attenuation shrinks the anisotropy, as Hillaire does.
 //  // away from the sun are not flat. Octave attenuation shrinks the anisotropy, as Hillaire does.
-    float skyCloudPhase(float cosTheta, float anisotropyScale) {
-//  float skyCloudPhase(float cosTheta, float anisotropyScale) {
-        return mix(henyeyGreenstein(cosTheta, 0.8 * anisotropyScale), henyeyGreenstein(cosTheta, -0.25 * anisotropyScale), 0.4);
-//      return mix(henyeyGreenstein(cosTheta, 0.8 * anisotropyScale), henyeyGreenstein(cosTheta, -0.25 * anisotropyScale), 0.4);
+    public float skyCloudPhase(float cosTheta, float anisotropyScale) {
+//  public float skyCloudPhase(float cosTheta, float anisotropyScale) {
+        return lerp(henyeyGreenstein(cosTheta, 0.8 * anisotropyScale), henyeyGreenstein(cosTheta, -0.25 * anisotropyScale), 0.4);
+//      return lerp(henyeyGreenstein(cosTheta, 0.8 * anisotropyScale), henyeyGreenstein(cosTheta, -0.25 * anisotropyScale), 0.4);
     }
 //  }
 
@@ -157,16 +174,16 @@
 //  // stepJitter in [0, 1) offsets the samples so successive frames (or neighbouring bake texels)
     // integrate between one another instead of banding.
 //  // integrate between one another instead of banding.
-    vec4 marchSkyClouds(vec3 rayDirection, int stepCount, float stepJitter) {
-//  vec4 marchSkyClouds(vec3 rayDirection, int stepCount, float stepJitter) {
+    public float4 marchSkyClouds(float3 rayDirection, int stepCount, float stepJitter) {
+//  public float4 marchSkyClouds(float3 rayDirection, int stepCount, float stepJitter) {
         if (rayDirection.y <= 0.0 || uSkyCloudCoverage <= 0.0) {
 //      if (rayDirection.y <= 0.0 || uSkyCloudCoverage <= 0.0) {
-            return vec4(0.0, 0.0, 0.0, 1.0);
-//          return vec4(0.0, 0.0, 0.0, 1.0);
+            return float4(0.0, 0.0, 0.0, 1.0);
+//          return float4(0.0, 0.0, 0.0, 1.0);
         }
 //      }
-        vec3 planetCentreToObserver = vec3(0.0, SKY_PLANET_RADIUS, 0.0);
-//      vec3 planetCentreToObserver = vec3(0.0, SKY_PLANET_RADIUS, 0.0);
+        float3 planetCentreToObserver = float3(0.0, SKY_PLANET_RADIUS, 0.0);
+//      float3 planetCentreToObserver = float3(0.0, SKY_PLANET_RADIUS, 0.0);
         float marchStart = raySphereExitDistance(planetCentreToObserver, rayDirection, SKY_PLANET_RADIUS + SKY_CLOUD_LAYER_BOTTOM);
 //      float marchStart = raySphereExitDistance(planetCentreToObserver, rayDirection, SKY_PLANET_RADIUS + SKY_CLOUD_LAYER_BOTTOM);
         float marchEnd = raySphereExitDistance(planetCentreToObserver, rayDirection, SKY_PLANET_RADIUS + SKY_CLOUD_LAYER_TOP);
@@ -190,15 +207,15 @@
 //      // Isotropic ambient from the sky dome: brighter towards the tops, which see more of it.
         // The dome is averaged towards its horizon haze, which dominates the irradiance a cloud receives.
 //      // The dome is averaged towards its horizon haze, which dominates the irradiance a cloud receives.
-        vec3 skyDomeRadiance = mix(getProceduralSkyBase(vec3(0.0, 1.0, 0.0)), getProceduralSkyBase(normalize(vec3(1.0, 0.15, 0.0))), 0.5);
-//      vec3 skyDomeRadiance = mix(getProceduralSkyBase(vec3(0.0, 1.0, 0.0)), getProceduralSkyBase(normalize(vec3(1.0, 0.15, 0.0))), 0.5);
-        vec3 ambientTop = skyDomeRadiance * 1.4;
-//      vec3 ambientTop = skyDomeRadiance * 1.4;
-        vec3 ambientBottom = skyDomeRadiance * 0.5;
-//      vec3 ambientBottom = skyDomeRadiance * 0.5;
+        float3 skyDomeRadiance = lerp(getProceduralSkyBase(float3(0.0, 1.0, 0.0)), getProceduralSkyBase(normalize(float3(1.0, 0.15, 0.0))), 0.5);
+//      float3 skyDomeRadiance = lerp(getProceduralSkyBase(float3(0.0, 1.0, 0.0)), getProceduralSkyBase(normalize(float3(1.0, 0.15, 0.0))), 0.5);
+        float3 ambientTop = skyDomeRadiance * 1.4;
+//      float3 ambientTop = skyDomeRadiance * 1.4;
+        float3 ambientBottom = skyDomeRadiance * 0.5;
+//      float3 ambientBottom = skyDomeRadiance * 0.5;
 
-        vec3 inScattered = vec3(0.0);
-//      vec3 inScattered = vec3(0.0);
+        float3 inScattered = float3(0.0);
+//      float3 inScattered = float3(0.0);
         float transmittance = 1.0;
 //      float transmittance = 1.0;
         float firstHitDistance = -1.0;
@@ -207,8 +224,8 @@
 //      for (int stepIndex = 0; stepIndex < stepCount; stepIndex++) {
             float sampleDistance = marchStart + (float(stepIndex) + stepJitter) * stepLength;
 //          float sampleDistance = marchStart + (float(stepIndex) + stepJitter) * stepLength;
-            vec3 samplePosition = rayDirection * sampleDistance;
-//          vec3 samplePosition = rayDirection * sampleDistance;
+            float3 samplePosition = rayDirection * sampleDistance;
+//          float3 samplePosition = rayDirection * sampleDistance;
             float heightFraction = (length(samplePosition + planetCentreToObserver) - SKY_PLANET_RADIUS - SKY_CLOUD_LAYER_BOTTOM) / (SKY_CLOUD_LAYER_TOP - SKY_CLOUD_LAYER_BOTTOM);
 //          float heightFraction = (length(samplePosition + planetCentreToObserver) - SKY_PLANET_RADIUS - SKY_CLOUD_LAYER_BOTTOM) / (SKY_CLOUD_LAYER_TOP - SKY_CLOUD_LAYER_BOTTOM);
             float density = skyCloudDensity(samplePosition, heightFraction, true);
@@ -238,8 +255,8 @@
 //          float lightDistance = 0.0;
             for (int lightStep = 0; lightStep < SKY_CLOUD_LIGHT_STEPS; lightStep++) {
 //          for (int lightStep = 0; lightStep < SKY_CLOUD_LIGHT_STEPS; lightStep++) {
-                vec3 lightSamplePosition = samplePosition + SKY_SUN_DIRECTION * (lightDistance + 0.5 * lightStepLength);
-//              vec3 lightSamplePosition = samplePosition + SKY_SUN_DIRECTION * (lightDistance + 0.5 * lightStepLength);
+                float3 lightSamplePosition = samplePosition + SKY_SUN_DIRECTION * (lightDistance + 0.5 * lightStepLength);
+//              float3 lightSamplePosition = samplePosition + SKY_SUN_DIRECTION * (lightDistance + 0.5 * lightStepLength);
                 float lightHeightFraction = (length(lightSamplePosition + planetCentreToObserver) - SKY_PLANET_RADIUS - SKY_CLOUD_LAYER_BOTTOM) / (SKY_CLOUD_LAYER_TOP - SKY_CLOUD_LAYER_BOTTOM);
 //              float lightHeightFraction = (length(lightSamplePosition + planetCentreToObserver) - SKY_PLANET_RADIUS - SKY_CLOUD_LAYER_BOTTOM) / (SKY_CLOUD_LAYER_TOP - SKY_CLOUD_LAYER_BOTTOM);
                 sunOpticalDepth += skyCloudDensity(lightSamplePosition, lightHeightFraction, false) * lightStepLength;
@@ -255,8 +272,8 @@
 
             // Multiple-scattering approximation: each octave halves scattering, extinction and anisotropy.
 //          // Multiple-scattering approximation: each octave halves scattering, extinction and anisotropy.
-            vec3 sunScattering = vec3(0.0);
-//          vec3 sunScattering = vec3(0.0);
+            float3 sunScattering = float3(0.0);
+//          float3 sunScattering = float3(0.0);
             float octaveWeight = 1.0;
 //          float octaveWeight = 1.0;
             for (int octave = 0; octave < SKY_CLOUD_SCATTERING_OCTAVES; octave++) {
@@ -271,10 +288,10 @@
 //          // Powder term: darkens the sun-facing rims of thin, freshly entered cloud.
             float powder = 1.0 - 0.35 * exp(-extinction * 2.0 * stepLength);
 //          float powder = 1.0 - 0.35 * exp(-extinction * 2.0 * stepLength);
-            vec3 ambient = mix(ambientBottom, ambientTop, clamp(heightFraction, 0.0, 1.0));
-//          vec3 ambient = mix(ambientBottom, ambientTop, clamp(heightFraction, 0.0, 1.0));
-            vec3 sourceRadiance = SKY_CLOUD_SUN_RADIANCE * sunScattering * powder + ambient;
-//          vec3 sourceRadiance = SKY_CLOUD_SUN_RADIANCE * sunScattering * powder + ambient;
+            float3 ambient = lerp(ambientBottom, ambientTop, clamp(heightFraction, 0.0, 1.0));
+//          float3 ambient = lerp(ambientBottom, ambientTop, clamp(heightFraction, 0.0, 1.0));
+            float3 sourceRadiance = SKY_CLOUD_SUN_RADIANCE * sunScattering * powder + ambient;
+//          float3 sourceRadiance = SKY_CLOUD_SUN_RADIANCE * sunScattering * powder + ambient;
 
             // Energy-conserving integration of a constant source over the step (Hillaire 2016).
 //          // Energy-conserving integration of a constant source over the step (Hillaire 2016).
@@ -294,8 +311,8 @@
 //      }
         if (firstHitDistance < 0.0) {
 //      if (firstHitDistance < 0.0) {
-            return vec4(0.0, 0.0, 0.0, 1.0);
-//          return vec4(0.0, 0.0, 0.0, 1.0);
+            return float4(0.0, 0.0, 0.0, 1.0);
+//          return float4(0.0, 0.0, 0.0, 1.0);
         }
 //      }
         // Aerial perspective: distant clouds dissolve into the sky behind them rather than going black,
@@ -308,8 +325,8 @@
 //      // Fade in just above the horizon so the layer does not end in a hard line.
         visibility *= clamp(rayDirection.y * 12.0, 0.0, 1.0);
 //      visibility *= clamp(rayDirection.y * 12.0, 0.0, 1.0);
-        return vec4(inScattered * visibility, mix(1.0, transmittance, visibility));
-//      return vec4(inScattered * visibility, mix(1.0, transmittance, visibility));
+        return float4(inScattered * visibility, lerp(1.0, transmittance, visibility));
+//      return float4(inScattered * visibility, lerp(1.0, transmittance, visibility));
     }
 //  }
 
@@ -319,10 +336,10 @@
 //  // at full resolution; the per-frame jitter is resolved by temporal accumulation. Every other lookup
     // goes through getSkyColor and the baked texture, whose filtering is invisible in indirect light.
 //  // goes through getSkyColor and the baked texture, whose filtering is invisible in indirect light.
-    vec3 getSkyColorRayMarched(vec3 rayDirection, float stepJitter) {
-//  vec3 getSkyColorRayMarched(vec3 rayDirection, float stepJitter) {
-        if (uUseHdri || !uSkyCloudsEnabled) {
-//      if (uUseHdri || !uSkyCloudsEnabled) {
+    public float3 getSkyColorRayMarched(float3 rayDirection, float stepJitter) {
+//  public float3 getSkyColorRayMarched(float3 rayDirection, float stepJitter) {
+        if ((uUseHdri != 0) || (uSkyCloudsEnabled == 0)) {
+//      if ((uUseHdri != 0) || (uSkyCloudsEnabled == 0)) {
             return getSkyColor(rayDirection);
 //          return getSkyColor(rayDirection);
         }

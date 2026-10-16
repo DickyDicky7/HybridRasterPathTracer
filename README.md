@@ -47,13 +47,13 @@
 -->
 
 <div align="center">
-  <p>The renderer implements a 5-stage hybrid graphics pipeline powered by <b>ModernGL</b>. In computer graphics, rendering 3D scenes generally falls into two primary paradigms: <b>Rasterization</b> and <b>Ray Tracing</b>. A hybrid approach seeks to unify the strengths of both methodologies.</p>
+  <p>The renderer implements a 5-stage hybrid graphics pipeline powered by <b>wgpu</b> (WebGPU), with every shader written in <b>Slang</b> and compiled to WGSL at start-up. In computer graphics, rendering 3D scenes generally falls into two primary paradigms: <b>Rasterization</b> and <b>Ray Tracing</b>. A hybrid approach seeks to unify the strengths of both methodologies.</p>
   <p><b>Rasterization</b> is exceptionally fast, though its lighting and shading models rely on fundamental approximations. While advanced techniques—such as Disney's BRDF/BSDF models and texture sampling—enable rasterization to achieve Physically Based Rendering (PBR), reflections, refractions, and transmission, it cannot inherently compute Global Illumination (GI). Achieving GI in a purely rasterized pipeline necessitates precomputed lighting methods (e.g., Lightmaps, Light Probes, Irradiance Volumes, Voxel Cone Tracing, Radiosity) or screen-space approximations like Screen Space Global Illumination (SSGI).</p>
   <p><b>Ray Tracing</b>, conversely, models the physical behavior of light more accurately. By simulating the trajectory of light rays, ray tracing naturally achieves GI alongside numerous physically accurate optical effects. Advancing beyond basic ray tracing introduces <b>Spectral Rendering</b>, an even more precise simulation of light physics. This project synthesizes the performance of rasterization for primary visibility with the physical accuracy of ray tracing for illumination.</p>
 </div>
 <!--
 <div align="center">
-  <p>The renderer implements a 5-stage hybrid graphics pipeline powered by <b>ModernGL</b>. In computer graphics, rendering 3D scenes generally falls into two primary paradigms: <b>Rasterization</b> and <b>Ray Tracing</b>. A hybrid approach seeks to unify the strengths of both methodologies.</p>
+  <p>The renderer implements a 5-stage hybrid graphics pipeline powered by <b>wgpu</b> (WebGPU), with every shader written in <b>Slang</b> and compiled to WGSL at start-up. In computer graphics, rendering 3D scenes generally falls into two primary paradigms: <b>Rasterization</b> and <b>Ray Tracing</b>. A hybrid approach seeks to unify the strengths of both methodologies.</p>
   <p><b>Rasterization</b> is exceptionally fast, though its lighting and shading models rely on fundamental approximations. While advanced techniques—such as Disney's BRDF/BSDF models and texture sampling—enable rasterization to achieve Physically Based Rendering (PBR), reflections, refractions, and transmission, it cannot inherently compute Global Illumination (GI). Achieving GI in a purely rasterized pipeline necessitates precomputed lighting methods (e.g., Lightmaps, Light Probes, Irradiance Volumes, Voxel Cone Tracing, Radiosity) or screen-space approximations like Screen Space Global Illumination (SSGI).</p>
   <p><b>Ray Tracing</b>, conversely, models the physical behavior of light more accurately. By simulating the trajectory of light rays, ray tracing naturally achieves GI alongside numerous physically accurate optical effects. Advancing beyond basic ray tracing introduces <b>Spectral Rendering</b>, an even more precise simulation of light physics. This project synthesizes the performance of rasterization for primary visibility with the physical accuracy of ray tracing for illumination.</p>
 </div>
@@ -148,14 +148,16 @@
 <div align="center">
   <ul>
     <li>Python 3.10+</li>
-    <li>ModernGL, ModernGL Window, NumPy, Pyrr, OpenCV, PyOIDN, PyAssimp</li>
+    <li>wgpu, rendercanvas, glfw, NumPy, Pyrr, OpenCV, PyOIDN, PyAssimp</li>
+    <li>Slang compiler (<code>slangc</code>), expected at <code>D:\slangexe\bin\slangc.exe</code> or set via the <code>SLANGC</code> environment variable</li>
   </ul>
 </div>
 <!--
 <div align="center">
   <ul>
     <li>Python 3.10+</li>
-    <li>ModernGL, ModernGL Window, NumPy, Pyrr, OpenCV, PyOIDN, PyAssimp</li>
+    <li>wgpu, rendercanvas, glfw, NumPy, Pyrr, OpenCV, PyOIDN, PyAssimp</li>
+    <li>Slang compiler (<code>slangc</code>), expected at <code>D:\slangexe\bin\slangc.exe</code> or set via the <code>SLANGC</code> environment variable</li>
   </ul>
 </div>
 -->

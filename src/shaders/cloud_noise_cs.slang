@@ -1,6 +1,3 @@
-    #version 430
-//  #version 430
-
     // ============================================================================
 //  // ============================================================================
     // Tileable 3D cloud noise generator (runs once, at renderer start-up).
@@ -27,19 +24,17 @@
 //  // Cloudscapes of Horizon Zero Dawn" (SIGGRAPH 2015).
     // ============================================================================
 //  // ============================================================================
-    layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
-//  layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
-    layout(binding = 0, rgba8) uniform writeonly image3D textureCloudNoise;
-//  layout(binding = 0, rgba8) uniform writeonly image3D textureCloudNoise;
+    [format("rgba8")] WTexture3D<float4> textureCloudNoise;
+//  [format("rgba8")] WTexture3D<float4> textureCloudNoise;
 
     uniform int uNoiseSize;
 //  uniform int uNoiseSize;
 
     // 3D PCG hash (Jarzynski & Olano 2020): three independent 32-bit outputs per lattice cell.
 //  // 3D PCG hash (Jarzynski & Olano 2020): three independent 32-bit outputs per lattice cell.
-    uvec3 pcg3d(uvec3 value) {
-//  uvec3 pcg3d(uvec3 value) {
+    uint3 pcg3d(uint3 value) {
+//  uint3 pcg3d(uint3 value) {
         value = value * 1664525u + 1013904223u;
 //      value = value * 1664525u + 1013904223u;
         value.x += value.y * value.z;
@@ -63,25 +58,25 @@
 
     // Wrapping the lattice cell by the octave's period before hashing is what makes the octave tile.
 //  // Wrapping the lattice cell by the octave's period before hashing is what makes the octave tile.
-    vec3 hashLatticeCell(ivec3 cell, int period, uint seed) {
-//  vec3 hashLatticeCell(ivec3 cell, int period, uint seed) {
-        uvec3 wrappedCell = uvec3((cell % period + period) % period);
-//      uvec3 wrappedCell = uvec3((cell % period + period) % period);
-        return vec3(pcg3d(wrappedCell + uvec3(seed, seed * 7u, seed * 13u))) / 4294967295.0;
-//      return vec3(pcg3d(wrappedCell + uvec3(seed, seed * 7u, seed * 13u))) / 4294967295.0;
+    float3 hashLatticeCell(int3 cell, int period, uint seed) {
+//  float3 hashLatticeCell(int3 cell, int period, uint seed) {
+        uint3 wrappedCell = uint3((cell % period + period) % period);
+//      uint3 wrappedCell = uint3((cell % period + period) % period);
+        return float3(pcg3d(wrappedCell + uint3(seed, seed * 7u, seed * 13u))) / 4294967295.0;
+//      return float3(pcg3d(wrappedCell + uint3(seed, seed * 7u, seed * 13u))) / 4294967295.0;
     }
 //  }
 
     // Inverted cellular noise: 1 at a feature point, falling to 0 one cell away.
 //  // Inverted cellular noise: 1 at a feature point, falling to 0 one cell away.
-    float worleyTileable(vec3 tileCoordinates, int cellsPerTile, uint seed) {
-//  float worleyTileable(vec3 tileCoordinates, int cellsPerTile, uint seed) {
-        vec3 cellSpacePosition = tileCoordinates * float(cellsPerTile);
-//      vec3 cellSpacePosition = tileCoordinates * float(cellsPerTile);
-        ivec3 baseCell = ivec3(floor(cellSpacePosition));
-//      ivec3 baseCell = ivec3(floor(cellSpacePosition));
-        vec3 cellFraction = fract(cellSpacePosition);
-//      vec3 cellFraction = fract(cellSpacePosition);
+    float worleyTileable(float3 tileCoordinates, int cellsPerTile, uint seed) {
+//  float worleyTileable(float3 tileCoordinates, int cellsPerTile, uint seed) {
+        float3 cellSpacePosition = tileCoordinates * float(cellsPerTile);
+//      float3 cellSpacePosition = tileCoordinates * float(cellsPerTile);
+        int3 baseCell = int3(floor(cellSpacePosition));
+//      int3 baseCell = int3(floor(cellSpacePosition));
+        float3 cellFraction = frac(cellSpacePosition);
+//      float3 cellFraction = frac(cellSpacePosition);
         float nearestDistanceSquared = 1.0e10;
 //      float nearestDistanceSquared = 1.0e10;
         for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
@@ -90,12 +85,12 @@
 //          for (int offsetY = -1; offsetY <= 1; offsetY++) {
                 for (int offsetX = -1; offsetX <= 1; offsetX++) {
 //              for (int offsetX = -1; offsetX <= 1; offsetX++) {
-                    ivec3 cellOffset = ivec3(offsetX, offsetY, offsetZ);
-//                  ivec3 cellOffset = ivec3(offsetX, offsetY, offsetZ);
-                    vec3 featurePoint = vec3(cellOffset) + hashLatticeCell(baseCell + cellOffset, cellsPerTile, seed);
-//                  vec3 featurePoint = vec3(cellOffset) + hashLatticeCell(baseCell + cellOffset, cellsPerTile, seed);
-                    vec3 toFeature = featurePoint - cellFraction;
-//                  vec3 toFeature = featurePoint - cellFraction;
+                    int3 cellOffset = int3(offsetX, offsetY, offsetZ);
+//                  int3 cellOffset = int3(offsetX, offsetY, offsetZ);
+                    float3 featurePoint = float3(cellOffset) + hashLatticeCell(baseCell + cellOffset, cellsPerTile, seed);
+//                  float3 featurePoint = float3(cellOffset) + hashLatticeCell(baseCell + cellOffset, cellsPerTile, seed);
+                    float3 toFeature = featurePoint - cellFraction;
+//                  float3 toFeature = featurePoint - cellFraction;
                     nearestDistanceSquared = min(nearestDistanceSquared, dot(toFeature, toFeature));
 //                  nearestDistanceSquared = min(nearestDistanceSquared, dot(toFeature, toFeature));
                 }
@@ -109,8 +104,8 @@
     }
 //  }
 
-    float worleyFbmTileable(vec3 tileCoordinates, int cellsPerTile, uint seed) {
-//  float worleyFbmTileable(vec3 tileCoordinates, int cellsPerTile, uint seed) {
+    float worleyFbmTileable(float3 tileCoordinates, int cellsPerTile, uint seed) {
+//  float worleyFbmTileable(float3 tileCoordinates, int cellsPerTile, uint seed) {
         return worleyTileable(tileCoordinates, cellsPerTile, seed) * 0.625
 //      return worleyTileable(tileCoordinates, cellsPerTile, seed) * 0.625
              + worleyTileable(tileCoordinates, cellsPerTile * 2, seed + 17u) * 0.25
@@ -122,43 +117,43 @@
 
     // Gradient (Perlin) noise with quintic fade, returning roughly [-1, 1].
 //  // Gradient (Perlin) noise with quintic fade, returning roughly [-1, 1].
-    float perlinTileable(vec3 tileCoordinates, int period, uint seed) {
-//  float perlinTileable(vec3 tileCoordinates, int period, uint seed) {
-        vec3 latticePosition = tileCoordinates * float(period);
-//      vec3 latticePosition = tileCoordinates * float(period);
-        ivec3 baseCell = ivec3(floor(latticePosition));
-//      ivec3 baseCell = ivec3(floor(latticePosition));
-        vec3 cellFraction = fract(latticePosition);
-//      vec3 cellFraction = fract(latticePosition);
-        vec3 fade = cellFraction * cellFraction * cellFraction * (cellFraction * (cellFraction * 6.0 - 15.0) + 10.0);
-//      vec3 fade = cellFraction * cellFraction * cellFraction * (cellFraction * (cellFraction * 6.0 - 15.0) + 10.0);
+    float perlinTileable(float3 tileCoordinates, int period, uint seed) {
+//  float perlinTileable(float3 tileCoordinates, int period, uint seed) {
+        float3 latticePosition = tileCoordinates * float(period);
+//      float3 latticePosition = tileCoordinates * float(period);
+        int3 baseCell = int3(floor(latticePosition));
+//      int3 baseCell = int3(floor(latticePosition));
+        float3 cellFraction = frac(latticePosition);
+//      float3 cellFraction = frac(latticePosition);
+        float3 fade = cellFraction * cellFraction * cellFraction * (cellFraction * (cellFraction * 6.0 - 15.0) + 10.0);
+//      float3 fade = cellFraction * cellFraction * cellFraction * (cellFraction * (cellFraction * 6.0 - 15.0) + 10.0);
         float cornerValues[8];
 //      float cornerValues[8];
         for (int corner = 0; corner < 8; corner++) {
 //      for (int corner = 0; corner < 8; corner++) {
-            ivec3 cornerOffset = ivec3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
-//          ivec3 cornerOffset = ivec3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
-            vec3 gradient = normalize(hashLatticeCell(baseCell + cornerOffset, period, seed) * 2.0 - 1.0 + 1.0e-5);
-//          vec3 gradient = normalize(hashLatticeCell(baseCell + cornerOffset, period, seed) * 2.0 - 1.0 + 1.0e-5);
-            cornerValues[corner] = dot(gradient, cellFraction - vec3(cornerOffset));
-//          cornerValues[corner] = dot(gradient, cellFraction - vec3(cornerOffset));
+            int3 cornerOffset = int3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+//          int3 cornerOffset = int3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+            float3 gradient = normalize(hashLatticeCell(baseCell + cornerOffset, period, seed) * 2.0 - 1.0 + 1.0e-5);
+//          float3 gradient = normalize(hashLatticeCell(baseCell + cornerOffset, period, seed) * 2.0 - 1.0 + 1.0e-5);
+            cornerValues[corner] = dot(gradient, cellFraction - float3(cornerOffset));
+//          cornerValues[corner] = dot(gradient, cellFraction - float3(cornerOffset));
         }
 //      }
-        float edgeX00 = mix(cornerValues[0], cornerValues[1], fade.x);
-//      float edgeX00 = mix(cornerValues[0], cornerValues[1], fade.x);
-        float edgeX10 = mix(cornerValues[2], cornerValues[3], fade.x);
-//      float edgeX10 = mix(cornerValues[2], cornerValues[3], fade.x);
-        float edgeX01 = mix(cornerValues[4], cornerValues[5], fade.x);
-//      float edgeX01 = mix(cornerValues[4], cornerValues[5], fade.x);
-        float edgeX11 = mix(cornerValues[6], cornerValues[7], fade.x);
-//      float edgeX11 = mix(cornerValues[6], cornerValues[7], fade.x);
-        return mix(mix(edgeX00, edgeX10, fade.y), mix(edgeX01, edgeX11, fade.y), fade.z);
-//      return mix(mix(edgeX00, edgeX10, fade.y), mix(edgeX01, edgeX11, fade.y), fade.z);
+        float edgeX00 = lerp(cornerValues[0], cornerValues[1], fade.x);
+//      float edgeX00 = lerp(cornerValues[0], cornerValues[1], fade.x);
+        float edgeX10 = lerp(cornerValues[2], cornerValues[3], fade.x);
+//      float edgeX10 = lerp(cornerValues[2], cornerValues[3], fade.x);
+        float edgeX01 = lerp(cornerValues[4], cornerValues[5], fade.x);
+//      float edgeX01 = lerp(cornerValues[4], cornerValues[5], fade.x);
+        float edgeX11 = lerp(cornerValues[6], cornerValues[7], fade.x);
+//      float edgeX11 = lerp(cornerValues[6], cornerValues[7], fade.x);
+        return lerp(lerp(edgeX00, edgeX10, fade.y), lerp(edgeX01, edgeX11, fade.y), fade.z);
+//      return lerp(lerp(edgeX00, edgeX10, fade.y), lerp(edgeX01, edgeX11, fade.y), fade.z);
     }
 //  }
 
-    float perlinFbmTileable(vec3 tileCoordinates, int basePeriod, uint seed) {
-//  float perlinFbmTileable(vec3 tileCoordinates, int basePeriod, uint seed) {
+    float perlinFbmTileable(float3 tileCoordinates, int basePeriod, uint seed) {
+//  float perlinFbmTileable(float3 tileCoordinates, int basePeriod, uint seed) {
         float noiseSum = 0.0;
 //      float noiseSum = 0.0;
         float amplitude = 1.0;
@@ -184,18 +179,22 @@
     }
 //  }
 
-    void main() {
-//  void main() {
-        ivec3 voxelCoordinates = ivec3(gl_GlobalInvocationID.xyz);
-//      ivec3 voxelCoordinates = ivec3(gl_GlobalInvocationID.xyz);
-        if (any(greaterThanEqual(voxelCoordinates, ivec3(uNoiseSize)))) {
-//      if (any(greaterThanEqual(voxelCoordinates, ivec3(uNoiseSize)))) {
+    [shader("compute")]
+//  [shader("compute")]
+    [numthreads(8, 8, 8)]
+//  [numthreads(8, 8, 8)]
+    void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+//  void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+        int3 voxelCoordinates = int3(globalInvocationID.xyz);
+//      int3 voxelCoordinates = int3(globalInvocationID.xyz);
+        if (any(voxelCoordinates >= int3(uNoiseSize))) {
+//      if (any(voxelCoordinates >= int3(uNoiseSize))) {
             return;
 //          return;
         }
 //      }
-        vec3 tileCoordinates = (vec3(voxelCoordinates) + 0.5) / float(uNoiseSize);
-//      vec3 tileCoordinates = (vec3(voxelCoordinates) + 0.5) / float(uNoiseSize);
+        float3 tileCoordinates = (float3(voxelCoordinates) + 0.5) / float(uNoiseSize);
+//      float3 tileCoordinates = (float3(voxelCoordinates) + 0.5) / float(uNoiseSize);
 
         // Perlin FBM remapped into [0, 1] with a little extra contrast, then floored by the Worley FBM
 //      // Perlin FBM remapped into [0, 1] with a little extra contrast, then floored by the Worley FBM
@@ -208,8 +207,8 @@
         float perlinWorley = clamp(baseWorley + perlinNoise * (1.0 - baseWorley), 0.0, 1.0);
 //      float perlinWorley = clamp(baseWorley + perlinNoise * (1.0 - baseWorley), 0.0, 1.0);
 
-        vec4 noiseTexel = vec4(
-//      vec4 noiseTexel = vec4(
+        float4 noiseTexel = float4(
+//      float4 noiseTexel = float4(
             perlinWorley,
 //          perlinWorley,
             baseWorley,
@@ -220,7 +219,7 @@
 //          worleyFbmTileable(tileCoordinates, 16, 61u)
         );
 //      );
-        imageStore(textureCloudNoise, voxelCoordinates, noiseTexel);
-//      imageStore(textureCloudNoise, voxelCoordinates, noiseTexel);
+        textureCloudNoise.Store(voxelCoordinates, noiseTexel);
+//      textureCloudNoise.Store(voxelCoordinates, noiseTexel);
     }
 //  }

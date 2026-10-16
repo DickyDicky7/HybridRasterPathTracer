@@ -32,74 +32,91 @@
 //  // through leaves the throughput untouched.
     //
 //  //
-    // Requires the includer to have already defined: PI, INF, MEDIA_RAND (a function-like macro or
-//  // Requires the includer to have already defined: PI, INF, MEDIA_RAND (a function-like macro or
-    // function name yielding a uniform float in [0, 1)), uCloudNoiseTexture, and to have included
-//  // function name yielding a uniform float in [0, 1)), uCloudNoiseTexture, and to have included
-    // volumetric_common.glsl.
-//  // volumetric_common.glsl.
+    // The trackers draw their random numbers through IMediumRandom: each pass passes its own generator
+//  // The trackers draw their random numbers through IMediumRandom: each pass passes its own generator
+    // as the generic argument (e.g. estimateMediumTransmittance<ShadingRandom>(...)), so the volumes
+//  // as the generic argument (e.g. estimateMediumTransmittance<ShadingRandom>(...)), so the volumes
+    // consume the same RNG stream as the rest of that pass.
+//  // consume the same RNG stream as the rest of that pass.
     // ============================================================================
 //  // ============================================================================
-    const int MAX_MEDIUM_VOLUMES = 4;
-//  const int MAX_MEDIUM_VOLUMES = 4;
-    const int MEDIUM_KIND_FOG = 0;
-//  const int MEDIUM_KIND_FOG = 0;
-    const int MEDIUM_KIND_CLOUD = 1;
-//  const int MEDIUM_KIND_CLOUD = 1;
-    const int MEDIUM_MAX_TRACKING_STEPS = 256;
-//  const int MEDIUM_MAX_TRACKING_STEPS = 256;
-    const float MEDIUM_DETAIL_EROSION = 0.3;
-//  const float MEDIUM_DETAIL_EROSION = 0.3;
-    const float MEDIUM_RATIO_TRACKING_ROULETTE = 0.1;
-//  const float MEDIUM_RATIO_TRACKING_ROULETTE = 0.1;
+    module participating_media;
+//  module participating_media;
 
-    struct MediumVolume {
-//  struct MediumVolume {
-        vec3 aabbMin;
-//      vec3 aabbMin;
-        float density;        // majorant extinction coefficient, per world unit
-//      float density;        // majorant extinction coefficient, per world unit
-        vec3 aabbMax;
-//      vec3 aabbMax;
-        float anisotropy;     // Henyey-Greenstein g
-//      float anisotropy;     // Henyey-Greenstein g
-        vec3 albedo;          // single-scattering albedo
-//      vec3 albedo;          // single-scattering albedo
-        float noiseFrequency; // noise tiles per world unit (clouds only)
-//      float noiseFrequency; // noise tiles per world unit (clouds only)
-        int kind;             // MEDIUM_KIND_FOG or MEDIUM_KIND_CLOUD
-//      int kind;             // MEDIUM_KIND_FOG or MEDIUM_KIND_CLOUD
+    import math_constants;
+//  import math_constants;
+    import volumetric_common;
+//  import volumetric_common;
+
+    // A pass's random number generator: next() yields a uniform float in [0, 1).
+//  // A pass's random number generator: next() yields a uniform float in [0, 1).
+    public interface IMediumRandom {
+//  public interface IMediumRandom {
+        static float next();
+//      static float next();
+    }
+//  }
+
+    public static const int MAX_MEDIUM_VOLUMES = 4;
+//  public static const int MAX_MEDIUM_VOLUMES = 4;
+    public static const int MEDIUM_KIND_FOG = 0;
+//  public static const int MEDIUM_KIND_FOG = 0;
+    public static const int MEDIUM_KIND_CLOUD = 1;
+//  public static const int MEDIUM_KIND_CLOUD = 1;
+    public static const int MEDIUM_MAX_TRACKING_STEPS = 256;
+//  public static const int MEDIUM_MAX_TRACKING_STEPS = 256;
+    public static const float MEDIUM_DETAIL_EROSION = 0.3;
+//  public static const float MEDIUM_DETAIL_EROSION = 0.3;
+    public static const float MEDIUM_RATIO_TRACKING_ROULETTE = 0.1;
+//  public static const float MEDIUM_RATIO_TRACKING_ROULETTE = 0.1;
+
+    public struct MediumVolume {
+//  public struct MediumVolume {
+        public float3 aabbMin;
+//      public float3 aabbMin;
+        public float density;        // majorant extinction coefficient, per world unit
+//      public float density;        // majorant extinction coefficient, per world unit
+        public float3 aabbMax;
+//      public float3 aabbMax;
+        public float anisotropy;     // Henyey-Greenstein g
+//      public float anisotropy;     // Henyey-Greenstein g
+        public float3 albedo;          // single-scattering albedo
+//      public float3 albedo;          // single-scattering albedo
+        public float noiseFrequency; // noise tiles per world unit (clouds only)
+//      public float noiseFrequency; // noise tiles per world unit (clouds only)
+        public int kind;             // MEDIUM_KIND_FOG or MEDIUM_KIND_CLOUD
+//      public int kind;             // MEDIUM_KIND_FOG or MEDIUM_KIND_CLOUD
     };
 //  };
 
-    uniform bool uMediaEnabled;
-//  uniform bool uMediaEnabled;
-    uniform int uMediumVolumeCount;
-//  uniform int uMediumVolumeCount;
-    uniform MediumVolume uMediumVolumes[MAX_MEDIUM_VOLUMES];
-//  uniform MediumVolume uMediumVolumes[MAX_MEDIUM_VOLUMES];
+    public uniform int uMediaEnabled;
+//  public uniform int uMediaEnabled;
+    public uniform int uMediumVolumeCount;
+//  public uniform int uMediumVolumeCount;
+    public uniform MediumVolume uMediumVolumes[MAX_MEDIUM_VOLUMES];
+//  public uniform MediumVolume uMediumVolumes[MAX_MEDIUM_VOLUMES];
 
-    bool isMediaActive() {
-//  bool isMediaActive() {
-        return uMediaEnabled && uMediumVolumeCount > 0;
-//      return uMediaEnabled && uMediumVolumeCount > 0;
+    public bool isMediaActive() {
+//  public bool isMediaActive() {
+        return (uMediaEnabled != 0) && uMediumVolumeCount > 0;
+//      return (uMediaEnabled != 0) && uMediumVolumeCount > 0;
     }
 //  }
 
     // Slab test clipped to [0, segmentEnd]; returns the overlap as (entry, exit).
 //  // Slab test clipped to [0, segmentEnd]; returns the overlap as (entry, exit).
-    bool intersectMediumVolume(int volumeIndex, vec3 rayOrigin, vec3 rayDirection, float segmentEnd, out float entryDistance, out float exitDistance) {
-//  bool intersectMediumVolume(int volumeIndex, vec3 rayOrigin, vec3 rayDirection, float segmentEnd, out float entryDistance, out float exitDistance) {
-        vec3 inverseDirection = 1.0 / rayDirection;
-//      vec3 inverseDirection = 1.0 / rayDirection;
-        vec3 slabNear = (uMediumVolumes[volumeIndex].aabbMin - rayOrigin) * inverseDirection;
-//      vec3 slabNear = (uMediumVolumes[volumeIndex].aabbMin - rayOrigin) * inverseDirection;
-        vec3 slabFar = (uMediumVolumes[volumeIndex].aabbMax - rayOrigin) * inverseDirection;
-//      vec3 slabFar = (uMediumVolumes[volumeIndex].aabbMax - rayOrigin) * inverseDirection;
-        vec3 slabMin = min(slabNear, slabFar);
-//      vec3 slabMin = min(slabNear, slabFar);
-        vec3 slabMax = max(slabNear, slabFar);
-//      vec3 slabMax = max(slabNear, slabFar);
+    public bool intersectMediumVolume(int volumeIndex, float3 rayOrigin, float3 rayDirection, float segmentEnd, out float entryDistance, out float exitDistance) {
+//  public bool intersectMediumVolume(int volumeIndex, float3 rayOrigin, float3 rayDirection, float segmentEnd, out float entryDistance, out float exitDistance) {
+        float3 inverseDirection = 1.0 / rayDirection;
+//      float3 inverseDirection = 1.0 / rayDirection;
+        float3 slabNear = (uMediumVolumes[volumeIndex].aabbMin - rayOrigin) * inverseDirection;
+//      float3 slabNear = (uMediumVolumes[volumeIndex].aabbMin - rayOrigin) * inverseDirection;
+        float3 slabFar = (uMediumVolumes[volumeIndex].aabbMax - rayOrigin) * inverseDirection;
+//      float3 slabFar = (uMediumVolumes[volumeIndex].aabbMax - rayOrigin) * inverseDirection;
+        float3 slabMin = min(slabNear, slabFar);
+//      float3 slabMin = min(slabNear, slabFar);
+        float3 slabMax = max(slabNear, slabFar);
+//      float3 slabMax = max(slabNear, slabFar);
         entryDistance = max(max(max(slabMin.x, slabMin.y), slabMin.z), 0.0);
 //      entryDistance = max(max(max(slabMin.x, slabMin.y), slabMin.z), 0.0);
         exitDistance = min(min(min(slabMax.x, slabMax.y), slabMax.z), segmentEnd);
@@ -113,20 +130,20 @@
 //  // Normalized density in [0, 1], so the volume's density field doubles as its exact majorant.
     // Clouds are an ellipsoidal puff with a flattened base, carved by the shared Perlin-Worley noise.
 //  // Clouds are an ellipsoidal puff with a flattened base, carved by the shared Perlin-Worley noise.
-    float mediumVolumeDensity(int volumeIndex, vec3 position) {
-//  float mediumVolumeDensity(int volumeIndex, vec3 position) {
+    public float mediumVolumeDensity(int volumeIndex, float3 position) {
+//  public float mediumVolumeDensity(int volumeIndex, float3 position) {
         if (uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_FOG) {
 //      if (uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_FOG) {
             return 1.0;
 //          return 1.0;
         }
 //      }
-        vec3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
-//      vec3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
-        vec3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
-//      vec3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
-        vec3 localPosition = (position - volumeCentre) / volumeHalfExtent;
-//      vec3 localPosition = (position - volumeCentre) / volumeHalfExtent;
+        float3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
+//      float3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
+        float3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
+//      float3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
+        float3 localPosition = (position - volumeCentre) / volumeHalfExtent;
+//      float3 localPosition = (position - volumeCentre) / volumeHalfExtent;
         float shape = clamp(remapValue(length(localPosition), 1.0, 0.3, 0.0, 1.0), 0.0, 1.0);
 //      float shape = clamp(remapValue(length(localPosition), 1.0, 0.3, 0.0, 1.0), 0.0, 1.0);
         shape *= clamp(remapValue(localPosition.y, -1.0, -0.6, 0.0, 1.0), 0.0, 1.0);
@@ -137,8 +154,8 @@
 //          return 0.0;
         }
 //      }
-        vec3 noiseCoordinates = position * uMediumVolumes[volumeIndex].noiseFrequency;
-//      vec3 noiseCoordinates = position * uMediumVolumes[volumeIndex].noiseFrequency;
+        float3 noiseCoordinates = position * uMediumVolumes[volumeIndex].noiseFrequency;
+//      float3 noiseCoordinates = position * uMediumVolumes[volumeIndex].noiseFrequency;
         float baseShape = sampleCloudBaseShape(noiseCoordinates);
 //      float baseShape = sampleCloudBaseShape(noiseCoordinates);
         float density = clamp(remapValue(baseShape, 1.0 - shape, 1.0, 0.0, 1.0), 0.0, 1.0);
@@ -158,8 +175,8 @@
 
     // Distance to this volume's first real collision inside [entryDistance, exitDistance], or INF.
 //  // Distance to this volume's first real collision inside [entryDistance, exitDistance], or INF.
-    float sampleMediumVolumeFreeFlight(int volumeIndex, vec3 rayOrigin, vec3 rayDirection, float entryDistance, float exitDistance) {
-//  float sampleMediumVolumeFreeFlight(int volumeIndex, vec3 rayOrigin, vec3 rayDirection, float entryDistance, float exitDistance) {
+    public float sampleMediumVolumeFreeFlight<Random : IMediumRandom>(int volumeIndex, float3 rayOrigin, float3 rayDirection, float entryDistance, float exitDistance) {
+//  public float sampleMediumVolumeFreeFlight<Random : IMediumRandom>(int volumeIndex, float3 rayOrigin, float3 rayDirection, float entryDistance, float exitDistance) {
         float majorant = uMediumVolumes[volumeIndex].density;
 //      float majorant = uMediumVolumes[volumeIndex].density;
         if (majorant <= 0.0) {
@@ -172,16 +189,16 @@
 //      float trackedDistance = entryDistance;
         if (uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_FOG) {
 //      if (uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_FOG) {
-            trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
-//          trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
+            trackedDistance -= log(1.0 - Random.next()) / majorant;
+//          trackedDistance -= log(1.0 - Random.next()) / majorant;
             return (trackedDistance < exitDistance) ? trackedDistance : INF;
 //          return (trackedDistance < exitDistance) ? trackedDistance : INF;
         }
 //      }
         for (int trackingStep = 0; trackingStep < MEDIUM_MAX_TRACKING_STEPS; trackingStep++) {
 //      for (int trackingStep = 0; trackingStep < MEDIUM_MAX_TRACKING_STEPS; trackingStep++) {
-            trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
-//          trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
+            trackedDistance -= log(1.0 - Random.next()) / majorant;
+//          trackedDistance -= log(1.0 - Random.next()) / majorant;
             if (trackedDistance >= exitDistance) {
 //          if (trackedDistance >= exitDistance) {
                 return INF;
@@ -190,8 +207,8 @@
 //          }
             // Real collision with probability density / majorant; otherwise a null collision, keep going.
 //          // Real collision with probability density / majorant; otherwise a null collision, keep going.
-            if (MEDIA_RAND() < mediumVolumeDensity(volumeIndex, rayOrigin + rayDirection * trackedDistance)) {
-//          if (MEDIA_RAND() < mediumVolumeDensity(volumeIndex, rayOrigin + rayDirection * trackedDistance)) {
+            if (Random.next() < mediumVolumeDensity(volumeIndex, rayOrigin + rayDirection * trackedDistance)) {
+//          if (Random.next() < mediumVolumeDensity(volumeIndex, rayOrigin + rayDirection * trackedDistance)) {
                 return trackedDistance;
 //              return trackedDistance;
             }
@@ -207,8 +224,8 @@
 //  // Samples where along [0, segmentEnd] the ray first scatters in any volume. Returns false when the
     // ray crosses every volume unscattered, which (with grey extinction) needs no throughput change.
 //  // ray crosses every volume unscattered, which (with grey extinction) needs no throughput change.
-    bool sampleMediumScattering(vec3 rayOrigin, vec3 rayDirection, float segmentEnd, out float scatterDistance, out int scatterVolumeIndex) {
-//  bool sampleMediumScattering(vec3 rayOrigin, vec3 rayDirection, float segmentEnd, out float scatterDistance, out int scatterVolumeIndex) {
+    public bool sampleMediumScattering<Random : IMediumRandom>(float3 rayOrigin, float3 rayDirection, float segmentEnd, out float scatterDistance, out int scatterVolumeIndex) {
+//  public bool sampleMediumScattering<Random : IMediumRandom>(float3 rayOrigin, float3 rayDirection, float segmentEnd, out float scatterDistance, out int scatterVolumeIndex) {
         scatterDistance = INF;
 //      scatterDistance = INF;
         scatterVolumeIndex = -1;
@@ -231,8 +248,8 @@
 //              continue;
             }
 //          }
-            float collisionDistance = sampleMediumVolumeFreeFlight(volumeIndex, rayOrigin, rayDirection, entryDistance, exitDistance);
-//          float collisionDistance = sampleMediumVolumeFreeFlight(volumeIndex, rayOrigin, rayDirection, entryDistance, exitDistance);
+            float collisionDistance = sampleMediumVolumeFreeFlight<Random>(volumeIndex, rayOrigin, rayDirection, entryDistance, exitDistance);
+//          float collisionDistance = sampleMediumVolumeFreeFlight<Random>(volumeIndex, rayOrigin, rayDirection, entryDistance, exitDistance);
             if (collisionDistance < scatterDistance) {
 //          if (collisionDistance < scatterDistance) {
                 scatterDistance = collisionDistance;
@@ -250,8 +267,8 @@
 
     // Unbiased estimate of the transmittance along [0, segmentEnd], for shadow rays.
 //  // Unbiased estimate of the transmittance along [0, segmentEnd], for shadow rays.
-    float estimateMediumTransmittance(vec3 rayOrigin, vec3 rayDirection, float segmentEnd) {
-//  float estimateMediumTransmittance(vec3 rayOrigin, vec3 rayDirection, float segmentEnd) {
+    public float estimateMediumTransmittance<Random : IMediumRandom>(float3 rayOrigin, float3 rayDirection, float segmentEnd) {
+//  public float estimateMediumTransmittance<Random : IMediumRandom>(float3 rayOrigin, float3 rayDirection, float segmentEnd) {
         if (!isMediaActive()) {
 //      if (!isMediaActive()) {
             return 1.0;
@@ -292,8 +309,8 @@
 //          float trackedDistance = entryDistance;
             for (int trackingStep = 0; trackingStep < MEDIUM_MAX_TRACKING_STEPS; trackingStep++) {
 //          for (int trackingStep = 0; trackingStep < MEDIUM_MAX_TRACKING_STEPS; trackingStep++) {
-                trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
-//              trackedDistance -= log(1.0 - MEDIA_RAND()) / majorant;
+                trackedDistance -= log(1.0 - Random.next()) / majorant;
+//              trackedDistance -= log(1.0 - Random.next()) / majorant;
                 if (trackedDistance >= exitDistance) {
 //              if (trackedDistance >= exitDistance) {
                     break;
@@ -312,8 +329,8 @@
 //              // Russian roulette keeps deep shadow rays from marching on for vanishing returns.
                 if (transmittance < MEDIUM_RATIO_TRACKING_ROULETTE) {
 //              if (transmittance < MEDIUM_RATIO_TRACKING_ROULETTE) {
-                    if (MEDIA_RAND() < 0.5) {
-//                  if (MEDIA_RAND() < 0.5) {
+                    if (Random.next() < 0.5) {
+//                  if (Random.next() < 0.5) {
                         return 0.0;
 //                      return 0.0;
                     }

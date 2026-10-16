@@ -6,29 +6,38 @@
 //  //
     // Phase functions and the noise-volume lookups used by both the sky cloud layer
 //  // Phase functions and the noise-volume lookups used by both the sky cloud layer
-    // (sky_clouds.glsl) and the in-scene participating media (participating_media.glsl).
-//  // (sky_clouds.glsl) and the in-scene participating media (participating_media.glsl).
+    // (sky_clouds.slang) and the in-scene participating media (participating_media.slang).
+//  // (sky_clouds.slang) and the in-scene participating media (participating_media.slang).
     //
 //  //
-    // Requires the includer to have already defined: PI, uCloudNoiseTexture (sampler3D holding the
-//  // Requires the includer to have already defined: PI, uCloudNoiseTexture (sampler3D holding the
-    // tileable noise written by cloud_noise_cs.glsl: R = Perlin-Worley, GBA = Worley FBM octaves).
-//  // tileable noise written by cloud_noise_cs.glsl: R = Perlin-Worley, GBA = Worley FBM octaves).
+    // Owns uCloudNoiseTexture, the tileable noise volume written by cloud_noise_cs.slang
+//  // Owns uCloudNoiseTexture, the tileable noise volume written by cloud_noise_cs.slang
+    // (R = Perlin-Worley, GBA = Worley FBM octaves).
+//  // (R = Perlin-Worley, GBA = Worley FBM octaves).
     // ============================================================================
 //  // ============================================================================
-    const vec3 CLOUD_NOISE_FBM_WEIGHTS = vec3(0.625, 0.25, 0.125);
-//  const vec3 CLOUD_NOISE_FBM_WEIGHTS = vec3(0.625, 0.25, 0.125);
+    module volumetric_common;
+//  module volumetric_common;
+
+    import math_constants;
+//  import math_constants;
+
+    public Sampler3D<float4> uCloudNoiseTexture;
+//  public Sampler3D<float4> uCloudNoiseTexture;
+
+    public static const float3 CLOUD_NOISE_FBM_WEIGHTS = float3(0.625, 0.25, 0.125);
+//  public static const float3 CLOUD_NOISE_FBM_WEIGHTS = float3(0.625, 0.25, 0.125);
     // The dilated Perlin-Worley below only spans roughly [0.74, 0.92] over the generated volume (its
 //  // The dilated Perlin-Worley below only spans roughly [0.74, 0.92] over the generated volume (its
     // 2nd to 98th percentile), which would leave every threshold against it all-or-nothing. Stretching
 //  // 2nd to 98th percentile), which would leave every threshold against it all-or-nothing. Stretching
     // that range onto [0, 1] lets coverage and shape masks carve individual billows.
 //  // that range onto [0, 1] lets coverage and shape masks carve individual billows.
-    const vec2 CLOUD_BASE_SHAPE_RANGE = vec2(0.74, 0.92);
-//  const vec2 CLOUD_BASE_SHAPE_RANGE = vec2(0.74, 0.92);
+    public static const float2 CLOUD_BASE_SHAPE_RANGE = float2(0.74, 0.92);
+//  public static const float2 CLOUD_BASE_SHAPE_RANGE = float2(0.74, 0.92);
 
-    float remapValue(float value, float oldMin, float oldMax, float newMin, float newMax) {
-//  float remapValue(float value, float oldMin, float oldMax, float newMin, float newMax) {
+    public float remapValue(float value, float oldMin, float oldMax, float newMin, float newMax) {
+//  public float remapValue(float value, float oldMin, float oldMax, float newMin, float newMax) {
         return newMin + (value - oldMin) / (oldMax - oldMin) * (newMax - newMin);
 //      return newMin + (value - oldMin) / (oldMax - oldMin) * (newMax - newMin);
     }
@@ -38,8 +47,8 @@
 //  // Henyey-Greenstein phase function, normalized over the sphere. cosTheta is measured between the
     // direction light was travelling and the direction it scatters into, so g > 0 is forward scattering.
 //  // direction light was travelling and the direction it scatters into, so g > 0 is forward scattering.
-    float henyeyGreenstein(float cosTheta, float anisotropy) {
-//  float henyeyGreenstein(float cosTheta, float anisotropy) {
+    public float henyeyGreenstein(float cosTheta, float anisotropy) {
+//  public float henyeyGreenstein(float cosTheta, float anisotropy) {
         float anisotropySquared = anisotropy * anisotropy;
 //      float anisotropySquared = anisotropy * anisotropy;
         float denominator = 1.0 + anisotropySquared - 2.0 * anisotropy * cosTheta;
@@ -53,8 +62,8 @@
 //  // Draws a scattered direction distributed exactly as henyeyGreenstein(dot(travelDirection, result), g),
     // so the phase-over-pdf ratio is 1 and the path throughput only picks up the medium albedo.
 //  // so the phase-over-pdf ratio is 1 and the path throughput only picks up the medium albedo.
-    vec3 sampleHenyeyGreenstein(vec3 travelDirection, float anisotropy, float randomA, float randomB) {
-//  vec3 sampleHenyeyGreenstein(vec3 travelDirection, float anisotropy, float randomA, float randomB) {
+    public float3 sampleHenyeyGreenstein(float3 travelDirection, float anisotropy, float randomA, float randomB) {
+//  public float3 sampleHenyeyGreenstein(float3 travelDirection, float anisotropy, float randomA, float randomB) {
         float cosTheta;
 //      float cosTheta;
         if (abs(anisotropy) < 1.0e-3) {
@@ -75,12 +84,12 @@
 //      float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
         float azimuth = 2.0 * PI * randomB;
 //      float azimuth = 2.0 * PI * randomB;
-        vec3 helperAxis = (abs(travelDirection.y) < 0.999) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-//      vec3 helperAxis = (abs(travelDirection.y) < 0.999) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-        vec3 tangentAxis = normalize(cross(helperAxis, travelDirection));
-//      vec3 tangentAxis = normalize(cross(helperAxis, travelDirection));
-        vec3 bitangentAxis = cross(travelDirection, tangentAxis);
-//      vec3 bitangentAxis = cross(travelDirection, tangentAxis);
+        float3 helperAxis = (abs(travelDirection.y) < 0.999) ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+//      float3 helperAxis = (abs(travelDirection.y) < 0.999) ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+        float3 tangentAxis = normalize(cross(helperAxis, travelDirection));
+//      float3 tangentAxis = normalize(cross(helperAxis, travelDirection));
+        float3 bitangentAxis = cross(travelDirection, tangentAxis);
+//      float3 bitangentAxis = cross(travelDirection, tangentAxis);
         return normalize(tangentAxis * (sinTheta * cos(azimuth)) + bitangentAxis * (sinTheta * sin(azimuth)) + travelDirection * cosTheta);
 //      return normalize(tangentAxis * (sinTheta * cos(azimuth)) + bitangentAxis * (sinTheta * sin(azimuth)) + travelDirection * cosTheta);
     }
@@ -90,10 +99,10 @@
 //  // Billowy base shape: the Perlin-Worley channel, dilated by the low-frequency Worley FBM so
     // cloud bodies grow rounded, cauliflower-like lobes instead of Perlin's stringy connectivity.
 //  // cloud bodies grow rounded, cauliflower-like lobes instead of Perlin's stringy connectivity.
-    float sampleCloudBaseShape(vec3 noiseCoordinates) {
-//  float sampleCloudBaseShape(vec3 noiseCoordinates) {
-        vec4 baseNoise = textureLod(uCloudNoiseTexture, noiseCoordinates, 0.0);
-//      vec4 baseNoise = textureLod(uCloudNoiseTexture, noiseCoordinates, 0.0);
+    public float sampleCloudBaseShape(float3 noiseCoordinates) {
+//  public float sampleCloudBaseShape(float3 noiseCoordinates) {
+        float4 baseNoise = uCloudNoiseTexture.SampleLevel(noiseCoordinates, 0.0);
+//      float4 baseNoise = uCloudNoiseTexture.SampleLevel(noiseCoordinates, 0.0);
         float lowFrequencyFbm = dot(baseNoise.gba, CLOUD_NOISE_FBM_WEIGHTS);
 //      float lowFrequencyFbm = dot(baseNoise.gba, CLOUD_NOISE_FBM_WEIGHTS);
         float dilatedShape = remapValue(baseNoise.r, lowFrequencyFbm - 1.0, 1.0, 0.0, 1.0);
@@ -105,9 +114,9 @@
 
     // High-frequency Worley FBM used to erode the edges of an already-shaped density.
 //  // High-frequency Worley FBM used to erode the edges of an already-shaped density.
-    float sampleCloudDetail(vec3 noiseCoordinates) {
-//  float sampleCloudDetail(vec3 noiseCoordinates) {
-        return dot(textureLod(uCloudNoiseTexture, noiseCoordinates, 0.0).gba, CLOUD_NOISE_FBM_WEIGHTS);
-//      return dot(textureLod(uCloudNoiseTexture, noiseCoordinates, 0.0).gba, CLOUD_NOISE_FBM_WEIGHTS);
+    public float sampleCloudDetail(float3 noiseCoordinates) {
+//  public float sampleCloudDetail(float3 noiseCoordinates) {
+        return dot(uCloudNoiseTexture.SampleLevel(noiseCoordinates, 0.0).gba, CLOUD_NOISE_FBM_WEIGHTS);
+//      return dot(uCloudNoiseTexture.SampleLevel(noiseCoordinates, 0.0).gba, CLOUD_NOISE_FBM_WEIGHTS);
     }
 //  }

@@ -1,15 +1,9 @@
-    #version 430
-//  #version 430
-
-    layout(local_size_x = 16, local_size_y = 16) in;
-//  layout(local_size_x = 16, local_size_y = 16) in;
-
     // rgba16f matches the f2 post-processing ping-pong pair (LDR data - no visible precision loss)
 //  // rgba16f matches the f2 post-processing ping-pong pair (LDR data - no visible precision loss)
-    layout(binding = 0, rgba16f) uniform image2D textureOutput;
-//  layout(binding = 0, rgba16f) uniform image2D textureOutput;
-    layout(binding = 1) uniform sampler2D textureInput;
-//  layout(binding = 1) uniform sampler2D textureInput;
+    [format("rgba16f")] WTexture2D<float4> textureOutput;
+//  [format("rgba16f")] WTexture2D<float4> textureOutput;
+    Sampler2D<float4> textureInput;
+//  Sampler2D<float4> textureInput;
 
     // FXAA 3.11 - the PC Quality path (Lottes), cranked to a SUPER-ULTRA profile
 //  // FXAA 3.11 - the PC Quality path (Lottes), cranked to a SUPER-ULTRA profile
@@ -22,30 +16,30 @@
 
     // Strength of the sub-pixel aliasing removal (1.0 = full strength, i.e. the softest result).
 //  // Strength of the sub-pixel aliasing removal (1.0 = full strength, i.e. the softest result).
-    #define SUBPIXEL_ALIASING_REMOVAL_STRENGTH   1.0
-//  #define SUBPIXEL_ALIASING_REMOVAL_STRENGTH   1.0
+    static const float SUBPIXEL_ALIASING_REMOVAL_STRENGTH    = 1.0;
+//  static const float SUBPIXEL_ALIASING_REMOVAL_STRENGTH    = 1.0;
     // Relative edge-contrast sensitivity, pushed about as low as is sane before flat detail starts to soften.
 //  // Relative edge-contrast sensitivity, pushed about as low as is sane before flat detail starts to soften.
-    #define RELATIVE_EDGE_CONTRAST_THRESHOLD     0.0234
-//  #define RELATIVE_EDGE_CONTRAST_THRESHOLD     0.0234
+    static const float RELATIVE_EDGE_CONTRAST_THRESHOLD      = 0.0234;
+//  static const float RELATIVE_EDGE_CONTRAST_THRESHOLD      = 0.0234;
     // Absolute contrast floor, so that even dark regions are still anti-aliased.
 //  // Absolute contrast floor, so that even dark regions are still anti-aliased.
-    #define MINIMUM_ABSOLUTE_EDGE_CONTRAST       0.0117
-//  #define MINIMUM_ABSOLUTE_EDGE_CONTRAST       0.0117
+    static const float MINIMUM_ABSOLUTE_EDGE_CONTRAST        = 0.0117;
+//  static const float MINIMUM_ABSOLUTE_EDGE_CONTRAST        = 0.0117;
     // Number of edge-end search taps; more taps reach further along grazing-angle edges.
 //  // Number of edge-end search taps; more taps reach further along grazing-angle edges.
-    #define EDGE_END_SEARCH_STEP_COUNT           20
-//  #define EDGE_END_SEARCH_STEP_COUNT           20
+    static const int EDGE_END_SEARCH_STEP_COUNT              = 20;
+//  static const int EDGE_END_SEARCH_STEP_COUNT              = 20;
 
-    const vec3 PERCEPTUAL_LUMINANCE_COEFFICIENTS = vec3(0.299, 0.587, 0.114);
-//  const vec3 PERCEPTUAL_LUMINANCE_COEFFICIENTS = vec3(0.299, 0.587, 0.114);
-    const float EDGE_END_SEARCH_STEP_SIZES[20] = float[20](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 4.0, 8.0, 8.0, 8.0, 8.0);
-//  const float EDGE_END_SEARCH_STEP_SIZES[20] = float[20](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 4.0, 8.0, 8.0, 8.0, 8.0);
+    static const float3 PERCEPTUAL_LUMINANCE_COEFFICIENTS = float3(0.299, 0.587, 0.114);
+//  static const float3 PERCEPTUAL_LUMINANCE_COEFFICIENTS = float3(0.299, 0.587, 0.114);
+    static const float EDGE_END_SEARCH_STEP_SIZES[20] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 4.0, 8.0, 8.0, 8.0, 8.0 };
+//  static const float EDGE_END_SEARCH_STEP_SIZES[20] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 4.0, 8.0, 8.0, 8.0, 8.0 };
 
     // Perceptual luminance from the gamma-encoded RGB; colored emissive edges still register as contrast.
 //  // Perceptual luminance from the gamma-encoded RGB; colored emissive edges still register as contrast.
-    float computePerceptualLuminance(vec3 color) {
-//  float computePerceptualLuminance(vec3 color) {
+    float computePerceptualLuminance(float3 color) {
+//  float computePerceptualLuminance(float3 color) {
         return dot(color, PERCEPTUAL_LUMINANCE_COEFFICIENTS);
 //      return dot(color, PERCEPTUAL_LUMINANCE_COEFFICIENTS);
     }
@@ -53,19 +47,27 @@
 
     // Sample the input and convert it to luminance; used for both the gathers and the edge walk.
 //  // Sample the input and convert it to luminance; used for both the gathers and the edge walk.
-    float samplePerceptualLuminanceAt(vec2 uv) {
-//  float samplePerceptualLuminanceAt(vec2 uv) {
-        return computePerceptualLuminance(texture(textureInput, uv).rgb);
-//      return computePerceptualLuminance(texture(textureInput, uv).rgb);
+    float samplePerceptualLuminanceAt(float2 uv) {
+//  float samplePerceptualLuminanceAt(float2 uv) {
+        return computePerceptualLuminance(textureInput.SampleLevel(uv, 0.0).rgb);
+//      return computePerceptualLuminance(textureInput.SampleLevel(uv, 0.0).rgb);
     }
 //  }
 
-    void main() {
-//  void main() {
-        ivec2 destinationPixelCoord = ivec2(gl_GlobalInvocationID.xy);
-//      ivec2 destinationPixelCoord = ivec2(gl_GlobalInvocationID.xy);
-        ivec2 outputImageSize = imageSize(textureOutput);
-//      ivec2 outputImageSize = imageSize(textureOutput);
+    [shader("compute")]
+//  [shader("compute")]
+    [numthreads(16, 16, 1)]
+//  [numthreads(16, 16, 1)]
+    void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+//  void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+        int2 destinationPixelCoord = int2(globalInvocationID.xy);
+//      int2 destinationPixelCoord = int2(globalInvocationID.xy);
+        uint2 outputImageSizeUnsigned;
+//      uint2 outputImageSizeUnsigned;
+        textureOutput.GetDimensions(outputImageSizeUnsigned.x, outputImageSizeUnsigned.y);
+//      textureOutput.GetDimensions(outputImageSizeUnsigned.x, outputImageSizeUnsigned.y);
+        int2 outputImageSize = int2(outputImageSizeUnsigned);
+//      int2 outputImageSize = int2(outputImageSizeUnsigned);
 
         if (destinationPixelCoord.x >= outputImageSize.x || destinationPixelCoord.y >= outputImageSize.y) {
 //      if (destinationPixelCoord.x >= outputImageSize.x || destinationPixelCoord.y >= outputImageSize.y) {
@@ -74,25 +76,25 @@
         }
 //      }
 
-        vec2 texelSizeInUv = 1.0 / vec2(outputImageSize);
-//      vec2 texelSizeInUv = 1.0 / vec2(outputImageSize);
-        vec2 centerSampleUv = (vec2(destinationPixelCoord) + 0.5) * texelSizeInUv;
-//      vec2 centerSampleUv = (vec2(destinationPixelCoord) + 0.5) * texelSizeInUv;
+        float2 texelSizeInUv = 1.0 / float2(outputImageSize);
+//      float2 texelSizeInUv = 1.0 / float2(outputImageSize);
+        float2 centerSampleUv = (float2(destinationPixelCoord) + 0.5) * texelSizeInUv;
+//      float2 centerSampleUv = (float2(destinationPixelCoord) + 0.5) * texelSizeInUv;
 
         // --- Gather local contrast across the center pixel and its north/south/east/west neighbors ---
 //      // --- Gather local contrast across the center pixel and its north/south/east/west neighbors ---
-        vec3 centerPixelColor = texture(textureInput, centerSampleUv).rgb;
-//      vec3 centerPixelColor = texture(textureInput, centerSampleUv).rgb;
+        float3 centerPixelColor = textureInput.SampleLevel(centerSampleUv, 0.0).rgb;
+//      float3 centerPixelColor = textureInput.SampleLevel(centerSampleUv, 0.0).rgb;
         float luminanceCenter = computePerceptualLuminance(centerPixelColor);
 //      float luminanceCenter = computePerceptualLuminance(centerPixelColor);
-        float luminanceNorth = samplePerceptualLuminanceAt(centerSampleUv + vec2( 0.0, -1.0) * texelSizeInUv);
-//      float luminanceNorth = samplePerceptualLuminanceAt(centerSampleUv + vec2( 0.0, -1.0) * texelSizeInUv);
-        float luminanceSouth = samplePerceptualLuminanceAt(centerSampleUv + vec2( 0.0,  1.0) * texelSizeInUv);
-//      float luminanceSouth = samplePerceptualLuminanceAt(centerSampleUv + vec2( 0.0,  1.0) * texelSizeInUv);
-        float luminanceEast  = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0,  0.0) * texelSizeInUv);
-//      float luminanceEast  = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0,  0.0) * texelSizeInUv);
-        float luminanceWest  = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0,  0.0) * texelSizeInUv);
-//      float luminanceWest  = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0,  0.0) * texelSizeInUv);
+        float luminanceNorth = samplePerceptualLuminanceAt(centerSampleUv + float2( 0.0, -1.0) * texelSizeInUv);
+//      float luminanceNorth = samplePerceptualLuminanceAt(centerSampleUv + float2( 0.0, -1.0) * texelSizeInUv);
+        float luminanceSouth = samplePerceptualLuminanceAt(centerSampleUv + float2( 0.0,  1.0) * texelSizeInUv);
+//      float luminanceSouth = samplePerceptualLuminanceAt(centerSampleUv + float2( 0.0,  1.0) * texelSizeInUv);
+        float luminanceEast  = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0,  0.0) * texelSizeInUv);
+//      float luminanceEast  = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0,  0.0) * texelSizeInUv);
+        float luminanceWest  = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0,  0.0) * texelSizeInUv);
+//      float luminanceWest  = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0,  0.0) * texelSizeInUv);
 
         float maximumLuminance = max(luminanceCenter, max(max(luminanceNorth, luminanceSouth), max(luminanceEast, luminanceWest)));
 //      float maximumLuminance = max(luminanceCenter, max(max(luminanceNorth, luminanceSouth), max(luminanceEast, luminanceWest)));
@@ -105,8 +107,8 @@
 //      // --- Early out: when local contrast is below threshold, pass the pixel through unchanged ---
         if (luminanceContrastRange < max(MINIMUM_ABSOLUTE_EDGE_CONTRAST, maximumLuminance * RELATIVE_EDGE_CONTRAST_THRESHOLD)) {
 //      if (luminanceContrastRange < max(MINIMUM_ABSOLUTE_EDGE_CONTRAST, maximumLuminance * RELATIVE_EDGE_CONTRAST_THRESHOLD)) {
-            imageStore(textureOutput, destinationPixelCoord, vec4(centerPixelColor, 1.0));
-//          imageStore(textureOutput, destinationPixelCoord, vec4(centerPixelColor, 1.0));
+            textureOutput.Store(destinationPixelCoord, float4(centerPixelColor, 1.0));
+//          textureOutput.Store(destinationPixelCoord, float4(centerPixelColor, 1.0));
             return;
 //          return;
         }
@@ -114,14 +116,14 @@
 
         // --- Gather the diagonal neighbors, used for edge orientation and the low-pass term ---
 //      // --- Gather the diagonal neighbors, used for edge orientation and the low-pass term ---
-        float luminanceNorthWest = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0, -1.0) * texelSizeInUv);
-//      float luminanceNorthWest = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0, -1.0) * texelSizeInUv);
-        float luminanceNorthEast = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0, -1.0) * texelSizeInUv);
-//      float luminanceNorthEast = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0, -1.0) * texelSizeInUv);
-        float luminanceSouthWest = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0,  1.0) * texelSizeInUv);
-//      float luminanceSouthWest = samplePerceptualLuminanceAt(centerSampleUv + vec2(-1.0,  1.0) * texelSizeInUv);
-        float luminanceSouthEast = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0,  1.0) * texelSizeInUv);
-//      float luminanceSouthEast = samplePerceptualLuminanceAt(centerSampleUv + vec2( 1.0,  1.0) * texelSizeInUv);
+        float luminanceNorthWest = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0, -1.0) * texelSizeInUv);
+//      float luminanceNorthWest = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0, -1.0) * texelSizeInUv);
+        float luminanceNorthEast = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0, -1.0) * texelSizeInUv);
+//      float luminanceNorthEast = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0, -1.0) * texelSizeInUv);
+        float luminanceSouthWest = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0,  1.0) * texelSizeInUv);
+//      float luminanceSouthWest = samplePerceptualLuminanceAt(centerSampleUv + float2(-1.0,  1.0) * texelSizeInUv);
+        float luminanceSouthEast = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0,  1.0) * texelSizeInUv);
+//      float luminanceSouthEast = samplePerceptualLuminanceAt(centerSampleUv + float2( 1.0,  1.0) * texelSizeInUv);
 
         // --- Estimate edge orientation: horizontal vs. vertical contrast magnitude ---
 //      // --- Estimate edge orientation: horizontal vs. vertical contrast magnitude ---
@@ -225,10 +227,10 @@
 
         // --- Step half a texel onto the edge and seed the two search anchors ---
 //      // --- Step half a texel onto the edge and seed the two search anchors ---
-        vec2 edgeMidpointUv = centerSampleUv;
-//      vec2 edgeMidpointUv = centerSampleUv;
-        vec2 alongEdgeStepUv;
-//      vec2 alongEdgeStepUv;
+        float2 edgeMidpointUv = centerSampleUv;
+//      float2 edgeMidpointUv = centerSampleUv;
+        float2 alongEdgeStepUv;
+//      float2 alongEdgeStepUv;
         if (edgeIsHorizontal) {
 //      if (edgeIsHorizontal) {
             alongEdgeStepUv.x = texelSizeInUv.x;
@@ -248,10 +250,10 @@
         }
 //      }
 
-        vec2 negativeSearchUv = edgeMidpointUv - alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
-//      vec2 negativeSearchUv = edgeMidpointUv - alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
-        vec2 positiveSearchUv = edgeMidpointUv + alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
-//      vec2 positiveSearchUv = edgeMidpointUv + alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
+        float2 negativeSearchUv = edgeMidpointUv - alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
+//      float2 negativeSearchUv = edgeMidpointUv - alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
+        float2 positiveSearchUv = edgeMidpointUv + alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
+//      float2 positiveSearchUv = edgeMidpointUv + alongEdgeStepUv * EDGE_END_SEARCH_STEP_SIZES[0];
         float subpixelBlendCubicSlope = (-2.0 * subpixelBlendAmountClamped) + 3.0;
 //      float subpixelBlendCubicSlope = (-2.0 * subpixelBlendAmountClamped) + 3.0;
         float negativeSearchLuminance = samplePerceptualLuminanceAt(negativeSearchUv);
@@ -427,9 +429,9 @@
 
         // --- Take a single resolved tap through the bilinear sampler ---
 //      // --- Take a single resolved tap through the bilinear sampler ---
-        vec3 antialiasedColor = texture(textureInput, centerSampleUv).rgb;
-//      vec3 antialiasedColor = texture(textureInput, centerSampleUv).rgb;
-        imageStore(textureOutput, destinationPixelCoord, vec4(antialiasedColor, 1.0));
-//      imageStore(textureOutput, destinationPixelCoord, vec4(antialiasedColor, 1.0));
+        float3 antialiasedColor = textureInput.SampleLevel(centerSampleUv, 0.0).rgb;
+//      float3 antialiasedColor = textureInput.SampleLevel(centerSampleUv, 0.0).rgb;
+        textureOutput.Store(destinationPixelCoord, float4(antialiasedColor, 1.0));
+//      textureOutput.Store(destinationPixelCoord, float4(antialiasedColor, 1.0));
     }
 //  }

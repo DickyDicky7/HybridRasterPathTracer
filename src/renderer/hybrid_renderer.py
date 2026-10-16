@@ -1,9 +1,7 @@
-import moderngl as mgl
-import moderngl as mgl
-import moderngl_window as mglw
-import moderngl_window as mglw
-from moderngl_window.context.base import BaseKeys, BaseWindow, KeyModifiers
-from moderngl_window.context.base import BaseKeys, BaseWindow, KeyModifiers
+import wgpu # type: ignore[import-untyped]
+import wgpu
+from rendercanvas.glfw import RenderCanvas, loop # type: ignore[import-untyped]
+from rendercanvas.glfw import RenderCanvas, loop
 import numpy as np
 import numpy as np
 import numpy.typing as npt
@@ -16,6 +14,8 @@ import typing
 import typing
 import enum
 import enum
+import time as tm
+import time as tm
 import os
 import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -24,8 +24,8 @@ import cv2
 import cv2
 import pyoidn     # type: ignore[import-untyped]
 import pyoidn
-from src.renderer.shader_compiler import resolve_includes
-from src.renderer.shader_compiler import resolve_includes
+from src.renderer.shader_compiler import ComputeProgram, RenderProgram
+from src.renderer.shader_compiler import ComputeProgram, RenderProgram
 from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.camera import Camera
@@ -47,7 +47,7 @@ class RenderMode(enum.IntEnum):
     TANGENT = 4
 #   TANGENT = 4
 
-class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
+class HybridRenderer:
     # Main Renderer Class implementing a Hybrid Pipeline:
 #   # Main Renderer Class implementing a Hybrid Pipeline:
     # 1. Rasterization Pass: Renders scene geometry to G-Buffer (Position, Normal, Albedo, etc.).
@@ -58,24 +58,31 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #   # 3. Post Processing Pass: Applies effects like Chromatic Aberration and Vignette.
     # 4. Composite Pass: Displays the final result to the screen.
 #   # 4. Composite Pass: Displays the final result to the screen.
-    gl_version: vec2i32 = (4, 3)
-#   gl_version: vec2i32 = (4, 3)
+    # GPU work runs on wgpu (WebGPU) with every shader written in Slang and compiled to WGSL at start-up.
+#   # GPU work runs on wgpu (WebGPU) with every shader written in Slang and compiled to WGSL at start-up.
     title: str = "Hybrid Rendering: Rasterization + Path Tracing"
 #   title: str = "Hybrid Rendering: Rasterization + Path Tracing"
     window_size: vec2i32 = (800, 600)
 #   window_size: vec2i32 = (800, 600)
     aspect_ratio: float = window_size[0] / window_size[1]
 #   aspect_ratio: float = window_size[0] / window_size[1]
-    resizable: bool = False
-#   resizable: bool = False
-    resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False) # type: ignore[assignment]
-#   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False) # type: ignore[assignment]
+    resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
+#   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
+    shader_dir: pl.Path = (resource_dir / "../shaders").resolve(strict=False)
+#   shader_dir: pl.Path = (resource_dir / "../shaders").resolve(strict=False)
+    # rendercanvas key names -> the names key_state and on_key_event use (letters and digits map to themselves, upper-cased).
+#   # rendercanvas key names -> the names key_state and on_key_event use (letters and digits map to themselves, upper-cased).
+    key_names: dict[str, str] = {
+#   key_names: dict[str, str] = {
+        "ArrowUp": "UP", "ArrowDown": "DOWN", "ArrowLeft": "LEFT", "ArrowRight": "RIGHT",
+#       "ArrowUp": "UP", "ArrowDown": "DOWN", "ArrowLeft": "LEFT", "ArrowRight": "RIGHT",
+        "Tab": "TAB",
+#       "Tab": "TAB",
+    }
+#   }
 
-    def __init__(self, **kwargs: typing.Any) -> None:
-#   def __init__(self, **kwargs: typing.Any) -> None:
-        super().__init__(**kwargs)
-#       super().__init__(**kwargs)
-
+    def __init__(self) -> None:
+#   def __init__(self) -> None:
         self.frame_count: int = 0
 #       self.frame_count: int = 0
         self.cache_frame_counter: int = 0
@@ -111,6 +118,103 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # -----------------------------
 #       # -----------------------------
+        # 0. Device and Window Setup
+#       # 0. Device and Window Setup
+        # -----------------------------
+#       # -----------------------------
+        # Ask for the high-performance adapter so hybrid-graphics laptops render on the discrete GPU.
+#       # Ask for the high-performance adapter so hybrid-graphics laptops render on the discrete GPU.
+        self.adapter: wgpu.GPUAdapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
+#       self.adapter: wgpu.GPUAdapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
+        print(f"[GPU] {self.adapter.info['device']} ({self.adapter.info['backend_type']})")
+#       print(f"[GPU] {self.adapter.info['device']} ({self.adapter.info['backend_type']})")
+        # float32-filterable: the HDRI and the debug views sample rgba32float textures through linear samplers.
+#       # float32-filterable: the HDRI and the debug views sample rgba32float textures through linear samplers.
+        # The shading pass binds eight storage buffers (the WebGPU default ceiling) and large scenes outgrow
+#       # The shading pass binds eight storage buffers (the WebGPU default ceiling) and large scenes outgrow
+        # the default buffer sizes, so those limits are raised to whatever the adapter supports.
+#       # the default buffer sizes, so those limits are raised to whatever the adapter supports.
+        required_limits: dict[str, int] = {
+#       required_limits: dict[str, int] = {
+            limit_name: self.adapter.limits[limit_name]
+#           limit_name: self.adapter.limits[limit_name]
+            for limit_name in ("max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers")
+#           for limit_name in ("max-storage-buffers-per-shader-stage", "max-storage-buffer-binding-size", "max-buffer-size", "max-texture-array-layers")
+        }
+#       }
+        self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
+#       self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
+
+        self.canvas: RenderCanvas = RenderCanvas(size=self.window_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=True)
+#       self.canvas: RenderCanvas = RenderCanvas(size=self.window_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=True)
+        self.present_context: typing.Any = self.canvas.get_context("wgpu")
+#       self.present_context: typing.Any = self.canvas.get_context("wgpu")
+        # A non-sRGB swapchain: the post-processing chain already gamma-encodes, like the GL default framebuffer did.
+#       # A non-sRGB swapchain: the post-processing chain already gamma-encodes, like the GL default framebuffer did.
+        self.present_format: str = self.present_context.get_preferred_format(self.adapter).removesuffix("-srgb")
+#       self.present_format: str = self.present_context.get_preferred_format(self.adapter).removesuffix("-srgb")
+        self.present_context.configure(device=self.device, format=self.present_format)
+#       self.present_context.configure(device=self.device, format=self.present_format)
+        self.canvas.add_event_handler(self.on_key_down, "key_down")
+#       self.canvas.add_event_handler(self.on_key_down, "key_down")
+        self.canvas.add_event_handler(self.on_key_up, "key_up")
+#       self.canvas.add_event_handler(self.on_key_up, "key_up")
+        self.canvas.add_event_handler(self.on_close, "close")
+#       self.canvas.add_event_handler(self.on_close, "close")
+        self.start_time: float = tm.perf_counter()
+#       self.start_time: float = tm.perf_counter()
+        self.last_frame_time: float = self.start_time
+#       self.last_frame_time: float = self.start_time
+
+        # Sampler states. OpenGL attached filtering / wrapping to each texture; WebGPU keeps them in sampler
+#       # Sampler states. OpenGL attached filtering / wrapping to each texture; WebGPU keeps them in sampler
+        # objects, bound together with the texture for every Slang combined texture-sampler (Sampler2D, ...).
+#       # objects, bound together with the texture for every Slang combined texture-sampler (Sampler2D, ...).
+        # Clamp-to-edge on every screen-sized target: FXAA's edge-end search taps (and any filtered read
+#       # Clamp-to-edge on every screen-sized target: FXAA's edge-end search taps (and any filtered read
+        # near the border) would otherwise wrap around and bleed the opposite side of the screen into the edges.
+#       # near the border) would otherwise wrap around and bleed the opposite side of the screen into the edges.
+        self.sampler_screen: wgpu.GPUSampler = self.device.create_sampler(
+#       self.sampler_screen: wgpu.GPUSampler = self.device.create_sampler(
+            mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+#           mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+            address_mode_u=wgpu.AddressMode.clamp_to_edge, address_mode_v=wgpu.AddressMode.clamp_to_edge,
+#           address_mode_u=wgpu.AddressMode.clamp_to_edge, address_mode_v=wgpu.AddressMode.clamp_to_edge,
+        )
+#       )
+        # Equirectangular maps (HDRI, baked sky clouds) wrap around in longitude and clamp at the poles.
+#       # Equirectangular maps (HDRI, baked sky clouds) wrap around in longitude and clamp at the poles.
+        self.sampler_equirect: wgpu.GPUSampler = self.device.create_sampler(
+#       self.sampler_equirect: wgpu.GPUSampler = self.device.create_sampler(
+            mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+#           mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+            address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.clamp_to_edge,
+#           address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.clamp_to_edge,
+        )
+#       )
+        self.sampler_cloud_noise: wgpu.GPUSampler = self.device.create_sampler(
+#       self.sampler_cloud_noise: wgpu.GPUSampler = self.device.create_sampler(
+            mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+#           mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear,
+            address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.repeat, address_mode_w=wgpu.AddressMode.repeat,
+#           address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.repeat, address_mode_w=wgpu.AddressMode.repeat,
+        )
+#       )
+        # Trilinear + anisotropic filtering keeps textures sharp at grazing angles.
+#       # Trilinear + anisotropic filtering keeps textures sharp at grazing angles.
+        self.sampler_texture_array: wgpu.GPUSampler = self.device.create_sampler(
+#       self.sampler_texture_array: wgpu.GPUSampler = self.device.create_sampler(
+            mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear, mipmap_filter=wgpu.MipmapFilterMode.linear,
+#           mag_filter=wgpu.FilterMode.linear, min_filter=wgpu.FilterMode.linear, mipmap_filter=wgpu.MipmapFilterMode.linear,
+            address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.repeat,
+#           address_mode_u=wgpu.AddressMode.repeat, address_mode_v=wgpu.AddressMode.repeat,
+            max_anisotropy=16,
+#           max_anisotropy=16,
+        )
+#       )
+
+        # -----------------------------
+#       # -----------------------------
         # 1. G-Buffer Setup
 #       # 1. G-Buffer Setup
         # -----------------------------
@@ -119,37 +223,35 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Create textures for the Geometric Buffer (G-Buffer).
         # These store the geometric properties of the visible surface at each pixel.
 #       # These store the geometric properties of the visible surface at each pixel.
-        self.texture_geometry_global_position: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-#       self.texture_geometry_global_position: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-        self.texture_geometry_global_normal: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-#       self.texture_geometry_global_normal: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-        self.texture_geometry_albedo: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f1")
-#       self.texture_geometry_albedo: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f1")
-        self.texture_geometry_global_tangent: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-#       self.texture_geometry_global_tangent: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-        self.texture_depth: mgl.Texture = self.ctx.depth_texture(size=self.window_size)
-#       self.texture_depth: mgl.Texture = self.ctx.depth_texture(size=self.window_size)
+        # COPY_SRC on albedo / normal lets denoise_and_show read them back as OIDN auxiliary images.
+#       # COPY_SRC on albedo / normal lets denoise_and_show read them back as OIDN auxiliary images.
+        gbuffer_usage: int = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_SRC
+#       gbuffer_usage: int = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_SRC
+        self.texture_geometry_global_position: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba32float, usage=gbuffer_usage, label="gbuffer position")
+#       self.texture_geometry_global_position: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba32float, usage=gbuffer_usage, label="gbuffer position")
+        self.texture_geometry_global_normal: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=gbuffer_usage, label="gbuffer normal")
+#       self.texture_geometry_global_normal: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=gbuffer_usage, label="gbuffer normal")
+        self.texture_geometry_albedo: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba8unorm, usage=gbuffer_usage, label="gbuffer albedo")
+#       self.texture_geometry_albedo: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba8unorm, usage=gbuffer_usage, label="gbuffer albedo")
+        self.texture_geometry_global_tangent: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=gbuffer_usage, label="gbuffer tangent")
+#       self.texture_geometry_global_tangent: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=gbuffer_usage, label="gbuffer tangent")
+        self.texture_depth: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.depth24plus, usage=wgpu.TextureUsage.RENDER_ATTACHMENT, label="gbuffer depth")
+#       self.texture_depth: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.depth24plus, usage=wgpu.TextureUsage.RENDER_ATTACHMENT, label="gbuffer depth")
 
-        # Framebuffer to render geometry into these textures
-#       # Framebuffer to render geometry into these textures
-        self.gbuffer: mgl.Framebuffer = self.ctx.framebuffer(
-#       self.gbuffer: mgl.Framebuffer = self.ctx.framebuffer(
-            color_attachments=[
-#           color_attachments=[
-                self.texture_geometry_global_position,
-#               self.texture_geometry_global_position,
-                self.texture_geometry_global_normal,
-#               self.texture_geometry_global_normal,
-                self.texture_geometry_albedo,
-#               self.texture_geometry_albedo,
-                self.texture_geometry_global_tangent,
-#               self.texture_geometry_global_tangent,
-            ],
-#           ],
-            depth_attachment=self.texture_depth,
-#           depth_attachment=self.texture_depth,
-        )
-#       )
+        # Render targets of the geometry pass, in the SV_Target order of hybrid_geometry_fs.slang.
+#       # Render targets of the geometry pass, in the SV_Target order of hybrid_geometry_fs.slang.
+        self.gbuffer: list[wgpu.GPUTexture] = [
+#       self.gbuffer: list[wgpu.GPUTexture] = [
+            self.texture_geometry_global_position,
+#           self.texture_geometry_global_position,
+            self.texture_geometry_global_normal,
+#           self.texture_geometry_global_normal,
+            self.texture_geometry_albedo,
+#           self.texture_geometry_albedo,
+            self.texture_geometry_global_tangent,
+#           self.texture_geometry_global_tangent,
+        ]
+#       ]
 
         # Post-processing ping-pong pair in rgba16f (f2): everything after the tonemap pass is
 #       # Post-processing ping-pong pair in rgba16f (f2): everything after the tonemap pass is
@@ -157,37 +259,40 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # gamma-encoded LDR in [0, 1], where half floats resolve ~1/2048 steps vs the display's
         # 1/255 - visually identical, at half the memory traffic for every post pass and blit.
 #       # 1/255 - visually identical, at half the memory traffic for every post pass and blit.
-        self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-#       self.texture_output: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-        self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
-#       self.texture_output.filter = (mgl.LINEAR, mgl.LINEAR)
+        screen_usage: int = wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
+#       screen_usage: int = wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING
+        self.texture_output: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="post output")
+#       self.texture_output: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="post output")
+        self.texture_ping: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="post ping")
+#       self.texture_ping: wgpu.GPUTexture = self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="post ping")
 
         # The accumulation history MUST stay f4: it averages thousands of HDR samples with blend
 #       # The accumulation history MUST stay f4: it averages thousands of HDR samples with blend
         # weights down to 0.001, which half-float precision would visibly stall and band.
 #       # weights down to 0.001, which half-float precision would visibly stall and band.
-        self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-#       self.texture_accum: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f4")
-        self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
-#       self.texture_accum.filter = (mgl.NEAREST, mgl.NEAREST)
+        # WebGPU only grants read-write storage access to single-channel 32-bit formats, so the history is
+#       # WebGPU only grants read-write storage access to single-channel 32-bit formats, so the history is
+        # a ping-pong pair: the shading pass reads last frame's result and writes this frame's into the other
+#       # a ping-pong pair: the shading pass reads last frame's result and writes this frame's into the other
+        # texture. texture_accum always names the most recently written one.
+#       # texture. texture_accum always names the most recently written one.
+        self.texture_accum_pair: list[wgpu.GPUTexture] = [
+#       self.texture_accum_pair: list[wgpu.GPUTexture] = [
+            self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba32float, usage=screen_usage | wgpu.TextureUsage.COPY_SRC, label=f"accumulation {accum_index}")
+#           self.create_texture(size=self.window_size, texture_format=wgpu.TextureFormat.rgba32float, usage=screen_usage | wgpu.TextureUsage.COPY_SRC, label=f"accumulation {accum_index}")
+            for accum_index in range(2)
+#           for accum_index in range(2)
+        ]
+#       ]
+        self.texture_accum: wgpu.GPUTexture = self.texture_accum_pair[0]
+#       self.texture_accum: wgpu.GPUTexture = self.texture_accum_pair[0]
 
-        self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-#       self.texture_ping: mgl.Texture = self.ctx.texture(size=self.window_size, components=4, dtype="f2")
-        self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
-#       self.texture_ping.filter = (mgl.LINEAR, mgl.LINEAR)
-
-        # Clamp-to-edge on every screen-sized target: moderngl textures default to repeat wrapping, so
-#       # Clamp-to-edge on every screen-sized target: moderngl textures default to repeat wrapping, so
-        # FXAA's edge-end search taps (and any sampler2D read near the border) wrapped around and bled
-#       # FXAA's edge-end search taps (and any sampler2D read near the border) wrapped around and bled
-        # the opposite side of the screen into the edges.
-#       # the opposite side of the screen into the edges.
-        for screen_texture in (self.texture_output, self.texture_accum, self.texture_ping):
-#       for screen_texture in (self.texture_output, self.texture_accum, self.texture_ping):
-            screen_texture.repeat_x = False
-#           screen_texture.repeat_x = False
-            screen_texture.repeat_y = False
-#           screen_texture.repeat_y = False
+        # 1x1 stand-in for sampled parameters a pass declares but must not alias with its own output
+#       # 1x1 stand-in for sampled parameters a pass declares but must not alias with its own output
+        # (the sky cloud bake writes texture_sky_clouds, so it cannot also sample it).
+#       # (the sky cloud bake writes texture_sky_clouds, so it cannot also sample it).
+        self.texture_dummy: wgpu.GPUTexture = self.create_texture(size=(1, 1), texture_format=wgpu.TextureFormat.rgba16float, usage=wgpu.TextureUsage.TEXTURE_BINDING, label="dummy")
+#       self.texture_dummy: wgpu.GPUTexture = self.create_texture(size=(1, 1), texture_format=wgpu.TextureFormat.rgba16float, usage=wgpu.TextureUsage.TEXTURE_BINDING, label="dummy")
 
         # OIDN Setup
 #       # OIDN Setup
@@ -198,8 +303,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # HDRI Texture Loading
 #       # HDRI Texture Loading
-        self.texture_hdri: mgl.Texture = typing.cast(mgl.Texture, None)
-#       self.texture_hdri: mgl.Texture = typing.cast(mgl.Texture, None)
+        self.texture_hdri: wgpu.GPUTexture = typing.cast(wgpu.GPUTexture, None)
+#       self.texture_hdri: wgpu.GPUTexture = typing.cast(wgpu.GPUTexture, None)
         self.use_hdri: bool = False
 #       self.use_hdri: bool = False
 
@@ -211,8 +316,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # how many layers are needed, so no VRAM is wasted on unused layers.
         self.texture_array_size: int = 2048
 #       self.texture_array_size: int = 2048
-        self.texture_array: mgl.TextureArray = typing.cast(mgl.TextureArray, None)
-#       self.texture_array: mgl.TextureArray = typing.cast(mgl.TextureArray, None)
+        # Full mip chain down to 1x1; WebGPU has no glGenerateMipmap, so the levels are built on the CPU per layer.
+#       # Full mip chain down to 1x1; WebGPU has no glGenerateMipmap, so the levels are built on the CPU per layer.
+        self.texture_array_mip_count: int = int(np.log2(self.texture_array_size)) + 1
+#       self.texture_array_mip_count: int = int(np.log2(self.texture_array_size)) + 1
+        self.texture_array: wgpu.GPUTexture = typing.cast(wgpu.GPUTexture, None)
+#       self.texture_array: wgpu.GPUTexture = typing.cast(wgpu.GPUTexture, None)
 
         self.texture_cache: dict[str, float] = {}
 #       self.texture_cache: dict[str, float] = {}
@@ -233,26 +342,48 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 2. Rasterization Shader (Geometry Pass)
         # -----------------------------
 #       # -----------------------------
-        hybrid_geometry_vs_path: pl.Path = self.resource_dir / "../shaders/hybrid_geometry_vs.glsl"
-#       hybrid_geometry_vs_path: pl.Path = self.resource_dir / "../shaders/hybrid_geometry_vs.glsl"
-        hybrid_geometry_vs_code: str = resolve_includes(hybrid_geometry_vs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_geometry_vs_code: str = resolve_includes(hybrid_geometry_vs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        hybrid_geometry_fs_path: pl.Path = self.resource_dir / "../shaders/hybrid_geometry_fs.glsl"
-#       hybrid_geometry_fs_path: pl.Path = self.resource_dir / "../shaders/hybrid_geometry_fs.glsl"
-        hybrid_geometry_fs_code: str = resolve_includes(hybrid_geometry_fs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_geometry_fs_code: str = resolve_includes(hybrid_geometry_fs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_geometry: mgl.Program = self.ctx.program(
-#       self.program_geometry: mgl.Program = self.ctx.program(
-              vertex_shader=hybrid_geometry_vs_code,
-#             vertex_shader=hybrid_geometry_vs_code,
-            fragment_shader=hybrid_geometry_fs_code,
-#           fragment_shader=hybrid_geometry_fs_code,
+        # One interleaved vertex stream of three float4 per vertex (see SceneBuilder.build).
+#       # One interleaved vertex stream of three float4 per vertex (see SceneBuilder.build).
+        # Depth test + back-face culling as in GL; the front face is clockwise because hybrid_geometry_vs.slang
+#       # Depth test + back-face culling as in GL; the front face is clockwise because hybrid_geometry_vs.slang
+        # mirrors clip-space y to keep OpenGL's bottom-up G-Buffer row order, which reverses the winding.
+#       # mirrors clip-space y to keep OpenGL's bottom-up G-Buffer row order, which reverses the winding.
+        self.program_geometry: RenderProgram = RenderProgram(
+#       self.program_geometry: RenderProgram = RenderProgram(
+            device=self.device,
+#           device=self.device,
+            shader_dir=self.shader_dir,
+#           shader_dir=self.shader_dir,
+            vertex_file_name="hybrid_geometry_vs.slang",
+#           vertex_file_name="hybrid_geometry_vs.slang",
+            fragment_file_name="hybrid_geometry_fs.slang",
+#           fragment_file_name="hybrid_geometry_fs.slang",
+            vertex_buffers=[{
+#           vertex_buffers=[{
+                "array_stride": 48,
+#               "array_stride": 48,
+                "step_mode": wgpu.VertexStepMode.vertex,
+#               "step_mode": wgpu.VertexStepMode.vertex,
+                "attributes": [
+#               "attributes": [
+                    {"format": wgpu.VertexFormat.float32x4, "offset": 0, "shader_location": 0},
+#                   {"format": wgpu.VertexFormat.float32x4, "offset": 0, "shader_location": 0},
+                    {"format": wgpu.VertexFormat.float32x4, "offset": 16, "shader_location": 1},
+#                   {"format": wgpu.VertexFormat.float32x4, "offset": 16, "shader_location": 1},
+                    {"format": wgpu.VertexFormat.float32x4, "offset": 32, "shader_location": 2},
+#                   {"format": wgpu.VertexFormat.float32x4, "offset": 32, "shader_location": 2},
+                ],
+#               ],
+            }],
+#           }],
+            color_formats=[texture.format for texture in self.gbuffer],
+#           color_formats=[texture.format for texture in self.gbuffer],
+            primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "front_face": wgpu.FrontFace.cw, "cull_mode": wgpu.CullMode.back},
+#           primitive={"topology": wgpu.PrimitiveTopology.triangle_list, "front_face": wgpu.FrontFace.cw, "cull_mode": wgpu.CullMode.back},
+            depth_stencil={"format": wgpu.TextureFormat.depth24plus, "depth_write_enabled": True, "depth_compare": wgpu.CompareFunction.less},
+#           depth_stencil={"format": wgpu.TextureFormat.depth24plus, "depth_write_enabled": True, "depth_compare": wgpu.CompareFunction.less},
         )
 #       )
-        if "uSceneTextureArray" in self.program_geometry:
-#       if "uSceneTextureArray" in self.program_geometry:
-            self.program_geometry["uSceneTextureArray"] = 9
-#           self.program_geometry["uSceneTextureArray"] = 9
 
         # -----------------------------
 #       # -----------------------------
@@ -260,12 +391,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 3. Compute Shader (Shading Pass)
         # -----------------------------
 #       # -----------------------------
-        hybrid_shading_cs_path: pl.Path = self.resource_dir / "../shaders/hybrid_shading_cs.glsl"
-#       hybrid_shading_cs_path: pl.Path = self.resource_dir / "../shaders/hybrid_shading_cs.glsl"
-        hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_shading_cs_code: str = resolve_includes(hybrid_shading_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
-#       self.program_shading: mgl.ComputeShader = self.ctx.compute_shader(source=hybrid_shading_cs_code)
+        self.program_shading: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="hybrid_shading_cs.slang")
+#       self.program_shading: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="hybrid_shading_cs.slang")
 
         # -----------------------------
 #       # -----------------------------
@@ -273,19 +400,11 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 3b. Compute Shader (NRC Training Passes)
         # -----------------------------
 #       # -----------------------------
-        nrc_gather_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_gather_cs.glsl"
-#       nrc_gather_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_gather_cs.glsl"
-        nrc_gather_cs_code: str = resolve_includes(nrc_gather_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       nrc_gather_cs_code: str = resolve_includes(nrc_gather_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_nrc_gather: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_gather_cs_code)
-#       self.program_nrc_gather: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_gather_cs_code)
+        self.program_nrc_gather: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="nrc_gather_cs.slang")
+#       self.program_nrc_gather: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="nrc_gather_cs.slang")
 
-        nrc_train_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_train_cs.glsl"
-#       nrc_train_cs_path: pl.Path = self.resource_dir / "../shaders/nrc_train_cs.glsl"
-        nrc_train_cs_code: str = resolve_includes(nrc_train_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       nrc_train_cs_code: str = resolve_includes(nrc_train_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
-#       self.program_nrc_train: mgl.ComputeShader = self.ctx.compute_shader(source=nrc_train_cs_code)
+        self.program_nrc_train: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="nrc_train_cs.slang")
+#       self.program_nrc_train: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="nrc_train_cs.slang")
 
         # -----------------------------
 #       # -----------------------------
@@ -293,19 +412,11 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 3c. Compute Shaders (Volumetrics)
         # -----------------------------
 #       # -----------------------------
-        cloud_noise_cs_path: pl.Path = self.resource_dir / "../shaders/cloud_noise_cs.glsl"
-#       cloud_noise_cs_path: pl.Path = self.resource_dir / "../shaders/cloud_noise_cs.glsl"
-        cloud_noise_cs_code: str = resolve_includes(cloud_noise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       cloud_noise_cs_code: str = resolve_includes(cloud_noise_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_cloud_noise: mgl.ComputeShader = self.ctx.compute_shader(source=cloud_noise_cs_code)
-#       self.program_cloud_noise: mgl.ComputeShader = self.ctx.compute_shader(source=cloud_noise_cs_code)
+        self.program_cloud_noise: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="cloud_noise_cs.slang")
+#       self.program_cloud_noise: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="cloud_noise_cs.slang")
 
-        sky_clouds_bake_cs_path: pl.Path = self.resource_dir / "../shaders/sky_clouds_bake_cs.glsl"
-#       sky_clouds_bake_cs_path: pl.Path = self.resource_dir / "../shaders/sky_clouds_bake_cs.glsl"
-        sky_clouds_bake_cs_code: str = resolve_includes(sky_clouds_bake_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       sky_clouds_bake_cs_code: str = resolve_includes(sky_clouds_bake_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_sky_clouds_bake: mgl.ComputeShader = self.ctx.compute_shader(source=sky_clouds_bake_cs_code)
-#       self.program_sky_clouds_bake: mgl.ComputeShader = self.ctx.compute_shader(source=sky_clouds_bake_cs_code)
+        self.program_sky_clouds_bake: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="sky_clouds_bake_cs.slang")
+#       self.program_sky_clouds_bake: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="sky_clouds_bake_cs.slang")
 
         # Tileable Perlin-Worley / Worley noise volume shared by the sky cloud layer and every
 #       # Tileable Perlin-Worley / Worley noise volume shared by the sky cloud layer and every
@@ -315,39 +426,37 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # ray-march step afterwards is a single hardware-filtered fetch instead of procedural noise.
         cloud_noise_size: int = 128
 #       cloud_noise_size: int = 128
-        self.texture_cloud_noise: mgl.Texture3D = self.ctx.texture3d(size=(cloud_noise_size, cloud_noise_size, cloud_noise_size), components=4, dtype="f1")
-#       self.texture_cloud_noise: mgl.Texture3D = self.ctx.texture3d(size=(cloud_noise_size, cloud_noise_size, cloud_noise_size), components=4, dtype="f1")
-        self.texture_cloud_noise.filter = (mgl.LINEAR, mgl.LINEAR)
-#       self.texture_cloud_noise.filter = (mgl.LINEAR, mgl.LINEAR)
-        self.texture_cloud_noise.repeat_x = True
-#       self.texture_cloud_noise.repeat_x = True
-        self.texture_cloud_noise.repeat_y = True
-#       self.texture_cloud_noise.repeat_y = True
-        self.texture_cloud_noise.repeat_z = True
-#       self.texture_cloud_noise.repeat_z = True
-        self.texture_cloud_noise.bind_to_image(0, read=False, write=True)
-#       self.texture_cloud_noise.bind_to_image(0, read=False, write=True)
+        self.texture_cloud_noise: wgpu.GPUTexture = self.device.create_texture(
+#       self.texture_cloud_noise: wgpu.GPUTexture = self.device.create_texture(
+            label="cloud noise",
+#           label="cloud noise",
+            size=(cloud_noise_size, cloud_noise_size, cloud_noise_size),
+#           size=(cloud_noise_size, cloud_noise_size, cloud_noise_size),
+            dimension=wgpu.TextureDimension.d3,
+#           dimension=wgpu.TextureDimension.d3,
+            format=wgpu.TextureFormat.rgba8unorm,
+#           format=wgpu.TextureFormat.rgba8unorm,
+            usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING,
+#           usage=wgpu.TextureUsage.STORAGE_BINDING | wgpu.TextureUsage.TEXTURE_BINDING,
+        )
+#       )
         self.program_cloud_noise["uNoiseSize"] = cloud_noise_size
 #       self.program_cloud_noise["uNoiseSize"] = cloud_noise_size
         cloud_noise_groups: int = (cloud_noise_size + 7) // 8
 #       cloud_noise_groups: int = (cloud_noise_size + 7) // 8
-        self.program_cloud_noise.run(group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
-#       self.program_cloud_noise.run(group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
-        self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="cloud noise")
+#       command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="cloud noise")
+        self.program_cloud_noise.run(command_encoder=command_encoder, resources={"textureCloudNoise": self.texture_cloud_noise}, group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
+#       self.program_cloud_noise.run(command_encoder=command_encoder, resources={"textureCloudNoise": self.texture_cloud_noise}, group_x=cloud_noise_groups, group_y=cloud_noise_groups, group_z=cloud_noise_groups)
+        self.device.queue.submit([command_encoder.finish()])
+#       self.device.queue.submit([command_encoder.finish()])
 
         # Baked sky cloud layer, equirectangular like the HDRI (rgb: in-scattering, a: transmittance).
 #       # Baked sky cloud layer, equirectangular like the HDRI (rgb: in-scattering, a: transmittance).
         # Only secondary bounces and NRC training read it, so half the HDRI's typical resolution is plenty.
 #       # Only secondary bounces and NRC training read it, so half the HDRI's typical resolution is plenty.
-        self.texture_sky_clouds: mgl.Texture = self.ctx.texture(size=(1024, 512), components=4, dtype="f2")
-#       self.texture_sky_clouds: mgl.Texture = self.ctx.texture(size=(1024, 512), components=4, dtype="f2")
-        self.texture_sky_clouds.filter = (mgl.LINEAR, mgl.LINEAR)
-#       self.texture_sky_clouds.filter = (mgl.LINEAR, mgl.LINEAR)
-        self.texture_sky_clouds.repeat_x = True
-#       self.texture_sky_clouds.repeat_x = True
-        self.texture_sky_clouds.repeat_y = False
-#       self.texture_sky_clouds.repeat_y = False
+        self.texture_sky_clouds: wgpu.GPUTexture = self.create_texture(size=(1024, 512), texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="sky clouds")
+#       self.texture_sky_clouds: wgpu.GPUTexture = self.create_texture(size=(1024, 512), texture_format=wgpu.TextureFormat.rgba16float, usage=screen_usage, label="sky clouds")
         # Whether the current frame composites the sky cloud layer (toggle, scene, and no HDRI all agree).
 #       # Whether the current frame composites the sky cloud layer (toggle, scene, and no HDRI all agree).
         self.is_sky_clouds_active: bool = False
@@ -359,20 +468,36 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 4. Rasterization Shader (Renderer Pass)
         # -----------------------------
 #       # -----------------------------
-        hybrid_renderer_vs_path: pl.Path = self.resource_dir / "../shaders/hybrid_renderer_vs.glsl"
-#       hybrid_renderer_vs_path: pl.Path = self.resource_dir / "../shaders/hybrid_renderer_vs.glsl"
-        hybrid_renderer_vs_code: str = resolve_includes(hybrid_renderer_vs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_renderer_vs_code: str = resolve_includes(hybrid_renderer_vs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        hybrid_renderer_fs_path: pl.Path = self.resource_dir / "../shaders/hybrid_renderer_fs.glsl"
-#       hybrid_renderer_fs_path: pl.Path = self.resource_dir / "../shaders/hybrid_renderer_fs.glsl"
-        hybrid_renderer_fs_code: str = resolve_includes(hybrid_renderer_fs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       hybrid_renderer_fs_code: str = resolve_includes(hybrid_renderer_fs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_renderer: mgl.Program = self.ctx.program(
-#       self.program_renderer: mgl.Program = self.ctx.program(
-              vertex_shader=hybrid_renderer_vs_code,
-#             vertex_shader=hybrid_renderer_vs_code,
-            fragment_shader=hybrid_renderer_fs_code,
-#           fragment_shader=hybrid_renderer_fs_code,
+        self.program_renderer: RenderProgram = RenderProgram(
+#       self.program_renderer: RenderProgram = RenderProgram(
+            device=self.device,
+#           device=self.device,
+            shader_dir=self.shader_dir,
+#           shader_dir=self.shader_dir,
+            vertex_file_name="hybrid_renderer_vs.slang",
+#           vertex_file_name="hybrid_renderer_vs.slang",
+            fragment_file_name="hybrid_renderer_fs.slang",
+#           fragment_file_name="hybrid_renderer_fs.slang",
+            vertex_buffers=[{
+#           vertex_buffers=[{
+                "array_stride": 16,
+#               "array_stride": 16,
+                "step_mode": wgpu.VertexStepMode.vertex,
+#               "step_mode": wgpu.VertexStepMode.vertex,
+                "attributes": [
+#               "attributes": [
+                    {"format": wgpu.VertexFormat.float32x2, "offset": 0, "shader_location": 0},
+#                   {"format": wgpu.VertexFormat.float32x2, "offset": 0, "shader_location": 0},
+                    {"format": wgpu.VertexFormat.float32x2, "offset": 8, "shader_location": 1},
+#                   {"format": wgpu.VertexFormat.float32x2, "offset": 8, "shader_location": 1},
+                ],
+#               ],
+            }],
+#           }],
+            color_formats=[self.present_format],
+#           color_formats=[self.present_format],
+            primitive={"topology": wgpu.PrimitiveTopology.triangle_strip, "cull_mode": wgpu.CullMode.none},
+#           primitive={"topology": wgpu.PrimitiveTopology.triangle_strip, "cull_mode": wgpu.CullMode.none},
         )
 #       )
         # Screen data (x, y, u, v)
@@ -389,20 +514,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #            1.0,  1.0,  1.0,  1.0,
         ], dtype=np.float32)
 #       ], dtype=np.float32)
-        self.vbo_screen: mgl.Buffer = self.ctx.buffer(data=screen_data.tobytes())
-#       self.vbo_screen: mgl.Buffer = self.ctx.buffer(data=screen_data.tobytes())
-        self.vao_screen: mgl.VertexArray = self.ctx.vertex_array(
-#       self.vao_screen: mgl.VertexArray = self.ctx.vertex_array(
-            self.program_renderer,
-#           self.program_renderer,
-            [
-#           [
-                (self.vbo_screen, "2f 2f", "inScreenVertexPosition", "inScreenVertexUV"),
-#               (self.vbo_screen, "2f 2f", "inScreenVertexPosition", "inScreenVertexUV"),
-            ],
-#           ],
-        )
-#       )
+        self.vbo_screen: wgpu.GPUBuffer = self.create_buffer(data=screen_data.tobytes(), usage=wgpu.BufferUsage.VERTEX, label="screen quad")
+#       self.vbo_screen: wgpu.GPUBuffer = self.create_buffer(data=screen_data.tobytes(), usage=wgpu.BufferUsage.VERTEX, label="screen quad")
 
         # -----------------------------
 #       # -----------------------------
@@ -416,14 +529,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.scene_builder: SceneBuilder = typing.cast(SceneBuilder, None)
         self.num_triangles: int = 0
 #       self.num_triangles: int = 0
-        self.ssbo_bvh_nodes: mgl.Buffer = typing.cast(mgl.Buffer, None)
-#       self.ssbo_bvh_nodes: mgl.Buffer = typing.cast(mgl.Buffer, None)
-        self.buffer_global_vertices: mgl.Buffer = typing.cast(mgl.Buffer, None)
-#       self.buffer_global_vertices: mgl.Buffer = typing.cast(mgl.Buffer, None)
-        self.ssbo_materials: mgl.Buffer = typing.cast(mgl.Buffer, None)
-#       self.ssbo_materials: mgl.Buffer = typing.cast(mgl.Buffer, None)
-        self.vao_scene: mgl.VertexArray = typing.cast(mgl.VertexArray, None)
-#       self.vao_scene: mgl.VertexArray = typing.cast(mgl.VertexArray, None)
+        self.ssbo_bvh_nodes: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
+#       self.ssbo_bvh_nodes: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
+        self.buffer_global_vertices: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
+#       self.buffer_global_vertices: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
+        self.ssbo_materials: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
+#       self.ssbo_materials: wgpu.GPUBuffer = typing.cast(wgpu.GPUBuffer, None)
         self.nrc_position_offset: vec3f32 = (0.0, 0.0, 0.0)
 #       self.nrc_position_offset: vec3f32 = (0.0, 0.0, 0.0)
         self.nrc_position_scale: float = 1.0
@@ -438,8 +549,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # read/write in the bounce loop by 25% and shrinks the buffer 8MB -> 6MB.
         cache_floats_per_entry: int = 12
 #       cache_floats_per_entry: int = 12
-        self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
-#       self.ssbo_radiance_cache: mgl.Buffer = self.ctx.buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+        self.ssbo_radiance_cache: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes(), label="radiance cache")
+#       self.ssbo_radiance_cache: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes(), label="radiance cache")
 
         # 4. Spatiotemporal ReSTIR Reservoirs Buffer (double-buffered: 2 frames)
 #       # 4. Spatiotemporal ReSTIR Reservoirs Buffer (double-buffered: 2 frames)
@@ -447,31 +558,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       reservoir_floats_per_item: int = 20
         w_res, h_res = self.window_size
 #       w_res, h_res = self.window_size
-        self.ssbo_sample_reservoirs: mgl.Buffer = self.ctx.buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
-#       self.ssbo_sample_reservoirs: mgl.Buffer = self.ctx.buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+        self.ssbo_sample_reservoirs: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes(), label="restir reservoirs")
+#       self.ssbo_sample_reservoirs: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes(), label="restir reservoirs")
 
         # 5. Neural Radiance Cache (NRC) Weights Buffer: 4556 floats total
 #       # 5. Neural Radiance Cache (NRC) Weights Buffer: 4556 floats total
-        self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
-#       self.ssbo_nrc_weights: mgl.Buffer = self.ctx.buffer(data=np.zeros(4556, dtype=np.float32).tobytes())
+        self.ssbo_nrc_weights: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(4556, dtype=np.float32).tobytes(), label="nrc weights")
+#       self.ssbo_nrc_weights: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(4556, dtype=np.float32).tobytes(), label="nrc weights")
 
         # 6. NRC Training Records Buffer: 8192 records * 9 floats, sized to match the 8192 paths the
 #       # 6. NRC Training Records Buffer: 8192 records * 9 floats, sized to match the 8192 paths the
         #    gather pass dispatches (see program_nrc_gather.run below); one record per path maximum.
 #       #    gather pass dispatches (see program_nrc_gather.run below); one record per path maximum.
-        self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
-#       self.ssbo_nrc_training_records: mgl.Buffer = self.ctx.buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes())
+        self.ssbo_nrc_training_records: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes(), label="nrc training records")
+#       self.ssbo_nrc_training_records: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(8192 * 9, dtype=np.float32).tobytes(), label="nrc training records")
 
         # 7. NRC Training Counter Buffer: 1 uint32 atomic counter
 #       # 7. NRC Training Counter Buffer: 1 uint32 atomic counter
-        self.ssbo_nrc_training_count: mgl.Buffer = self.ctx.buffer(data=np.zeros(1, dtype=np.uint32).tobytes())
-#       self.ssbo_nrc_training_count: mgl.Buffer = self.ctx.buffer(data=np.zeros(1, dtype=np.uint32).tobytes())
+        self.ssbo_nrc_training_count: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(1, dtype=np.uint32).tobytes(), label="nrc training count")
+#       self.ssbo_nrc_training_count: wgpu.GPUBuffer = self.create_buffer(data=np.zeros(1, dtype=np.uint32).tobytes(), label="nrc training count")
 
         self.reset_neural_cache_weights()
 #       self.reset_neural_cache_weights()
-
-        self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
-#       self.ctx.enable(flags=mgl.DEPTH_TEST | mgl.CULL_FACE)
 
         # -----------------------------
 #       # -----------------------------
@@ -479,44 +587,37 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 6. Post Processing System
         # -----------------------------
 #       # -----------------------------
-        post_chromatic_aberration_cs_path: pl.Path = self.resource_dir / "../shaders/post_chromatic_aberration_cs.glsl"
-#       post_chromatic_aberration_cs_path: pl.Path = self.resource_dir / "../shaders/post_chromatic_aberration_cs.glsl"
-        post_chromatic_aberration_cs_code: str = resolve_includes(post_chromatic_aberration_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       post_chromatic_aberration_cs_code: str = resolve_includes(post_chromatic_aberration_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_post_chromatic_aberration: mgl.ComputeShader = self.ctx.compute_shader(source=post_chromatic_aberration_cs_code)
-#       self.program_post_chromatic_aberration: mgl.ComputeShader = self.ctx.compute_shader(source=post_chromatic_aberration_cs_code)
+        self.program_post_chromatic_aberration: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_chromatic_aberration_cs.slang")
+#       self.program_post_chromatic_aberration: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_chromatic_aberration_cs.slang")
 
-        post_vignette_cs_path: pl.Path = self.resource_dir / "../shaders/post_vignette_cs.glsl"
-#       post_vignette_cs_path: pl.Path = self.resource_dir / "../shaders/post_vignette_cs.glsl"
-        post_vignette_cs_code: str = resolve_includes(post_vignette_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       post_vignette_cs_code: str = resolve_includes(post_vignette_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
-#       self.program_post_vignette: mgl.ComputeShader = self.ctx.compute_shader(source=post_vignette_cs_code)
+        self.program_post_vignette: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_vignette_cs.slang")
+#       self.program_post_vignette: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_vignette_cs.slang")
 
-        post_tonemap_cs_path: pl.Path = self.resource_dir / "../shaders/post_tonemap_cs.glsl"
-#       post_tonemap_cs_path: pl.Path = self.resource_dir / "../shaders/post_tonemap_cs.glsl"
-        post_tonemap_cs_code: str = resolve_includes(post_tonemap_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       post_tonemap_cs_code: str = resolve_includes(post_tonemap_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_post_tonemap: mgl.ComputeShader = self.ctx.compute_shader(source=post_tonemap_cs_code)
-#       self.program_post_tonemap: mgl.ComputeShader = self.ctx.compute_shader(source=post_tonemap_cs_code)
+        self.program_post_tonemap: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_tonemap_cs.slang")
+#       self.program_post_tonemap: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_tonemap_cs.slang")
 
-        post_fxaa_cs_path: pl.Path = self.resource_dir / "../shaders/post_fxaa_cs.glsl"
-#       post_fxaa_cs_path: pl.Path = self.resource_dir / "../shaders/post_fxaa_cs.glsl"
-        post_fxaa_cs_code: str = resolve_includes(post_fxaa_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-#       post_fxaa_cs_code: str = resolve_includes(post_fxaa_cs_path.read_text(encoding="utf-8"), self.resource_dir / "../shaders")
-        self.program_post_fxaa: mgl.ComputeShader = self.ctx.compute_shader(source=post_fxaa_cs_code)
-#       self.program_post_fxaa: mgl.ComputeShader = self.ctx.compute_shader(source=post_fxaa_cs_code)
+        self.program_post_fxaa: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_fxaa_cs.slang")
+#       self.program_post_fxaa: ComputeProgram = ComputeProgram(device=self.device, shader_dir=self.shader_dir, file_name="post_fxaa_cs.slang")
+
+        # Slang ignores initialisers on uniforms, so the defaults the GLSL declarations carried are staged here once.
+#       # Slang ignores initialisers on uniforms, so the defaults the GLSL declarations carried are staged here once.
+        self.program_post_chromatic_aberration["uAberrationStrength"] = 0.01
+#       self.program_post_chromatic_aberration["uAberrationStrength"] = 0.01
+        self.program_post_vignette["uVignetteIntensity"] = 1.0
+#       self.program_post_vignette["uVignetteIntensity"] = 1.0
+        self.program_post_vignette["uFalloffSmoothness"] = 0.5
+#       self.program_post_vignette["uFalloffSmoothness"] = 0.5
+        self.program_post_vignette["uVignetteColor"] = (0.0, 0.0, 0.0)
+#       self.program_post_vignette["uVignetteColor"] = (0.0, 0.0, 0.0)
 
         # Pipeline of active post-processing shaders
 #       # Pipeline of active post-processing shaders
-        # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input image is
-#       # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input image is
-        # declared rgba32f (it reads the f4 accumulation buffer); every later pass declares its
-#       # declared rgba32f (it reads the f4 accumulation buffer); every later pass declares its
-        # input rgba16f to match the f2 ping-pong pair.
-#       # input rgba16f to match the f2 ping-pong pair.
-        self.post_processing_pipeline: list[mgl.ComputeShader] = [
-#       self.post_processing_pipeline: list[mgl.ComputeShader] = [
+        # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input is the f4
+#       # ORDER CONSTRAINT: tonemap must stay FIRST. It is the only pass whose input is the f4
+        # accumulation buffer; every later pass reads the f2 ping-pong pair.
+#       # accumulation buffer; every later pass reads the f2 ping-pong pair.
+        self.post_processing_pipeline: list[ComputeProgram] = [
+#       self.post_processing_pipeline: list[ComputeProgram] = [
             self.program_post_tonemap,
 #           self.program_post_tonemap,
             self.program_post_fxaa,
@@ -528,8 +629,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         ]
 #       ]
 
-        # Key states for first-person camera movement
-#       # Key states for first-person camera movement
+        # Key states for first-person camera movement, kept current by on_key_down / on_key_up
+#       # Key states for first-person camera movement, kept current by on_key_down / on_key_up
         self.key_state: dict[str, bool] = {
 #       self.key_state: dict[str, bool] = {
             "W": False, "A": False, "S": False, "D": False,
@@ -564,8 +665,100 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.current_scene: BaseScene = typing.cast(BaseScene, None)
         self.set_scene(scene=self.scenes[self.current_scene_index])
 #       self.set_scene(scene=self.scenes[self.current_scene_index])
+
+        self.canvas.request_draw(self.on_draw)
+#       self.canvas.request_draw(self.on_draw)
         pass
 #       pass
+
+    def run(self) -> None:
+#   def run(self) -> None:
+        # Hand control to the rendercanvas event loop, which calls on_draw every frame until the window closes.
+#       # Hand control to the rendercanvas event loop, which calls on_draw every frame until the window closes.
+        loop.run()
+#       loop.run()
+        pass
+#       pass
+
+    def create_texture(self, size: vec2i32, texture_format: str, usage: int, label: str) -> wgpu.GPUTexture:
+#   def create_texture(self, size: vec2i32, texture_format: str, usage: int, label: str) -> wgpu.GPUTexture:
+        return self.device.create_texture(label=label, size=(size[0], size[1], 1), format=texture_format, usage=usage)
+#       return self.device.create_texture(label=label, size=(size[0], size[1], 1), format=texture_format, usage=usage)
+
+    def create_buffer(self, data: bytes, label: str, usage: int = wgpu.BufferUsage.STORAGE) -> wgpu.GPUBuffer:
+#   def create_buffer(self, data: bytes, label: str, usage: int = wgpu.BufferUsage.STORAGE) -> wgpu.GPUBuffer:
+        # Storage buffer initialised with data. COPY_DST lets the scene / NRC resets rewrite it in place, and
+#       # Storage buffer initialised with data. COPY_DST lets the scene / NRC resets rewrite it in place, and
+        # COPY_SRC keeps it readable for debugging. Empty data still gets a 16-byte buffer, since WebGPU
+#       # COPY_SRC keeps it readable for debugging. Empty data still gets a 16-byte buffer, since WebGPU
+        # rejects zero-sized bindings.
+#       # rejects zero-sized bindings.
+        padded_data: bytes = data if len(data) >= 16 else data + bytes(16 - len(data))
+#       padded_data: bytes = data if len(data) >= 16 else data + bytes(16 - len(data))
+        return self.device.create_buffer_with_data(label=label, data=padded_data, usage=usage | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
+#       return self.device.create_buffer_with_data(label=label, data=padded_data, usage=usage | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
+
+    def get_shader_resources(self) -> dict[str, typing.Any]:
+#   def get_shader_resources(self) -> dict[str, typing.Any]:
+        # Every scene-wide buffer, texture and sampler, keyed by its Slang parameter name. Each program binds
+#       # Every scene-wide buffer, texture and sampler, keyed by its Slang parameter name. Each program binds
+        # the subset it declares, which plays the role GL's global binding points / texture units used to.
+#       # the subset it declares, which plays the role GL's global binding points / texture units used to.
+        return {
+#       return {
+            "textureGeometryGlobalPosition": self.texture_geometry_global_position,
+#           "textureGeometryGlobalPosition": self.texture_geometry_global_position,
+            "textureGeometryGlobalNormal": self.texture_geometry_global_normal,
+#           "textureGeometryGlobalNormal": self.texture_geometry_global_normal,
+            "textureGeometryAlbedo": self.texture_geometry_albedo,
+#           "textureGeometryAlbedo": self.texture_geometry_albedo,
+            "textureGeometryGlobalTangent": self.texture_geometry_global_tangent,
+#           "textureGeometryGlobalTangent": self.texture_geometry_global_tangent,
+            "nodes": self.ssbo_bvh_nodes,
+#           "nodes": self.ssbo_bvh_nodes,
+            "vertices": self.buffer_global_vertices,
+#           "vertices": self.buffer_global_vertices,
+            "materials": self.ssbo_materials,
+#           "materials": self.ssbo_materials,
+            "cacheEntries": self.ssbo_radiance_cache,
+#           "cacheEntries": self.ssbo_radiance_cache,
+            "sampleReservoirs": self.ssbo_sample_reservoirs,
+#           "sampleReservoirs": self.ssbo_sample_reservoirs,
+            "neuralNetworkWeights": self.ssbo_nrc_weights,
+#           "neuralNetworkWeights": self.ssbo_nrc_weights,
+            "nrcTrainingRecords": self.ssbo_nrc_training_records,
+#           "nrcTrainingRecords": self.ssbo_nrc_training_records,
+            "trainingRecordCounter": self.ssbo_nrc_training_count,
+#           "trainingRecordCounter": self.ssbo_nrc_training_count,
+            "uHdriTexture": (self.texture_hdri, self.sampler_equirect),
+#           "uHdriTexture": (self.texture_hdri, self.sampler_equirect),
+            "uSceneTextureArray": (self.texture_array, self.sampler_texture_array),
+#           "uSceneTextureArray": (self.texture_array, self.sampler_texture_array),
+            "uSkyCloudTexture": (self.texture_sky_clouds, self.sampler_equirect),
+#           "uSkyCloudTexture": (self.texture_sky_clouds, self.sampler_equirect),
+            "uCloudNoiseTexture": (self.texture_cloud_noise, self.sampler_cloud_noise),
+#           "uCloudNoiseTexture": (self.texture_cloud_noise, self.sampler_cloud_noise),
+        }
+#       }
+
+    def read_texture(self, texture: wgpu.GPUTexture, bytes_per_pixel: int) -> bytes:
+#   def read_texture(self, texture: wgpu.GPUTexture, bytes_per_pixel: int) -> bytes:
+        # Synchronous read-back of mip 0, rows in memory order (row 0 is the bottom of the image, as in GL).
+#       # Synchronous read-back of mip 0, rows in memory order (row 0 is the bottom of the image, as in GL).
+        width, height = texture.size[0], texture.size[1]
+#       width, height = texture.size[0], texture.size[1]
+        texture_data: typing.Any = self.device.queue.read_texture(
+#       texture_data: typing.Any = self.device.queue.read_texture(
+            source={"texture": texture, "origin": (0, 0, 0), "mip_level": 0},
+#           source={"texture": texture, "origin": (0, 0, 0), "mip_level": 0},
+            data_layout={"offset": 0, "bytes_per_row": width * bytes_per_pixel, "rows_per_image": height},
+#           data_layout={"offset": 0, "bytes_per_row": width * bytes_per_pixel, "rows_per_image": height},
+            size=(width, height, 1),
+#           size=(width, height, 1),
+        )
+#       )
+        return bytes(texture_data)
+#       return bytes(texture_data)
 
     def get_halton_jitter(self, index: int, base: int) -> float:
 #   def get_halton_jitter(self, index: int, base: int) -> float:
@@ -726,6 +919,43 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         return channel_float
 #       return channel_float
 
+    def write_texture_array_layer(self, data_uint8: npt.NDArray[np.uint8], layer_index: int) -> None:
+#   def write_texture_array_layer(self, data_uint8: npt.NDArray[np.uint8], layer_index: int) -> None:
+        # Uploads one RGBA8 layer together with its full mip chain. Each level is the 2x2 box average of the
+#       # Uploads one RGBA8 layer together with its full mip chain. Each level is the 2x2 box average of the
+        # one above it, the same filter glGenerateMipmap applied to the 8-bit data.
+#       # one above it, the same filter glGenerateMipmap applied to the 8-bit data.
+        level_data: npt.NDArray[np.uint8] = np.ascontiguousarray(data_uint8)
+#       level_data: npt.NDArray[np.uint8] = np.ascontiguousarray(data_uint8)
+        for mip_level in range(self.texture_array_mip_count):
+#       for mip_level in range(self.texture_array_mip_count):
+            level_height, level_width = level_data.shape[:2]
+#           level_height, level_width = level_data.shape[:2]
+            self.device.queue.write_texture(
+#           self.device.queue.write_texture(
+                destination={"texture": self.texture_array, "mip_level": mip_level, "origin": (0, 0, layer_index)},
+#               destination={"texture": self.texture_array, "mip_level": mip_level, "origin": (0, 0, layer_index)},
+                data=level_data,
+#               data=level_data,
+                data_layout={"offset": 0, "bytes_per_row": level_width * 4, "rows_per_image": level_height},
+#               data_layout={"offset": 0, "bytes_per_row": level_width * 4, "rows_per_image": level_height},
+                size=(level_width, level_height, 1),
+#               size=(level_width, level_height, 1),
+            )
+#           )
+            if level_width == 1 or level_height == 1:
+#           if level_width == 1 or level_height == 1:
+                break
+#               break
+            level_float: npt.NDArray[np.float32] = level_data.astype(dtype=np.float32)
+#           level_float: npt.NDArray[np.float32] = level_data.astype(dtype=np.float32)
+            level_float = (level_float[0::2, 0::2] + level_float[1::2, 0::2] + level_float[0::2, 1::2] + level_float[1::2, 1::2]) * 0.25
+#           level_float = (level_float[0::2, 0::2] + level_float[1::2, 0::2] + level_float[0::2, 1::2] + level_float[1::2, 1::2]) * 0.25
+            level_data = np.ascontiguousarray((level_float + 0.5).astype(np.uint8))
+#           level_data = np.ascontiguousarray((level_float + 0.5).astype(np.uint8))
+        pass
+#       pass
+
     def upload_pending_textures(self) -> None:
 #   def upload_pending_textures(self) -> None:
         # Creates the texture array at exactly the size needed, then uploads every
@@ -734,18 +964,20 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # registered texture. Called once after all materials have been set up.
         layer_count: int = max(1, self.next_texture_layer)
 #       layer_count: int = max(1, self.next_texture_layer)
-        self.texture_array = self.ctx.texture_array(
-#       self.texture_array = self.ctx.texture_array(
-            size=(self.texture_array_size, self.texture_array_size, layer_count), components=4, dtype="f1"
-#           size=(self.texture_array_size, self.texture_array_size, layer_count), components=4, dtype="f1"
+        self.texture_array = self.device.create_texture(
+#       self.texture_array = self.device.create_texture(
+            label="scene texture array",
+#           label="scene texture array",
+            size=(self.texture_array_size, self.texture_array_size, layer_count),
+#           size=(self.texture_array_size, self.texture_array_size, layer_count),
+            format=wgpu.TextureFormat.rgba8unorm,
+#           format=wgpu.TextureFormat.rgba8unorm,
+            mip_level_count=self.texture_array_mip_count,
+#           mip_level_count=self.texture_array_mip_count,
+            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
+#           usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
         )
 #       )
-        self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
-#       self.texture_array.filter = (mgl.LINEAR_MIPMAP_LINEAR, mgl.LINEAR)
-        # Anisotropic filtering keeps textures sharp at grazing angles (clamped to hardware max)
-#       # Anisotropic filtering keeps textures sharp at grazing angles (clamped to hardware max)
-        self.texture_array.anisotropy = 16.0
-#       self.texture_array.anisotropy = 16.0
 
         for path, layer_index, is_srgb in self.pending_textures:
 #       for path, layer_index, is_srgb in self.pending_textures:
@@ -753,7 +985,7 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
 
         # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
-        # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
+#       # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
         for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
 #       for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
             # Quantize each channel straight into the 8-bit layer: identical bytes to the old
@@ -780,22 +1012,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #                   packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
             packed_uint8 = np.flipud(packed_uint8)
 #           packed_uint8 = np.flipud(packed_uint8)
-            self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
-#           self.texture_array.write(packed_uint8.tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
-
-        self.texture_array.build_mipmaps()
-#       self.texture_array.build_mipmaps()
-
-        # Bind the array to unit 9 right away: the geometry pass samples uSceneTextureArray on
-#       # Bind the array to unit 9 right away: the geometry pass samples uSceneTextureArray on
-        # unit 9 and runs BEFORE the shading section (which used to be the only place binding it),
-#       # unit 9 and runs BEFORE the shading section (which used to be the only place binding it),
-        # so the very first frame rasterized with an unbound unit and seeded the accumulation
-#       # so the very first frame rasterized with an unbound unit and seeded the accumulation
-        # history with undefined (usually black) albedo.
-#       # history with undefined (usually black) albedo.
-        self.texture_array.use(location=9)
-#       self.texture_array.use(location=9)
+            self.write_texture_array_layer(data_uint8=packed_uint8, layer_index=layer_index)
+#           self.write_texture_array_layer(data_uint8=packed_uint8, layer_index=layer_index)
         pass
 #       pass
 
@@ -805,8 +1023,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       self.use_hdri = use_hdri and hdri_path is not None and hdri_path.exists()
         if self.texture_hdri is not None:
 #       if self.texture_hdri is not None:
-            self.texture_hdri.release()
-#           self.texture_hdri.release()
+            self.texture_hdri.destroy()
+#           self.texture_hdri.destroy()
+        # WebGPU has no three-channel float format, so the HDRI is stored as rgba32float with alpha = 1.
+#       # WebGPU has no three-channel float format, so the HDRI is stored as rgba32float with alpha = 1.
+        hdri_data: npt.NDArray[np.float32]
+#       hdri_data: npt.NDArray[np.float32]
         if self.use_hdri and hdri_path is not None:
 #       if self.use_hdri and hdri_path is not None:
             loaded_data = cv2.imread(str(hdri_path), cv2.IMREAD_UNCHANGED)
@@ -815,26 +1037,34 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if loaded_data is None:
                 raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
 #               raise RuntimeError(f"Failed to load HDRI: {hdri_path}")
-            hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
-#           hdri_data: npt.NDArray[np.float32] = loaded_data.astype(dtype=np.float32)
-            hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
-#           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGB))
+            hdri_data = loaded_data.astype(dtype=np.float32)
+#           hdri_data = loaded_data.astype(dtype=np.float32)
+            hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGBA))
+#           hdri_data = typing.cast(npt.NDArray[np.float32], cv2.cvtColor(hdri_data, cv2.COLOR_BGR2RGBA))
+            hdri_data[..., 3] = 1.0
+#           hdri_data[..., 3] = 1.0
             hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
 #           hdri_data = np.ascontiguousarray(np.flipud(hdri_data))
-            h, w, c = hdri_data.shape
-#           h, w, c = hdri_data.shape
-            self.texture_hdri = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-#           self.texture_hdri = self.ctx.texture((w, h), components=3, dtype="f4", data=hdri_data.tobytes())
-            self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
-#           self.texture_hdri.filter = (mgl.LINEAR, mgl.LINEAR)
-            self.texture_hdri.repeat_x = True
-#           self.texture_hdri.repeat_x = True
-            self.texture_hdri.repeat_y = False
-#           self.texture_hdri.repeat_y = False
         else:
 #       else:
-            self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
-#           self.texture_hdri = self.ctx.texture((1, 1), components=3, dtype="f4", data=np.zeros(3, dtype=np.float32).tobytes())
+            hdri_data = np.zeros((1, 1, 4), dtype=np.float32)
+#           hdri_data = np.zeros((1, 1, 4), dtype=np.float32)
+        h, w, c = hdri_data.shape
+#       h, w, c = hdri_data.shape
+        self.texture_hdri = self.create_texture(size=(w, h), texture_format=wgpu.TextureFormat.rgba32float, usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST, label="hdri")
+#       self.texture_hdri = self.create_texture(size=(w, h), texture_format=wgpu.TextureFormat.rgba32float, usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST, label="hdri")
+        self.device.queue.write_texture(
+#       self.device.queue.write_texture(
+            destination={"texture": self.texture_hdri, "mip_level": 0, "origin": (0, 0, 0)},
+#           destination={"texture": self.texture_hdri, "mip_level": 0, "origin": (0, 0, 0)},
+            data=hdri_data,
+#           data=hdri_data,
+            data_layout={"offset": 0, "bytes_per_row": w * c * 4, "rows_per_image": h},
+#           data_layout={"offset": 0, "bytes_per_row": w * c * 4, "rows_per_image": h},
+            size=(w, h, 1),
+#           size=(w, h, 1),
+        )
+#       )
         pass
 #       pass
 
@@ -850,12 +1080,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if not self.is_sky_clouds_active:
             return
 #           return
-        self.texture_cloud_noise.use(location=11)
-#       self.texture_cloud_noise.use(location=11)
-        if "uCloudNoiseTexture" in self.program_sky_clouds_bake:
-#       if "uCloudNoiseTexture" in self.program_sky_clouds_bake:
-            self.program_sky_clouds_bake["uCloudNoiseTexture"] = 11
-#           self.program_sky_clouds_bake["uCloudNoiseTexture"] = 11
         if "uSkyCloudCoverage" in self.program_sky_clouds_bake:
 #       if "uSkyCloudCoverage" in self.program_sky_clouds_bake:
             self.program_sky_clouds_bake["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
@@ -864,35 +1088,37 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uSkyCloudDensity" in self.program_sky_clouds_bake:
             self.program_sky_clouds_bake["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
 #           self.program_sky_clouds_bake["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
-        self.texture_sky_clouds.bind_to_image(0, read=False, write=True)
-#       self.texture_sky_clouds.bind_to_image(0, read=False, write=True)
-        bake_width, bake_height = self.texture_sky_clouds.size
-#       bake_width, bake_height = self.texture_sky_clouds.size
-        self.program_sky_clouds_bake.run(group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
-#       self.program_sky_clouds_bake.run(group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        bake_resources: dict[str, typing.Any] = self.get_shader_resources()
+#       bake_resources: dict[str, typing.Any] = self.get_shader_resources()
+        bake_resources["textureSkyClouds"] = self.texture_sky_clouds
+#       bake_resources["textureSkyClouds"] = self.texture_sky_clouds
+        # The bake writes texture_sky_clouds, so the sampled uSkyCloudTexture the shared sky code declares
+#       # The bake writes texture_sky_clouds, so the sampled uSkyCloudTexture the shared sky code declares
+        # (but the bake never reads) is pointed at the dummy texture instead.
+#       # (but the bake never reads) is pointed at the dummy texture instead.
+        bake_resources["uSkyCloudTexture"] = (self.texture_dummy, self.sampler_equirect)
+#       bake_resources["uSkyCloudTexture"] = (self.texture_dummy, self.sampler_equirect)
+        bake_width, bake_height = self.texture_sky_clouds.size[0], self.texture_sky_clouds.size[1]
+#       bake_width, bake_height = self.texture_sky_clouds.size[0], self.texture_sky_clouds.size[1]
+        command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="sky clouds bake")
+#       command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="sky clouds bake")
+        self.program_sky_clouds_bake.run(command_encoder=command_encoder, resources=bake_resources, group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
+#       self.program_sky_clouds_bake.run(command_encoder=command_encoder, resources=bake_resources, group_x=(bake_width + 15) // 16, group_y=(bake_height + 15) // 16, group_z=1)
+        self.device.queue.submit([command_encoder.finish()])
+#       self.device.queue.submit([command_encoder.finish()])
         pass
 #       pass
 
-    def upload_volumetric_uniforms(self, program: mgl.ComputeShader) -> None:
-#   def upload_volumetric_uniforms(self, program: mgl.ComputeShader) -> None:
+    def upload_volumetric_uniforms(self, program: ComputeProgram) -> None:
+#   def upload_volumetric_uniforms(self, program: ComputeProgram) -> None:
         # Sky cloud layer and participating media uniforms, shared by the shading and NRC gather passes.
 #       # Sky cloud layer and participating media uniforms, shared by the shading and NRC gather passes.
-        # texture_sky_clouds / texture_cloud_noise are bound to units 10 / 11 once per frame in on_render.
-#       # texture_sky_clouds / texture_cloud_noise are bound to units 10 / 11 once per frame in on_render.
+        # texture_sky_clouds / texture_cloud_noise are bound through get_shader_resources.
+#       # texture_sky_clouds / texture_cloud_noise are bound through get_shader_resources.
         if "uSkyCloudsEnabled" in program:
 #       if "uSkyCloudsEnabled" in program:
             program["uSkyCloudsEnabled"] = self.is_sky_clouds_active
 #           program["uSkyCloudsEnabled"] = self.is_sky_clouds_active
-        if "uSkyCloudTexture" in program:
-#       if "uSkyCloudTexture" in program:
-            program["uSkyCloudTexture"] = 10
-#           program["uSkyCloudTexture"] = 10
-        if "uCloudNoiseTexture" in program:
-#       if "uCloudNoiseTexture" in program:
-            program["uCloudNoiseTexture"] = 11
-#           program["uCloudNoiseTexture"] = 11
         if "uSkyCloudCoverage" in program:
 #       if "uSkyCloudCoverage" in program:
             program["uSkyCloudCoverage"] = self.current_scene.sky_cloud_coverage
@@ -901,8 +1127,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uSkyCloudDensity" in program:
             program["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
 #           program["uSkyCloudDensity"] = self.current_scene.sky_cloud_density
-        # Must match MAX_MEDIUM_VOLUMES in participating_media.glsl.
-#       # Must match MAX_MEDIUM_VOLUMES in participating_media.glsl.
+        # Must match MAX_MEDIUM_VOLUMES in participating_media.slang.
+#       # Must match MAX_MEDIUM_VOLUMES in participating_media.slang.
         medium_volumes: list[MediumVolume] = self.current_scene.get_medium_volumes()[:4]
 #       medium_volumes: list[MediumVolume] = self.current_scene.get_medium_volumes()[:4]
         if "uMediaEnabled" in program:
@@ -915,10 +1141,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           program["uMediumVolumeCount"] = len(medium_volumes)
         for i, volume in enumerate(medium_volumes):
 #       for i, volume in enumerate(medium_volumes):
-            # Checked member by member: the NRC gather pass only estimates transmittance, so the
-#           # Checked member by member: the NRC gather pass only estimates transmittance, so the
-            # compiler strips the scattering members (albedo, anisotropy) out of that program.
-#           # compiler strips the scattering members (albedo, anisotropy) out of that program.
+            # Checked member by member, so a program whose shader omits part of the volume layout still
+#           # Checked member by member, so a program whose shader omits part of the volume layout still
+            # accepts the upload (the GLSL compiler used to strip the scattering members from NRC gather).
+#           # accepts the upload (the GLSL compiler used to strip the scattering members from NRC gather).
             volume_members: dict[str, typing.Any] = {
 #           volume_members: dict[str, typing.Any] = {
                 "aabbMin": volume["aabb_min"],
@@ -972,8 +1198,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Build scene materials and geometry
         self.materials = []
 #       self.materials = []
-        self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
-#       self.scene_builder = SceneBuilder(self.ctx, self.program_geometry, materials=self.materials)
+        self.scene_builder = SceneBuilder(device=self.device, program_geometry=self.program_geometry, materials=self.materials)
+#       self.scene_builder = SceneBuilder(device=self.device, program_geometry=self.program_geometry, materials=self.materials)
         scene.build(scene_builder=self.scene_builder, renderer=self)
 #       scene.build(scene_builder=self.scene_builder, renderer=self)
 
@@ -986,48 +1212,33 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Upload to GPU buffers
         if self.ssbo_bvh_nodes is not None:
 #       if self.ssbo_bvh_nodes is not None:
-            self.ssbo_bvh_nodes.release()
-#           self.ssbo_bvh_nodes.release()
-        self.ssbo_bvh_nodes = self.ctx.buffer(data=bvh_data)
-#       self.ssbo_bvh_nodes = self.ctx.buffer(data=bvh_data)
+            self.ssbo_bvh_nodes.destroy()
+#           self.ssbo_bvh_nodes.destroy()
+        self.ssbo_bvh_nodes = self.create_buffer(data=bvh_data, label="bvh nodes")
+#       self.ssbo_bvh_nodes = self.create_buffer(data=bvh_data, label="bvh nodes")
 
+        # The interleaved vertices feed both the rasterizer (vertex buffer) and the ray tracer (storage buffer).
+#       # The interleaved vertices feed both the rasterizer (vertex buffer) and the ray tracer (storage buffer).
         if self.buffer_global_vertices is not None:
 #       if self.buffer_global_vertices is not None:
-            self.buffer_global_vertices.release()
-#           self.buffer_global_vertices.release()
-        self.buffer_global_vertices = self.ctx.buffer(data=vertices_data)
-#       self.buffer_global_vertices = self.ctx.buffer(data=vertices_data)
+            self.buffer_global_vertices.destroy()
+#           self.buffer_global_vertices.destroy()
+        self.buffer_global_vertices = self.create_buffer(data=vertices_data, label="scene vertices", usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.VERTEX)
+#       self.buffer_global_vertices = self.create_buffer(data=vertices_data, label="scene vertices", usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.VERTEX)
 
         if self.ssbo_materials is not None:
 #       if self.ssbo_materials is not None:
-            self.ssbo_materials.release()
-#           self.ssbo_materials.release()
-        self.ssbo_materials = self.ctx.buffer(data=materials_data)
-#       self.ssbo_materials = self.ctx.buffer(data=materials_data)
-
-        if self.vao_scene is not None:
-#       if self.vao_scene is not None:
-            self.vao_scene.release()
-#           self.vao_scene.release()
-        self.vao_scene = self.ctx.vertex_array(
-#       self.vao_scene = self.ctx.vertex_array(
-            self.program_geometry,
-#           self.program_geometry,
-            [
-#           [
-                (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
-#               (self.buffer_global_vertices, "4f 4f 4f", "inVertexGlobalPositionU", "inVertexGlobalNormalV", "inVertexGlobalTangentMat"),
-            ],
-#           ],
-        )
-#       )
+            self.ssbo_materials.destroy()
+#           self.ssbo_materials.destroy()
+        self.ssbo_materials = self.create_buffer(data=materials_data, label="scene materials")
+#       self.ssbo_materials = self.create_buffer(data=materials_data, label="scene materials")
 
         # Upload all registered textures to the texture array
 #       # Upload all registered textures to the texture array
         if self.texture_array is not None:
 #       if self.texture_array is not None:
-            self.texture_array.release()
-#           self.texture_array.release()
+            self.texture_array.destroy()
+#           self.texture_array.destroy()
         self.upload_pending_textures()
 #       self.upload_pending_textures()
 
@@ -1069,14 +1280,14 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       w_res, h_res = self.window_size
         reservoir_floats_per_item: int = 20
 #       reservoir_floats_per_item: int = 20
-        self.ssbo_sample_reservoirs.write(np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
-#       self.ssbo_sample_reservoirs.write(np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+        self.device.queue.write_buffer(self.ssbo_sample_reservoirs, 0, np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
+#       self.device.queue.write_buffer(self.ssbo_sample_reservoirs, 0, np.zeros(w_res * h_res * 2 * reservoir_floats_per_item, dtype=np.float32).tobytes())
         cache_entry_count: int = 131072
 #       cache_entry_count: int = 131072
         cache_floats_per_entry: int = 12
 #       cache_floats_per_entry: int = 12
-        self.ssbo_radiance_cache.write(np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
-#       self.ssbo_radiance_cache.write(np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+        self.device.queue.write_buffer(self.ssbo_radiance_cache, 0, np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
+#       self.device.queue.write_buffer(self.ssbo_radiance_cache, 0, np.zeros(cache_entry_count * cache_floats_per_entry, dtype=np.float32).tobytes())
 
         # Setup HDRI / Environment
 #       # Setup HDRI / Environment
@@ -1158,10 +1369,10 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       initialize_layer(816, 16, 16)
         initialize_layer(1088, 16, 3)
 #       initialize_layer(1088, 16, 3)
-        self.ssbo_nrc_weights.write(initial_weights.tobytes())
-#       self.ssbo_nrc_weights.write(initial_weights.tobytes())
-        self.ssbo_nrc_training_count.write(np.zeros(1, dtype=np.uint32).tobytes())
-#       self.ssbo_nrc_training_count.write(np.zeros(1, dtype=np.uint32).tobytes())
+        self.device.queue.write_buffer(self.ssbo_nrc_weights, 0, initial_weights.tobytes())
+#       self.device.queue.write_buffer(self.ssbo_nrc_weights, 0, initial_weights.tobytes())
+        self.device.queue.write_buffer(self.ssbo_nrc_training_count, 0, np.zeros(1, dtype=np.uint32).tobytes())
+#       self.device.queue.write_buffer(self.ssbo_nrc_training_count, 0, np.zeros(1, dtype=np.uint32).tobytes())
         self.nrc_training_step = 0
 #       self.nrc_training_step = 0
 
@@ -1188,7 +1399,7 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           return False
 
         # Ensure RGBA
-        # Ensure RGBA
+#       # Ensure RGBA
         print(f"path: {path} loaded_data.shape: {loaded_data.shape}")
 #       print(f"path: {path} loaded_data.shape: {loaded_data.shape}")
         if len(loaded_data.shape) == 2:
@@ -1205,22 +1416,22 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           loaded_data = cv2.cvtColor(loaded_data, cv2.COLOR_BGRA2RGBA)
 
         # Fast path: an 8-bit source already at the array size needs no resize, so the
-        # Fast path: an 8-bit source already at the array size needs no resize, so the
+#       # Fast path: an 8-bit source already at the array size needs no resize, so the
         # sRGB decode -> resize -> encode round-trip below is an exact identity and both
-        # sRGB decode -> resize -> encode round-trip below is an exact identity and both
+#       # sRGB decode -> resize -> encode round-trip below is an exact identity and both
         # full-resolution pow() passes (plus the float conversion) can be skipped entirely.
-        # full-resolution pow() passes (plus the float conversion) can be skipped entirely.
+#       # full-resolution pow() passes (plus the float conversion) can be skipped entirely.
         if loaded_data.dtype == np.uint8 and loaded_data.shape[0] == self.texture_array_size and loaded_data.shape[1] == self.texture_array_size:
 #       if loaded_data.dtype == np.uint8 and loaded_data.shape[0] == self.texture_array_size and loaded_data.shape[1] == self.texture_array_size:
-            # Flip for OpenGL!
-            # Flip for OpenGL!
-            self.texture_array.write(np.flipud(loaded_data).tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
-#           self.texture_array.write(np.flipud(loaded_data).tobytes(), viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
+            # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
+#           # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
+            self.write_texture_array_layer(data_uint8=np.flipud(loaded_data), layer_index=layer_index)
+#           self.write_texture_array_layer(data_uint8=np.flipud(loaded_data), layer_index=layer_index)
             return True
 #           return True
 
         # Convert to normalized float first so resizing is done on linear data
-        # Convert to normalized float first so resizing is done on linear data
+#       # Convert to normalized float first so resizing is done on linear data
         data_float: npt.NDArray[np.float32]
 #       data_float: npt.NDArray[np.float32]
 
@@ -1247,7 +1458,7 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           data_float[..., :3] = np.power(data_float[..., :3], 2.2)
 
         # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
-        # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
+#       # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
         if data_float.shape[0] != self.texture_array_size or data_float.shape[1] != self.texture_array_size:
 #       if data_float.shape[0] != self.texture_array_size or data_float.shape[1] != self.texture_array_size:
             src_height, src_width = data_float.shape[:2]
@@ -1260,36 +1471,27 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           data_float = cv2.resize(data_float, (self.texture_array_size, self.texture_array_size), interpolation=interpolation).astype(dtype=np.float32)
 
         # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
-        # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
+#       # Re-encode color back to sRGB so 8-bit storage is perceptually uniform (shader decodes on sample)
         if is_srgb:
 #       if is_srgb:
             data_float[..., :3] = np.power(np.clip(data_float[..., :3], 0.0, 1.0), 1.0 / 2.2)
 #           data_float[..., :3] = np.power(np.clip(data_float[..., :3], 0.0, 1.0), 1.0 / 2.2)
 
-        # Flip for OpenGL!
-        # Flip for OpenGL!
+        # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
+#       # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
         data_float = np.flipud(data_float)
 #       data_float = np.flipud(data_float)
 
         # Quantize to 8-bit (f1) for the texture array: 4x less VRAM than f4
-        # Quantize to 8-bit (f1) for the texture array: 4x less VRAM than f4
+#       # Quantize to 8-bit (f1) for the texture array: 4x less VRAM than f4
         data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 #       data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-        data_bytes = data_uint8.tobytes()
-#       data_bytes = data_uint8.tobytes()
 
-        # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
-        # Viewport: (x, y, layer, width, height, depth) -> for 2D array, it's (x, y, layer, width, height, 1)
-        # For ModernGL TextureArray.write: viewport=(x, y, z, width, height, depth)
-        # For ModernGL TextureArray.write: viewport=(x, y, z, width, height, depth)
+        # Upload the layer together with its mip chain.
+#       # Upload the layer together with its mip chain.
+        self.write_texture_array_layer(data_uint8=data_uint8, layer_index=layer_index)
+#       self.write_texture_array_layer(data_uint8=data_uint8, layer_index=layer_index)
 
-        # Check ModernGL docs logic. Often it's just (x, y, layer, width, height, 1).
-        # Check ModernGL docs logic. Often it's just (x, y, layer, width, height, 1).
-        self.texture_array.write(data_bytes, viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
-#       self.texture_array.write(data_bytes, viewport=(0, 0, layer_index, self.texture_array_size, self.texture_array_size, 1))
-
-        # Generate mipmaps if needed (requires creating whole array though! or per layer!)
-        # Generate mipmaps if needed (requires creating whole array though! or per layer!)
         return True
 #       return True
 
@@ -1357,8 +1559,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Read textures (Read 4 components to be safe, then slice)
         # Accumulator (Color)
 #       # Accumulator (Color)
-        color_data: bytes = self.texture_accum.read()
-#       color_data: bytes = self.texture_accum.read()
+        color_data: bytes = self.read_texture(texture=self.texture_accum, bytes_per_pixel=16)
+#       color_data: bytes = self.read_texture(texture=self.texture_accum, bytes_per_pixel=16)
         color_arr: npt.NDArray[np.float32] = np.frombuffer(color_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
 #       color_arr: npt.NDArray[np.float32] = np.frombuffer(color_data, dtype=np.float32).reshape((h, w, 4))[:, :, :3]
         color_arr = np.ascontiguousarray(color_arr)
@@ -1371,8 +1573,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Albedo
 #       # Albedo
-        albedo_data: bytes = self.texture_geometry_albedo.read()
-#       albedo_data: bytes = self.texture_geometry_albedo.read()
+        albedo_data: bytes = self.read_texture(texture=self.texture_geometry_albedo, bytes_per_pixel=4)
+#       albedo_data: bytes = self.read_texture(texture=self.texture_geometry_albedo, bytes_per_pixel=4)
         albedo_arr_uint8: npt.NDArray[np.uint8] = np.frombuffer(albedo_data, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
 #       albedo_arr_uint8: npt.NDArray[np.uint8] = np.frombuffer(albedo_data, dtype=np.uint8).reshape((h, w, 4))[:, :, :3]
         albedo_arr: npt.NDArray[np.float32] = albedo_arr_uint8.astype(np.float32) / 255.0
@@ -1382,8 +1584,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # Normal
 #       # Normal
-        normal_data: bytes = self.texture_geometry_global_normal.read()
-#       normal_data: bytes = self.texture_geometry_global_normal.read()
+        normal_data: bytes = self.read_texture(texture=self.texture_geometry_global_normal, bytes_per_pixel=8)
+#       normal_data: bytes = self.read_texture(texture=self.texture_geometry_global_normal, bytes_per_pixel=8)
         normal_arr_f16: npt.NDArray[np.float16] = np.frombuffer(normal_data, dtype=np.float16).reshape((h, w, 4))[:, :, :3]
 #       normal_arr_f16: npt.NDArray[np.float16] = np.frombuffer(normal_data, dtype=np.float16).reshape((h, w, 4))[:, :, :3]
         normal_arr: npt.NDArray[np.float32] = normal_arr_f16.astype(np.float32)
@@ -1459,8 +1661,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       output_arr = (output_arr * (a * output_arr + b)) / (output_arr * (c * output_arr + d) + e)
         """
 
-        # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.glsl)
-#       # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.glsl)
+        # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.slang)
+#       # Apply Exposure - physically-based camera EV (matches computeExposure in post_tonemap_cs.slang)
         APERTURE = 16.0                 # f-number N
 #       APERTURE = 16.0                 # f-number N
         SHUTTER_TIME = 0.008            # seconds t (~1/125 s)
@@ -1478,8 +1680,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         output_arr = output_arr * exposure
 #       output_arr = output_arr * exposure
 
-        # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.glsl)
-#       # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.glsl)
+        # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.slang)
+#       # Apply Gran Turismo (Uchimura 2017) Tonemap (matches gtTonemap in tonemap.slang)
         P = 1.0    # maximum brightness the curve maps to
 #       P = 1.0    # maximum brightness the curve maps to
         a = 1.0    # contrast of the linear mid-section
@@ -1552,6 +1754,50 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
         print("Denoise complete. Check the window.")
 #       print("Denoise complete. Check the window.")
 
+    def on_draw(self) -> None:
+#   def on_draw(self) -> None:
+        # rendercanvas draw callback: derives the elapsed / frame time moderngl_window used to pass in.
+#       # rendercanvas draw callback: derives the elapsed / frame time moderngl_window used to pass in.
+        current_time: float = tm.perf_counter()
+#       current_time: float = tm.perf_counter()
+        frame_time: float = current_time - self.last_frame_time
+#       frame_time: float = current_time - self.last_frame_time
+        self.last_frame_time = current_time
+#       self.last_frame_time = current_time
+        self.on_render(time=current_time - self.start_time, frame_time=frame_time)
+#       self.on_render(time=current_time - self.start_time, frame_time=frame_time)
+        pass
+#       pass
+
+    def render_to_screen(self, command_encoder: wgpu.GPUCommandEncoder, texture: wgpu.GPUTexture) -> None:
+#   def render_to_screen(self, command_encoder: wgpu.GPUCommandEncoder, texture: wgpu.GPUTexture) -> None:
+        # Composite Pass: draws texture over the window through hybrid_renderer_fs.slang, then submits the frame.
+#       # Composite Pass: draws texture over the window through hybrid_renderer_fs.slang, then submits the frame.
+        if "uRenderMode" in self.program_renderer:
+#       if "uRenderMode" in self.program_renderer:
+            self.program_renderer["uRenderMode"] = self.render_mode.value
+#           self.program_renderer["uRenderMode"] = self.render_mode.value
+        screen_view: wgpu.GPUTextureView = self.present_context.get_current_texture().create_view()
+#       screen_view: wgpu.GPUTextureView = self.present_context.get_current_texture().create_view()
+        self.program_renderer.render(
+#       self.program_renderer.render(
+            command_encoder=command_encoder,
+#           command_encoder=command_encoder,
+            resources={"uTextureOutput": (texture, self.sampler_screen)},
+#           resources={"uTextureOutput": (texture, self.sampler_screen)},
+            color_attachments=[{"view": screen_view, "clear_value": (0.0, 0.0, 0.0, 1.0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}],
+#           color_attachments=[{"view": screen_view, "clear_value": (0.0, 0.0, 0.0, 1.0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}],
+            vertex_buffer=self.vbo_screen,
+#           vertex_buffer=self.vbo_screen,
+            vertex_count=4,
+#           vertex_count=4,
+        )
+#       )
+        self.device.queue.submit([command_encoder.finish()])
+#       self.device.queue.submit([command_encoder.finish()])
+        pass
+#       pass
+
     def on_render(self, time: float, frame_time: float) -> None:
 #   def on_render(self, time: float, frame_time: float) -> None:
         # Main Render Loop
@@ -1568,39 +1814,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # 5. Post Processing Pipeline
         # 6. Display to Screen
 #       # 6. Display to Screen
+        # Every pass of the frame is recorded into one command encoder and submitted at the end; WebGPU
+#       # Every pass of the frame is recorded into one command encoder and submitted at the end; WebGPU
+        # tracks the resource hazards between passes, so the explicit GL memory barriers have no equivalent.
+#       # tracks the resource hazards between passes, so the explicit GL memory barriers have no equivalent.
         self.frame_count += 1
 #       self.frame_count += 1
-
-        # Poll keys (Backup for key_event)
-#       # Poll keys (Backup for key_event)
-        keys: type[BaseKeys] = self.wnd.keys
-#       keys: type[BaseKeys] = self.wnd.keys
-        try:
-#       try:
-            self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
-#           self.key_state["W"] = self.wnd.is_key_pressed(keys.W)
-            self.key_state["S"] = self.wnd.is_key_pressed(keys.S)
-#           self.key_state["S"] = self.wnd.is_key_pressed(keys.S)
-            self.key_state["A"] = self.wnd.is_key_pressed(keys.A)
-#           self.key_state["A"] = self.wnd.is_key_pressed(keys.A)
-            self.key_state["D"] = self.wnd.is_key_pressed(keys.D)
-#           self.key_state["D"] = self.wnd.is_key_pressed(keys.D)
-            self.key_state["Q"] = self.wnd.is_key_pressed(keys.Q)
-#           self.key_state["Q"] = self.wnd.is_key_pressed(keys.Q)
-            self.key_state["E"] = self.wnd.is_key_pressed(keys.E)
-#           self.key_state["E"] = self.wnd.is_key_pressed(keys.E)
-            self.key_state["UP"] = self.wnd.is_key_pressed(keys.UP)
-#           self.key_state["UP"] = self.wnd.is_key_pressed(keys.UP)
-            self.key_state["DOWN"] = self.wnd.is_key_pressed(keys.DOWN)
-#           self.key_state["DOWN"] = self.wnd.is_key_pressed(keys.DOWN)
-            self.key_state["LEFT"] = self.wnd.is_key_pressed(keys.LEFT)
-#           self.key_state["LEFT"] = self.wnd.is_key_pressed(keys.LEFT)
-            self.key_state["RIGHT"] = self.wnd.is_key_pressed(keys.RIGHT)
-#           self.key_state["RIGHT"] = self.wnd.is_key_pressed(keys.RIGHT)
-        except AttributeError:
-#       except AttributeError:
-            pass # method might not exist on all backends
-#           pass # method might not exist on all backends
 
         self.camera.update(frame_time=frame_time, key_state=self.key_state)
 #       self.camera.update(frame_time=frame_time, key_state=self.key_state)
@@ -1652,98 +1871,69 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             self.last_camera_position = tuple(self.camera.look_from)
 #           self.last_camera_position = tuple(self.camera.look_from)
 
+        command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="frame")
+#       command_encoder: wgpu.GPUCommandEncoder = self.device.create_command_encoder(label="frame")
+
         # 1. Rasterize to G-Buffer
 #       # 1. Rasterize to G-Buffer
-        self.gbuffer.use()
-#       self.gbuffer.use()
-        self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
-#       self.gbuffer.clear(0.0, 0.0, 0.0, 0.0) # Zero out, .w = 0 means background
+        self.program_geometry.write("uTransformView", transform_view.astype(dtype=np.float32).tobytes())
+#       self.program_geometry.write("uTransformView", transform_view.astype(dtype=np.float32).tobytes())
+        self.program_geometry.write("uTransformProjection", transform_projection.astype(dtype=np.float32).tobytes())
+#       self.program_geometry.write("uTransformProjection", transform_projection.astype(dtype=np.float32).tobytes())
 
-        typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype(dtype=np.float32).tobytes())
-#       typing.cast(mgl.Uniform, self.program_geometry["uTransformView"]).write(transform_view.astype(dtype=np.float32).tobytes())
-        typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
-#       typing.cast(mgl.Uniform, self.program_geometry["uTransformProjection"]).write(transform_projection.astype(dtype=np.float32).tobytes())
-
-        self.ssbo_materials.bind_to_storage_buffer(binding=8)
-#       self.ssbo_materials.bind_to_storage_buffer(binding=8)
-        self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
-#       self.vao_scene.render(mode=mgl.TRIANGLES, vertices=self.num_triangles * 3)
-
-        # The G-Buffer just written by the rasterization pass is read back through imageLoad by both
-#       # The G-Buffer just written by the rasterization pass is read back through imageLoad by both
-        # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
-#       # nrc_gather_cs.glsl and hybrid_shading_cs.glsl. Those are incoherent accesses, so publish the
-        # writes once here, ahead of either consumer. No such barrier existed before: the raster ->
-#       # writes once here, ahead of either consumer. No such barrier existed before: the raster ->
-        # compute G-Buffer handoff was unsynchronised outright rather than merely under-covered, going
-#       # compute G-Buffer handoff was unsynchronised outright rather than merely under-covered, going
-        # back past the NRC work to 0349123. The two SHADER_STORAGE barriers further down guard the
-#       # back past the NRC work to 0349123. The two SHADER_STORAGE barriers further down guard the
-        # training records and weights, not these images.
-#       # training records and weights, not these images.
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-
-        if "uRenderMode" in self.program_renderer:
-#       if "uRenderMode" in self.program_renderer:
-            self.program_renderer["uRenderMode"] = self.render_mode.value
-#           self.program_renderer["uRenderMode"] = self.render_mode.value
+        self.program_geometry.render(
+#       self.program_geometry.render(
+            command_encoder=command_encoder,
+#           command_encoder=command_encoder,
+            resources=self.get_shader_resources(),
+#           resources=self.get_shader_resources(),
+            # Zero out, .w = 0 means background
+#           # Zero out, .w = 0 means background
+            color_attachments=[
+#           color_attachments=[
+                {"view": gbuffer_texture.create_view(), "clear_value": (0.0, 0.0, 0.0, 0.0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}
+#               {"view": gbuffer_texture.create_view(), "clear_value": (0.0, 0.0, 0.0, 0.0), "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}
+                for gbuffer_texture in self.gbuffer
+#               for gbuffer_texture in self.gbuffer
+            ],
+#           ],
+            depth_stencil_attachment={"view": self.texture_depth.create_view(), "depth_clear_value": 1.0, "depth_load_op": wgpu.LoadOp.clear, "depth_store_op": wgpu.StoreOp.store},
+#           depth_stencil_attachment={"view": self.texture_depth.create_view(), "depth_clear_value": 1.0, "depth_load_op": wgpu.LoadOp.clear, "depth_store_op": wgpu.StoreOp.store},
+            vertex_buffer=self.buffer_global_vertices,
+#           vertex_buffer=self.buffer_global_vertices,
+            vertex_count=self.num_triangles * 3,
+#           vertex_count=self.num_triangles * 3,
+        )
+#       )
 
         if self.render_mode != RenderMode.PATH_TRACE:
 #       if self.render_mode != RenderMode.PATH_TRACE:
-            self.ctx.screen.use()
-#           self.ctx.screen.use()
-            self.ctx.clear()
-#           self.ctx.clear()
+            debug_texture: wgpu.GPUTexture = self.texture_geometry_albedo
+#           debug_texture: wgpu.GPUTexture = self.texture_geometry_albedo
             if self.render_mode == RenderMode.ALBEDO:
 #           if self.render_mode == RenderMode.ALBEDO:
-                self.texture_geometry_albedo.use(location=0)
-#               self.texture_geometry_albedo.use(location=0)
+                debug_texture = self.texture_geometry_albedo
+#               debug_texture = self.texture_geometry_albedo
             elif self.render_mode == RenderMode.NORMAL:
 #           elif self.render_mode == RenderMode.NORMAL:
-                self.texture_geometry_global_normal.use(location=0)
-#               self.texture_geometry_global_normal.use(location=0)
+                debug_texture = self.texture_geometry_global_normal
+#               debug_texture = self.texture_geometry_global_normal
             elif self.render_mode == RenderMode.POSITION:
 #           elif self.render_mode == RenderMode.POSITION:
-                self.texture_geometry_global_position.use(location=0)
-#               self.texture_geometry_global_position.use(location=0)
+                debug_texture = self.texture_geometry_global_position
+#               debug_texture = self.texture_geometry_global_position
             elif self.render_mode == RenderMode.TANGENT:
 #           elif self.render_mode == RenderMode.TANGENT:
-                self.texture_geometry_global_tangent.use(location=0)
-#               self.texture_geometry_global_tangent.use(location=0)
+                debug_texture = self.texture_geometry_global_tangent
+#               debug_texture = self.texture_geometry_global_tangent
 
-            self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
-#           self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
+            self.render_to_screen(command_encoder=command_encoder, texture=debug_texture)
+#           self.render_to_screen(command_encoder=command_encoder, texture=debug_texture)
             return
 #           return
 
         # 2. Compute Shade
 #       # 2. Compute Shade
-        self.texture_output.bind_to_image(0, read=False, write=True)
-#       self.texture_output.bind_to_image(0, read=False, write=True)
-        self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-#       self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-        self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-#       self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-        self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-#       self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-        self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
-#       self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
-
-        # Bind BVH buffers
-#       # Bind BVH buffers
-        self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
-#       self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
-        self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
-#       self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
-        self.ssbo_materials.bind_to_storage_buffer(binding=8)
-#       self.ssbo_materials.bind_to_storage_buffer(binding=8)
-        self.ssbo_radiance_cache.bind_to_storage_buffer(binding=9)
-#       self.ssbo_radiance_cache.bind_to_storage_buffer(binding=9)
-
-        self.texture_accum.bind_to_image(5, read=True, write=True)
-#       self.texture_accum.bind_to_image(5, read=True, write=True)
-
         # Update Uniforms
 #       # Update Uniforms
         if "uTime" in self.program_shading:
@@ -1828,8 +2018,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       if "uCacheBlendFactor" in self.program_shading:
             # The hash radiance cache and the Neural Radiance Cache are two answers to the same
 #           # The hash radiance cache and the Neural Radiance Cache are two answers to the same
-            # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.glsl breaks out
-#           # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.glsl breaks out
+            # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.slang breaks out
+#           # question, and with NRC on the hash cache cannot win: hybrid_shading_cs.slang breaks out
             # of the path at the NRC vertex before writeCache is reached, so nothing is ever written
 #           # of the path at the NRC vertex before writeCache is reached, so nothing is ever written
             # at a diffuse vertex. What survives is the worst of both -- readCache still runs on every
@@ -1843,33 +2033,12 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             self.program_shading["uCacheBlendFactor"] = 0.0 if self.is_nrc_enabled else 0.5
 #           self.program_shading["uCacheBlendFactor"] = 0.0 if self.is_nrc_enabled else 0.5
 
-        # HDRI Texture
-#       # HDRI Texture
-        self.texture_hdri.use(location=8)
-#       self.texture_hdri.use(location=8)
-        if "uHdriTexture" in self.program_shading:
-#       if "uHdriTexture" in self.program_shading:
-            self.program_shading["uHdriTexture"] = 8
-#           self.program_shading["uHdriTexture"] = 8
-        # Scene Texture Array
-#       # Scene Texture Array
-        self.texture_array.use(location=9)
-#       self.texture_array.use(location=9)
-        if "uSceneTextureArray" in self.program_shading:
-#       if "uSceneTextureArray" in self.program_shading:
-            self.program_shading["uSceneTextureArray"] = 9
-#           self.program_shading["uSceneTextureArray"] = 9
-
         if "uUseHdri" in self.program_shading:
 #       if "uUseHdri" in self.program_shading:
             self.program_shading["uUseHdri"] = self.use_hdri
 #           self.program_shading["uUseHdri"] = self.use_hdri
-        # Volumetrics: baked sky cloud layer and cloud noise volume (units stay bound for the gather pass too)
-#       # Volumetrics: baked sky cloud layer and cloud noise volume (units stay bound for the gather pass too)
-        self.texture_sky_clouds.use(location=10)
-#       self.texture_sky_clouds.use(location=10)
-        self.texture_cloud_noise.use(location=11)
-#       self.texture_cloud_noise.use(location=11)
+        # Volumetrics: baked sky cloud layer and cloud noise volume (bound for the gather pass too)
+#       # Volumetrics: baked sky cloud layer and cloud noise volume (bound for the gather pass too)
         self.upload_volumetric_uniforms(program=self.program_shading)
 #       self.upload_volumetric_uniforms(program=self.program_shading)
 
@@ -1921,17 +2090,6 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             self.program_shading["uJitter"] = (jitter_x, jitter_y)
 #           self.program_shading["uJitter"] = (jitter_x, jitter_y)
 
-        # Bind ReSTIR reservoirs and NRC buffers
-#       # Bind ReSTIR reservoirs and NRC buffers
-        self.ssbo_sample_reservoirs.bind_to_storage_buffer(binding=10)
-#       self.ssbo_sample_reservoirs.bind_to_storage_buffer(binding=10)
-        self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-#       self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-        self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-#       self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-        self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
-#       self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
-
         if "uNRCEnabled" in self.program_shading:
 #       if "uNRCEnabled" in self.program_shading:
             self.program_shading["uNRCEnabled"] = self.is_nrc_enabled
@@ -1960,8 +2118,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           self.program_shading["uResolution"] = (w, h)
         if "uPreviousTransformViewProjection" in self.program_shading and self.last_view_proj_matrix is not None:
 #       if "uPreviousTransformViewProjection" in self.program_shading and self.last_view_proj_matrix is not None:
-            typing.cast(mgl.Uniform, self.program_shading["uPreviousTransformViewProjection"]).write(self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
-#           typing.cast(mgl.Uniform, self.program_shading["uPreviousTransformViewProjection"]).write(self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
+            self.program_shading.write("uPreviousTransformViewProjection", self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
+#           self.program_shading.write("uPreviousTransformViewProjection", self.last_view_proj_matrix.astype(dtype=np.float32).tobytes())
         if "uPreviousCameraPosition" in self.program_shading and self.last_camera_position is not None:
 #       if "uPreviousCameraPosition" in self.program_shading and self.last_camera_position is not None:
             self.program_shading["uPreviousCameraPosition"] = self.last_camera_position
@@ -1971,37 +2129,19 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
             self.program_shading["uResetHistory"] = self.is_scene_reset
 #           self.program_shading["uResetHistory"] = self.is_scene_reset
 
+        shader_resources: dict[str, typing.Any] = self.get_shader_resources()
+#       shader_resources: dict[str, typing.Any] = self.get_shader_resources()
+
         # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
 #       # Online Neural Radiance Cache (NRC) Training Passes (Gather + Backprop with Adam)
         if self.is_nrc_enabled:
 #       if self.is_nrc_enabled:
             # 1. Gather pass: collect training records from the scene
 #           # 1. Gather pass: collect training records from the scene
-            self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-#           self.texture_geometry_global_position.bind_to_image(1, read=True, write=False)
-            self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-#           self.texture_geometry_global_normal.bind_to_image(2, read=True, write=False)
-            self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
-#           self.texture_geometry_albedo.bind_to_image(3, read=True, write=False)
             # The gather pass reads texcoord V out of the tangent target's w channel, so it can resolve
 #           # The gather pass reads texcoord V out of the tangent target's w channel, so it can resolve
             # the primary vertex's material from the same maps the shading pass uses on that pixel.
 #           # the primary vertex's material from the same maps the shading pass uses on that pixel.
-            self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
-#           self.texture_geometry_global_tangent.bind_to_image(4, read=True, write=False)
-            self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
-#           self.ssbo_bvh_nodes.bind_to_storage_buffer(binding=6)
-            self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
-#           self.buffer_global_vertices.bind_to_storage_buffer(binding=7)
-            self.ssbo_materials.bind_to_storage_buffer(binding=8)
-#           self.ssbo_materials.bind_to_storage_buffer(binding=8)
-            self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-#           self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-            self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-#           self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-            self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
-#           self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
-
             if "uTrainingStep" in self.program_nrc_gather:
 #           if "uTrainingStep" in self.program_nrc_gather:
                 self.program_nrc_gather["uTrainingStep"] = self.nrc_training_step
@@ -2020,34 +2160,20 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #           if "uCameraGlobalPosition" in self.program_nrc_gather:
                 self.program_nrc_gather["uCameraGlobalPosition"] = tuple(self.camera.look_from)
 #               self.program_nrc_gather["uCameraGlobalPosition"] = tuple(self.camera.look_from)
-            # texture_hdri is already bound to texture unit 8 above for the shading pass, and unit
-#           # texture_hdri is already bound to texture unit 8 above for the shading pass, and unit
-            # bindings are global GL state, so the gather program only needs the sampler index.
-#           # bindings are global GL state, so the gather program only needs the sampler index.
-            if "uHdriTexture" in self.program_nrc_gather:
-#           if "uHdriTexture" in self.program_nrc_gather:
-                self.program_nrc_gather["uHdriTexture"] = 8
-#               self.program_nrc_gather["uHdriTexture"] = 8
             if "uUseHdri" in self.program_nrc_gather:
 #           if "uUseHdri" in self.program_nrc_gather:
                 self.program_nrc_gather["uUseHdri"] = self.use_hdri
 #               self.program_nrc_gather["uUseHdri"] = self.use_hdri
-            # Same units 10 / 11 bound above for the shading pass: the training target sees the cloudy
-#           # Same units 10 / 11 bound above for the shading pass: the training target sees the cloudy
+            # Same sky cloud layer and cloud noise as the shading pass: the training target sees the cloudy
+#           # Same sky cloud layer and cloud noise as the shading pass: the training target sees the cloudy
             # sky and the media shadows the shading pass renders.
 #           # sky and the media shadows the shading pass renders.
             self.upload_volumetric_uniforms(program=self.program_nrc_gather)
 #           self.upload_volumetric_uniforms(program=self.program_nrc_gather)
-            # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
-#           # texture_array is already bound to unit 9 above for the shading pass; same reasoning as
-            # the HDRI above, the gather program only needs the sampler index. Without it the training
-#           # the HDRI above, the gather program only needs the sampler index. Without it the training
-            # target would be built from placeholder material scalars on every textured surface.
-#           # target would be built from placeholder material scalars on every textured surface.
-            if "uSceneTextureArray" in self.program_nrc_gather:
-#           if "uSceneTextureArray" in self.program_nrc_gather:
-                self.program_nrc_gather["uSceneTextureArray"] = 9
-#               self.program_nrc_gather["uSceneTextureArray"] = 9
+            # The scene texture array comes from the same shader_resources as the shading pass. Without it
+#           # The scene texture array comes from the same shader_resources as the shading pass. Without it
+            # the training target would be built from placeholder material scalars on every textured surface.
+#           # the training target would be built from placeholder material scalars on every textured surface.
             if "uPointLightCount" in self.program_nrc_gather:
 #           if "uPointLightCount" in self.program_nrc_gather:
                 self.program_nrc_gather["uPointLightCount"] = len(point_lights)
@@ -2083,25 +2209,17 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
                             self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
 #                           self.program_nrc_gather[f"uPointLights[{i}].pdf"] = prob
 
-            # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.glsl records at most one
-#           # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.glsl records at most one
+            # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.slang records at most one
+#           # 128 workgroups x 64 invocations = 8192 paths, and nrc_gather_cs.slang records at most one
             # vertex per path, which is exactly the capacity of ssbo_nrc_training_records. Raising this
 #           # vertex per path, which is exactly the capacity of ssbo_nrc_training_records. Raising this
             # count without resizing that buffer silently discards the surplus records.
 #           # count without resizing that buffer silently discards the surplus records.
-            self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
-#           self.program_nrc_gather.run(group_x=128, group_y=1, group_z=1)
-            self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
-#           self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+            self.program_nrc_gather.run(command_encoder=command_encoder, resources=shader_resources, group_x=128, group_y=1, group_z=1)
+#           self.program_nrc_gather.run(command_encoder=command_encoder, resources=shader_resources, group_x=128, group_y=1, group_z=1)
 
             # 2. Train MLP pass: mini-batch SGD with Adam optimizer on GPU
 #           # 2. Train MLP pass: mini-batch SGD with Adam optimizer on GPU
-            self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-#           self.ssbo_nrc_weights.bind_to_storage_buffer(binding=11)
-            self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-#           self.ssbo_nrc_training_records.bind_to_storage_buffer(binding=12)
-            self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
-#           self.ssbo_nrc_training_count.bind_to_storage_buffer(binding=13)
             if "uTrainingStep" in self.program_nrc_train:
 #           if "uTrainingStep" in self.program_nrc_train:
                 self.program_nrc_train["uTrainingStep"] = self.nrc_training_step
@@ -2113,19 +2231,28 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
                 self.program_nrc_train["uNRCPositionScale"] = self.nrc_position_scale
 #               self.program_nrc_train["uNRCPositionScale"] = self.nrc_position_scale
 
-            self.program_nrc_train.run(group_x=1, group_y=1, group_z=1)
-#           self.program_nrc_train.run(group_x=1, group_y=1, group_z=1)
-            self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
-#           self.ctx.memory_barrier(barriers=mgl.SHADER_STORAGE_BARRIER_BIT)
+            self.program_nrc_train.run(command_encoder=command_encoder, resources=shader_resources, group_x=1, group_y=1, group_z=1)
+#           self.program_nrc_train.run(command_encoder=command_encoder, resources=shader_resources, group_x=1, group_y=1, group_z=1)
             self.nrc_training_step += 1
 #           self.nrc_training_step += 1
 
+        # The shading pass blends into the other half of the accumulation pair, reading this one as history.
+#       # The shading pass blends into the other half of the accumulation pair, reading this one as history.
+        texture_accum_target: wgpu.GPUTexture = self.texture_accum_pair[1] if self.texture_accum is self.texture_accum_pair[0] else self.texture_accum_pair[0]
+#       texture_accum_target: wgpu.GPUTexture = self.texture_accum_pair[1] if self.texture_accum is self.texture_accum_pair[0] else self.texture_accum_pair[0]
+        shading_resources: dict[str, typing.Any] = dict(shader_resources)
+#       shading_resources: dict[str, typing.Any] = dict(shader_resources)
+        shading_resources["textureAccumHistory"] = self.texture_accum
+#       shading_resources["textureAccumHistory"] = self.texture_accum
+        shading_resources["textureAccum"] = texture_accum_target
+#       shading_resources["textureAccum"] = texture_accum_target
+
         gx, gy = (w + 15) // 16, (h + 15) // 16
 #       gx, gy = (w + 15) // 16, (h + 15) // 16
-        self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
-#       self.program_shading.run(group_x=gx, group_y=gy, group_z=1)
-        self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
-#       self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT | mgl.SHADER_STORAGE_BARRIER_BIT)
+        self.program_shading.run(command_encoder=command_encoder, resources=shading_resources, group_x=gx, group_y=gy, group_z=1)
+#       self.program_shading.run(command_encoder=command_encoder, resources=shading_resources, group_x=gx, group_y=gy, group_z=1)
+        self.texture_accum = texture_accum_target
+#       self.texture_accum = texture_accum_target
         self.last_view_proj_matrix = current_view_proj
 #       self.last_view_proj_matrix = current_view_proj
         self.last_camera_position = tuple(self.camera.look_from)
@@ -2141,24 +2268,23 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Feed it in as a read-only input and ping-pong between ping/output so the
         # accumulation buffer is never overwritten by a post-processing pass.
 #       # accumulation buffer is never overwritten by a post-processing pass.
-        current_read_texture: mgl.Texture = self.texture_accum
-#       current_read_texture: mgl.Texture = self.texture_accum
-        current_write_texture: mgl.Texture = self.texture_ping
-#       current_write_texture: mgl.Texture = self.texture_ping
+        current_read_texture: wgpu.GPUTexture = self.texture_accum
+#       current_read_texture: wgpu.GPUTexture = self.texture_accum
+        current_write_texture: wgpu.GPUTexture = self.texture_ping
+#       current_write_texture: wgpu.GPUTexture = self.texture_ping
 
         for post_program in self.post_processing_pipeline:
 #       for post_program in self.post_processing_pipeline:
-            current_write_texture.bind_to_image(0, read=False, write=True)  # Output
-#           current_write_texture.bind_to_image(0, read=False, write=True)  # Output
-            current_read_texture.bind_to_image(1, read=True, write=False)   # Input
-#           current_read_texture.bind_to_image(1, read=True, write=False)   # Input
-            current_read_texture.use(location=1) # Bind for sampler2D access
-#           current_read_texture.use(location=1) # Bind for sampler2D access
-
-            post_program.run(group_x=gx, group_y=gy, group_z=1)
-#           post_program.run(group_x=gx, group_y=gy, group_z=1)
-            self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
-#           self.ctx.memory_barrier(barriers=mgl.SHADER_IMAGE_ACCESS_BARRIER_BIT | mgl.TEXTURE_FETCH_BARRIER_BIT)
+            post_resources: dict[str, typing.Any] = {
+#           post_resources: dict[str, typing.Any] = {
+                "textureOutput": current_write_texture,                     # Output
+#               "textureOutput": current_write_texture,                     # Output
+                "textureInput": (current_read_texture, self.sampler_screen), # Input (FXAA samples it filtered, the others load texels)
+#               "textureInput": (current_read_texture, self.sampler_screen), # Input (FXAA samples it filtered, the others load texels)
+            }
+#           }
+            post_program.run(command_encoder=command_encoder, resources=post_resources, group_x=gx, group_y=gy, group_z=1)
+#           post_program.run(command_encoder=command_encoder, resources=post_resources, group_x=gx, group_y=gy, group_z=1)
 
             # Swap textures
 #           # Swap textures
@@ -2176,119 +2302,141 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 
         # 4. Display Result to Screen
 #       # 4. Display Result to Screen
-        self.ctx.screen.use()
-#       self.ctx.screen.use()
-        self.ctx.clear()
-#       self.ctx.clear()
-
-        current_read_texture.use()
-#       current_read_texture.use()
-        self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
-#       self.vao_screen.render(mode=mgl.TRIANGLE_STRIP)
+        self.render_to_screen(command_encoder=command_encoder, texture=current_read_texture)
+#       self.render_to_screen(command_encoder=command_encoder, texture=current_read_texture)
         pass
 #       pass
 
-    def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
-#   def on_key_event(self, key: typing.Any, action: typing.Any, modifiers: KeyModifiers) -> None:
-        if action == self.wnd.keys.ACTION_PRESS:
-#       if action == self.wnd.keys.ACTION_PRESS:
-            if key == self.wnd.keys.I:
-#           if key == self.wnd.keys.I:
-                self.denoise_and_show()
-#               self.denoise_and_show()
-            elif key == self.wnd.keys.NUMBER_0:
-#           elif key == self.wnd.keys.NUMBER_0:
-                self.render_mode = RenderMode.PATH_TRACE
-#               self.render_mode = RenderMode.PATH_TRACE
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.NUMBER_1:
-#           elif key == self.wnd.keys.NUMBER_1:
-                self.render_mode = RenderMode.ALBEDO
-#               self.render_mode = RenderMode.ALBEDO
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.NUMBER_2:
-#           elif key == self.wnd.keys.NUMBER_2:
-                self.render_mode = RenderMode.NORMAL
-#               self.render_mode = RenderMode.NORMAL
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.NUMBER_3:
-#           elif key == self.wnd.keys.NUMBER_3:
-                self.render_mode = RenderMode.POSITION
-#               self.render_mode = RenderMode.POSITION
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.NUMBER_4:
-#           elif key == self.wnd.keys.NUMBER_4:
-                self.render_mode = RenderMode.TANGENT
-#               self.render_mode = RenderMode.TANGENT
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.N:
-#           elif key == self.wnd.keys.N:
-                self.is_nrc_enabled = not self.is_nrc_enabled
-#               self.is_nrc_enabled = not self.is_nrc_enabled
-                if self.is_nrc_enabled:
-#               if self.is_nrc_enabled:
-                    self.reset_neural_cache_weights()
-#                   self.reset_neural_cache_weights()
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.R:
-#           elif key == self.wnd.keys.R:
-                self.is_restir_enabled = not self.is_restir_enabled
-#               self.is_restir_enabled = not self.is_restir_enabled
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.V:
-#           elif key == self.wnd.keys.V:
-                self.is_vrt_enabled = not self.is_vrt_enabled
-#               self.is_vrt_enabled = not self.is_vrt_enabled
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.H:
-#           elif key == self.wnd.keys.H:
-                self.is_vrt_visualize = not self.is_vrt_visualize
-#               self.is_vrt_visualize = not self.is_vrt_visualize
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.C:
-#           elif key == self.wnd.keys.C:
-                self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
-#               self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
-                self.bake_sky_clouds()
-#               self.bake_sky_clouds()
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.M:
-#           elif key == self.wnd.keys.M:
-                self.is_media_enabled = not self.is_media_enabled
-#               self.is_media_enabled = not self.is_media_enabled
-                self.frame_count = 0
-#               self.frame_count = 0
-            elif key == self.wnd.keys.TAB:
-#           elif key == self.wnd.keys.TAB:
-                self.set_scene_by_index(index=self.current_scene_index + 1)
-#               self.set_scene_by_index(index=self.current_scene_index + 1)
-                self.frame_count = 0
-#               self.frame_count = 0
-            if self.frame_count == 0:
-#           if self.frame_count == 0:
-                self.is_scene_reset = True
-#               self.is_scene_reset = True
-                self.last_view_proj_matrix = None
-#               self.last_view_proj_matrix = None
-                self.last_camera_position = None
-#               self.last_camera_position = None
-            pass
-#           pass
+    def get_key_name(self, event: dict[str, typing.Any]) -> str:
+#   def get_key_name(self, event: dict[str, typing.Any]) -> str:
+        key: str = event["key"]
+#       key: str = event["key"]
+        return self.key_names.get(key, key.upper())
+#       return self.key_names.get(key, key.upper())
+
+    def on_key_down(self, event: dict[str, typing.Any]) -> None:
+#   def on_key_down(self, event: dict[str, typing.Any]) -> None:
+        key: str = self.get_key_name(event=event)
+#       key: str = self.get_key_name(event=event)
+        if key in self.key_state:
+#       if key in self.key_state:
+            self.key_state[key] = True
+#           self.key_state[key] = True
+        self.on_key_event(key=key)
+#       self.on_key_event(key=key)
         pass
 #       pass
 
-    def on_close(self) -> None:
-#   def on_close(self) -> None:
+    def on_key_up(self, event: dict[str, typing.Any]) -> None:
+#   def on_key_up(self, event: dict[str, typing.Any]) -> None:
+        key: str = self.get_key_name(event=event)
+#       key: str = self.get_key_name(event=event)
+        if key in self.key_state:
+#       if key in self.key_state:
+            self.key_state[key] = False
+#           self.key_state[key] = False
+        pass
+#       pass
+
+    def on_key_event(self, key: str) -> None:
+#   def on_key_event(self, key: str) -> None:
+        # Key press actions (rendercanvas does not repeat key_down while a key is held).
+#       # Key press actions (rendercanvas does not repeat key_down while a key is held).
+        if key == "I":
+#       if key == "I":
+            self.denoise_and_show()
+#           self.denoise_and_show()
+        elif key == "0":
+#       elif key == "0":
+            self.render_mode = RenderMode.PATH_TRACE
+#           self.render_mode = RenderMode.PATH_TRACE
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "1":
+#       elif key == "1":
+            self.render_mode = RenderMode.ALBEDO
+#           self.render_mode = RenderMode.ALBEDO
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "2":
+#       elif key == "2":
+            self.render_mode = RenderMode.NORMAL
+#           self.render_mode = RenderMode.NORMAL
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "3":
+#       elif key == "3":
+            self.render_mode = RenderMode.POSITION
+#           self.render_mode = RenderMode.POSITION
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "4":
+#       elif key == "4":
+            self.render_mode = RenderMode.TANGENT
+#           self.render_mode = RenderMode.TANGENT
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "N":
+#       elif key == "N":
+            self.is_nrc_enabled = not self.is_nrc_enabled
+#           self.is_nrc_enabled = not self.is_nrc_enabled
+            if self.is_nrc_enabled:
+#           if self.is_nrc_enabled:
+                self.reset_neural_cache_weights()
+#               self.reset_neural_cache_weights()
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "R":
+#       elif key == "R":
+            self.is_restir_enabled = not self.is_restir_enabled
+#           self.is_restir_enabled = not self.is_restir_enabled
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "V":
+#       elif key == "V":
+            self.is_vrt_enabled = not self.is_vrt_enabled
+#           self.is_vrt_enabled = not self.is_vrt_enabled
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "H":
+#       elif key == "H":
+            self.is_vrt_visualize = not self.is_vrt_visualize
+#           self.is_vrt_visualize = not self.is_vrt_visualize
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "C":
+#       elif key == "C":
+            self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
+#           self.is_sky_clouds_enabled = not self.is_sky_clouds_enabled
+            self.bake_sky_clouds()
+#           self.bake_sky_clouds()
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "M":
+#       elif key == "M":
+            self.is_media_enabled = not self.is_media_enabled
+#           self.is_media_enabled = not self.is_media_enabled
+            self.frame_count = 0
+#           self.frame_count = 0
+        elif key == "TAB":
+#       elif key == "TAB":
+            self.set_scene_by_index(index=self.current_scene_index + 1)
+#           self.set_scene_by_index(index=self.current_scene_index + 1)
+            self.frame_count = 0
+#           self.frame_count = 0
+        if self.frame_count == 0:
+#       if self.frame_count == 0:
+            self.is_scene_reset = True
+#           self.is_scene_reset = True
+            self.last_view_proj_matrix = None
+#           self.last_view_proj_matrix = None
+            self.last_camera_position = None
+#           self.last_camera_position = None
+        pass
+#       pass
+
+    def on_close(self, event: dict[str, typing.Any]) -> None:
+#   def on_close(self, event: dict[str, typing.Any]) -> None:
         print(f"[CLOSE]")
 #       print(f"[CLOSE]")
         self.oidn_device.release()

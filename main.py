@@ -2,8 +2,6 @@ import ctypes
 import ctypes
 import os
 import os
-import moderngl_window as mglw
-import moderngl_window as mglw
 from src.renderer.hybrid_renderer import HybridRenderer
 from src.renderer.hybrid_renderer import HybridRenderer
 
@@ -33,11 +31,13 @@ if __name__ == "__main__":
         print("NVIDIA driver not found.")
 #       print("NVIDIA driver not found.")
 
-    # Execute the ModernGL Window application lifecycle.
-#   # Execute the ModernGL Window application lifecycle.
-    # This handles argument parsing, window creation, context setup, and the render loop.
-#   # This handles argument parsing, window creation, context setup, and the render loop.
-    mglw.run_window_config(HybridRenderer)
-#   mglw.run_window_config(HybridRenderer)
+    # Build the renderer (wgpu device on the high-performance adapter, window, Slang shaders, first scene)
+#   # Build the renderer (wgpu device on the high-performance adapter, window, Slang shaders, first scene)
+    # and hand control to the rendercanvas event loop, which drives the render loop until the window closes.
+#   # and hand control to the rendercanvas event loop, which drives the render loop until the window closes.
+    renderer: HybridRenderer = HybridRenderer()
+#   renderer: HybridRenderer = HybridRenderer()
+    renderer.run()
+#   renderer.run()
     pass
 #   pass

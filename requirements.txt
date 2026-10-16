@@ -10,10 +10,12 @@ pyoidn
 pyoidn
 pyassimp
 pyassimp
-moderngl
-moderngl
-moderngl-window
-moderngl-window
+wgpu
+wgpu
+rendercanvas
+rendercanvas
+glfw
+glfw
 opencv-python
 opencv-python
 setuptools

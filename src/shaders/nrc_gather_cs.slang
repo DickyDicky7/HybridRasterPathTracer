@@ -1,62 +1,65 @@
-    #version 430
-//  #version 430
+    // Shared modules: principled_bsdf so the cache is trained against the same BSDF hybrid_shading_cs.slang
+//  // Shared modules: principled_bsdf so the cache is trained against the same BSDF hybrid_shading_cs.slang
+    // later evaluates it with, sky_environment for the same environment radiance the shading pass gathers,
+//  // later evaluates it with, sky_environment for the same environment radiance the shading pass gathers,
+    // and the participating media for shadow-ray transmittance.
+//  // and the participating media for shadow-ray transmittance.
+    import math_constants;
+//  import math_constants;
+    import principled_bsdf;
+//  import principled_bsdf;
+    import sky_environment;
+//  import sky_environment;
+    import volumetric_common;
+//  import volumetric_common;
+    import participating_media;
+//  import participating_media;
 
-    layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
-//  layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
-
-    layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
-//  layout(binding = 1, rgba32f) uniform image2D textureGeometryGlobalPosition;
-    layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
-//  layout(binding = 2, rgba16f) uniform image2D textureGeometryGlobalNormal;
-    layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
-//  layout(binding = 3, rgba8) uniform image2D textureGeometryAlbedo;
-    // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.glsl packs the
-//  // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.glsl packs the
+    Texture2D<float4> textureGeometryGlobalPosition;
+//  Texture2D<float4> textureGeometryGlobalPosition;
+    Texture2D<float4> textureGeometryGlobalNormal;
+//  Texture2D<float4> textureGeometryGlobalNormal;
+    Texture2D<float4> textureGeometryAlbedo;
+//  Texture2D<float4> textureGeometryAlbedo;
+    // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.slang packs the
+//  // Only the w channel is used, and only for the primary vertex: hybrid_shading_cs.slang packs the
     // interpolated texcoord V there (U lives in the normal target), which is what the material
 //  // interpolated texcoord V there (U lives in the normal target), which is what the material
     // resolution below needs to sample the same maps the shading pass shades that pixel with.
 //  // resolution below needs to sample the same maps the shading pass shades that pixel with.
-    layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
-//  layout(binding = 4, rgba16f) uniform image2D textureGeometryGlobalTangent;
+    Texture2D<float4> textureGeometryGlobalTangent;
+//  Texture2D<float4> textureGeometryGlobalTangent;
 
     struct Node {
 //  struct Node {
-        vec4 aabbMinAndLeftChild;
-//      vec4 aabbMinAndLeftChild;
-        vec4 aabbMaxAndRightChild;
-//      vec4 aabbMaxAndRightChild;
+        float4 aabbMinAndLeftChild;
+//      float4 aabbMinAndLeftChild;
+        float4 aabbMaxAndRightChild;
+//      float4 aabbMaxAndRightChild;
     };
 //  };
 
-    layout(std430, binding = 6) buffer BVHNodes {
-//  layout(std430, binding = 6) buffer BVHNodes {
-        Node nodes[];
-//      Node nodes[];
-    };
-//  };
+    StructuredBuffer<Node> nodes;
+//  StructuredBuffer<Node> nodes;
 
     struct VertexData {
 //  struct VertexData {
-        vec4 positionAndTexcoordU;
-//      vec4 positionAndTexcoordU;
-        vec4 normalAndTexcoordV;
-//      vec4 normalAndTexcoordV;
-        vec4 tangentAndMaterialIndex;
-//      vec4 tangentAndMaterialIndex;
+        float4 positionAndTexcoordU;
+//      float4 positionAndTexcoordU;
+        float4 normalAndTexcoordV;
+//      float4 normalAndTexcoordV;
+        float4 tangentAndMaterialIndex;
+//      float4 tangentAndMaterialIndex;
     };
 //  };
 
-    layout(std430, binding = 7) buffer SceneVertices {
-//  layout(std430, binding = 7) buffer SceneVertices {
-        VertexData vertices[];
-//      VertexData vertices[];
-    };
-//  };
+    StructuredBuffer<VertexData> vertices;
+//  StructuredBuffer<VertexData> vertices;
 
     struct Material {
 //  struct Material {
-        vec4 albedo;
-//      vec4 albedo;
+        float4 albedo;
+//      float4 albedo;
         float roughness;
 //      float roughness;
         float metallic;
@@ -81,49 +84,33 @@
 //      float textureIndexTransmission;
         float padding002;
 //      float padding002;
-        vec2 uvScale;
-//      vec2 uvScale;
-        vec2 padding003;
-//      vec2 padding003;
+        float2 uvScale;
+//      float2 uvScale;
+        float2 padding003;
+//      float2 padding003;
     };
 //  };
 
-    layout(std430, binding = 8) buffer SceneMaterials {
-//  layout(std430, binding = 8) buffer SceneMaterials {
-        Material materials[];
-//      Material materials[];
-    };
-//  };
+    StructuredBuffer<Material> materials;
+//  StructuredBuffer<Material> materials;
 
-    layout(std430, binding = 11) buffer NRCWeights {
-//  layout(std430, binding = 11) buffer NRCWeights {
-        float neuralNetworkWeights[];
-//      float neuralNetworkWeights[];
-    };
-//  };
+    StructuredBuffer<float> neuralNetworkWeights;
+//  StructuredBuffer<float> neuralNetworkWeights;
 
-    layout(std430, binding = 12) buffer NRCTrainingRecords {
-//  layout(std430, binding = 12) buffer NRCTrainingRecords {
-        float nrcTrainingRecords[];
-//      float nrcTrainingRecords[];
-    };
-//  };
+    RWStructuredBuffer<float> nrcTrainingRecords;
+//  RWStructuredBuffer<float> nrcTrainingRecords;
 
-    layout(std430, binding = 13) buffer NRCTrainingCounter {
-//  layout(std430, binding = 13) buffer NRCTrainingCounter {
-        uint uTrainingRecordCount;
-//      uint uTrainingRecordCount;
-    };
-//  };
+    RWStructuredBuffer<Atomic<uint>> trainingRecordCounter;
+//  RWStructuredBuffer<Atomic<uint>> trainingRecordCounter;
 
     struct PointLight {
 //  struct PointLight {
-        vec3 position;
-//      vec3 position;
+        float3 position;
+//      float3 position;
         float radius;
 //      float radius;
-        vec3 color;
-//      vec3 color;
+        float3 color;
+//      float3 color;
         float cdf;
 //      float cdf;
         float pdf;
@@ -139,44 +126,30 @@
 //  uniform PointLight uPointLights[10];
     uniform uint uTrainingStep;
 //  uniform uint uTrainingStep;
-    uniform ivec2 uResolution;
-//  uniform ivec2 uResolution;
+    uniform int2 uResolution;
+//  uniform int2 uResolution;
     // The training target evaluates a view-dependent BSDF, so this pass needs the direction each path
 //  // The training target evaluates a view-dependent BSDF, so this pass needs the direction each path
     // vertex was reached along. For the first vertex, taken from the G-Buffer, that is the camera ray.
 //  // vertex was reached along. For the first vertex, taken from the G-Buffer, that is the camera ray.
-    uniform vec3 uCameraGlobalPosition;
-//  uniform vec3 uCameraGlobalPosition;
-    // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_train_cs.glsl exactly.
-//  // NRC input-domain normalisation; must match hybrid_shading_cs.glsl and nrc_train_cs.glsl exactly.
-    uniform vec3 uNRCPositionOffset;
-//  uniform vec3 uNRCPositionOffset;
+    uniform float3 uCameraGlobalPosition;
+//  uniform float3 uCameraGlobalPosition;
+    // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_train_cs.slang exactly.
+//  // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_train_cs.slang exactly.
+    uniform float3 uNRCPositionOffset;
+//  uniform float3 uNRCPositionOffset;
     uniform float uNRCPositionScale;
 //  uniform float uNRCPositionScale;
 
-    // Environment lighting inputs, required by sky_environment.glsl below. The cache regresses total
-//  // Environment lighting inputs, required by sky_environment.glsl below. The cache regresses total
-    // outgoing radiance, so the training target has to see the same sky hybrid_shading_cs.glsl gathers.
-//  // outgoing radiance, so the training target has to see the same sky hybrid_shading_cs.glsl gathers.
-    uniform sampler2D uHdriTexture;
-//  uniform sampler2D uHdriTexture;
-    uniform bool uUseHdri;
-//  uniform bool uUseHdri;
-    // The baked volumetric cloud layer getSkyColor composites over the procedural sky, so the cache
-//  // The baked volumetric cloud layer getSkyColor composites over the procedural sky, so the cache
-    // trains against the same cloudy sky the shading pass sees on its secondary bounces.
-//  // trains against the same cloudy sky the shading pass sees on its secondary bounces.
-    uniform bool uSkyCloudsEnabled;
-//  uniform bool uSkyCloudsEnabled;
-    uniform sampler2D uSkyCloudTexture;
-//  uniform sampler2D uSkyCloudTexture;
-    // Noise volume sampled by participating_media.glsl for cloud-shaped scene volumes.
-//  // Noise volume sampled by participating_media.glsl for cloud-shaped scene volumes.
-    uniform sampler3D uCloudNoiseTexture;
-//  uniform sampler3D uCloudNoiseTexture;
+    // Environment lighting inputs (HDRI, baked cloud layer) and the cloud noise volume belong to the imported
+//  // Environment lighting inputs (HDRI, baked cloud layer) and the cloud noise volume belong to the imported
+    // sky_environment / volumetric_common modules. The cache regresses total outgoing radiance, so the
+//  // sky_environment / volumetric_common modules. The cache regresses total outgoing radiance, so the
+    // training target has to see the same cloudy sky hybrid_shading_cs.slang gathers on its secondary bounces.
+//  // training target has to see the same cloudy sky hybrid_shading_cs.slang gathers on its secondary bounces.
 
-    // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
-//  // The scene texture array, shared with hybrid_shading_cs.glsl. Without it this pass could only see
+    // The scene texture array, shared with hybrid_shading_cs.slang. Without it this pass could only see
+//  // The scene texture array, shared with hybrid_shading_cs.slang. Without it this pass could only see
     // a material's scalar roughness/metallic/albedo, which on any textured material is a placeholder
 //  // a material's scalar roughness/metallic/albedo, which on any textured material is a placeholder
     // rather than the value the shading pass actually shades with. That mismatch used to be masked by
@@ -187,52 +160,21 @@
 //  // term is (correctly) suppressed there, the network is the sole source of direct light at that
     // vertex and the target has to be built from the same material the renderer will ask about.
 //  // vertex and the target has to be built from the same material the renderer will ask about.
-    uniform sampler2DArray uSceneTextureArray;
-//  uniform sampler2DArray uSceneTextureArray;
+    Sampler2DArray<float4> uSceneTextureArray;
+//  Sampler2DArray<float4> uSceneTextureArray;
 
     // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
 //  // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
-    // workgroup at the top of main() so every cache query reads shared memory instead of the SSBO.
-//  // workgroup at the top of main() so every cache query reads shared memory instead of the SSBO.
-    shared float shared_network_weights[1139];
-//  shared float shared_network_weights[1139];
+    // workgroup at the top of computeMain() so every cache query reads shared memory instead of the SSBO.
+//  // workgroup at the top of computeMain() so every cache query reads shared memory instead of the SSBO.
+    groupshared float shared_network_weights[1139];
+//  groupshared float shared_network_weights[1139];
 
-    const float PI = 3.14159265359;
-//  const float PI = 3.14159265359;
-    const float TWO_PI = 6.28318530718;
-//  const float TWO_PI = 6.28318530718;
-    const float EPSILON_OFFSET = 0.001;
-//  const float EPSILON_OFFSET = 0.001;
-    const float INF = 1e30;
-//  const float INF = 1e30;
-    // Required by principled_bsdf.glsl below; values mirror hybrid_shading_cs.glsl.
-//  // Required by principled_bsdf.glsl below; values mirror hybrid_shading_cs.glsl.
-    const float F0_DEFAULT = 0.04;
-//  const float F0_DEFAULT = 0.04;
-    const float EPSILON_MATH = 0.0001;
-//  const float EPSILON_MATH = 0.0001;
-    const float EPSILON_DOT = 0.001;
-//  const float EPSILON_DOT = 0.001;
-    // Required by sky_environment.glsl below; value mirrors hybrid_shading_cs.glsl.
-//  // Required by sky_environment.glsl below; value mirrors hybrid_shading_cs.glsl.
-    const float HDRI_CLAMP = 20.0;
-//  const float HDRI_CLAMP = 20.0;
-    // Mirrors hybrid_shading_cs.glsl: the same floor scatterPrincipled clamps sampled roughness to.
-//  // Mirrors hybrid_shading_cs.glsl: the same floor scatterPrincipled clamps sampled roughness to.
-    const float MIN_ROUGHNESS = 0.04;
-//  const float MIN_ROUGHNESS = 0.04;
+    static const float EPSILON_OFFSET = 0.001;
+//  static const float EPSILON_OFFSET = 0.001;
 
-    // Shared with hybrid_shading_cs.glsl so the cache is trained against the same BSDF it is later
-    // evaluated with. The directive is deliberately not mirrored into a // comment: the AMD GLSL
-    // preprocessor still acts on #include inside a line comment.
-    #include "principled_bsdf.glsl"
-
-    // Shared with hybrid_shading_cs.glsl so the cache is trained against the same environment
-    // radiance the shading pass gathers. Not mirrored into a // comment, for the same reason as above.
-    #include "sky_environment.glsl"
-
-    uint gRngState;
-//  uint gRngState;
+    static uint gRngState;
+//  static uint gRngState;
 
     uint randUint() {
 //  uint randUint() {
@@ -252,35 +194,40 @@
     }
 //  }
 
-    vec3 randomUnitVector() {
-//  vec3 randomUnitVector() {
+    float3 randomUnitVector() {
+//  float3 randomUnitVector() {
         float cosPolar = randFloat() * 2.0 - 1.0;
 //      float cosPolar = randFloat() * 2.0 - 1.0;
         float azimuthAngle = randFloat() * TWO_PI;
 //      float azimuthAngle = randFloat() * TWO_PI;
         float sinPolar = sqrt(max(0.0, 1.0 - cosPolar * cosPolar));
 //      float sinPolar = sqrt(max(0.0, 1.0 - cosPolar * cosPolar));
-        return vec3(sinPolar * cos(azimuthAngle), sinPolar * sin(azimuthAngle), cosPolar);
-//      return vec3(sinPolar * cos(azimuthAngle), sinPolar * sin(azimuthAngle), cosPolar);
+        return float3(sinPolar * cos(azimuthAngle), sinPolar * sin(azimuthAngle), cosPolar);
+//      return float3(sinPolar * cos(azimuthAngle), sinPolar * sin(azimuthAngle), cosPolar);
     }
 //  }
 
-    // In-scene participating media, included here rather than beside the other includes because its
-//  // In-scene participating media, included here rather than beside the other includes because its
-    // trackers draw from randFloat above. Only the shadow-ray transmittance is used: the training target
-//  // trackers draw from randFloat above. Only the shadow-ray transmittance is used: the training target
-    // then carries media shadows on the direct light, while its bounce rays still cross media unscattered.
-//  // then carries media shadows on the direct light, while its bounce rays still cross media unscattered.
-    #include "volumetric_common.glsl"
+    // This pass's random source for the participating media trackers. Only the shadow-ray transmittance
+//  // This pass's random source for the participating media trackers. Only the shadow-ray transmittance
+    // is used: the training target then carries media shadows on the direct light, while its bounce rays
+//  // is used: the training target then carries media shadows on the direct light, while its bounce rays
+    // still cross media unscattered.
+//  // still cross media unscattered.
+    struct GatherRandom : IMediumRandom {
+//  struct GatherRandom : IMediumRandom {
+        static float next() {
+//      static float next() {
+            return randFloat();
+//          return randFloat();
+        }
+//      }
+    }
+//  }
 
-    #define MEDIA_RAND randFloat
-//  #define MEDIA_RAND randFloat
-    #include "participating_media.glsl"
-
-    float calculateLuminance(vec3 color) {
-//  float calculateLuminance(vec3 color) {
-        return dot(color, vec3(0.2126, 0.7152, 0.0722));
-//      return dot(color, vec3(0.2126, 0.7152, 0.0722));
+    float calculateLuminance(float3 color) {
+//  float calculateLuminance(float3 color) {
+        return dot(color, float3(0.2126, 0.7152, 0.0722));
+//      return dot(color, float3(0.2126, 0.7152, 0.0722));
     }
 //  }
 
@@ -290,30 +237,30 @@
 //  // Multi-Layer Perceptron: 16 inputs -> 16 hidden (x4, ReLU) -> 3 outputs.
     //
 //  //
-    // Reads the weights out of shared_network_weights, which main() fills once per workgroup with the
-//  // Reads the weights out of shared_network_weights, which main() fills once per workgroup with the
+    // Reads the weights out of shared_network_weights, which computeMain() fills once per workgroup with the
+//  // Reads the weights out of shared_network_weights, which computeMain() fills once per workgroup with the
     // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
 //  // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
     // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
 //  // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
-    // inside this deeply inlined function makes the NVIDIA GLSL compiler give up with
-//  // inside this deeply inlined function makes the NVIDIA GLSL compiler give up with
-    // "error C5025: lvalue in array access too complex", failing the whole program link.
-//  // "error C5025: lvalue in array access too complex", failing the whole program link.
+    // inside this deeply inlined function made the NVIDIA GLSL compiler (the original OpenGL backend)
+//  // inside this deeply inlined function made the NVIDIA GLSL compiler (the original OpenGL backend)
+    // give up with "error C5025: lvalue in array access too complex", failing the whole program link.
+//  // give up with "error C5025: lvalue in array access too complex", failing the whole program link.
     //
 //  //
     // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
 //  // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
     // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
 //  // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
-    // trips the same compiler limit. This layout also matches nrc_train_cs.glsl exactly, so inference
-//  // trips the same compiler limit. This layout also matches nrc_train_cs.glsl exactly, so inference
+    // tripped the same compiler limit. This layout also matches nrc_train_cs.slang exactly, so inference
+//  // tripped the same compiler limit. This layout also matches nrc_train_cs.slang exactly, so inference
     // and training cannot drift apart.
 //  // and training cannot drift apart.
-    vec3 evaluateNeuralRadianceCache(vec3 position, vec3 normal) {
-//  vec3 evaluateNeuralRadianceCache(vec3 position, vec3 normal) {
-        vec3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
-//      vec3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
+    float3 evaluateNeuralRadianceCache(float3 position, float3 normal) {
+//  float3 evaluateNeuralRadianceCache(float3 position, float3 normal) {
+        float3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
+//      float3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
 
         // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
 //      // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
@@ -356,12 +303,16 @@
 //      // Hidden Layer 1 (weights offset 0, bias offset 256)
         float hiddenLayer1[16];
 //      float hiddenLayer1[16];
+        [ForceUnroll]
+//      [ForceUnroll]
         for (uint i = 0u; i < 16u; i++) {
 //      for (uint i = 0u; i < 16u; i++) {
             float activationSum = shared_network_weights[256u + i];
 //          float activationSum = shared_network_weights[256u + i];
             uint weightOffset = i * 16u;
 //          uint weightOffset = i * 16u;
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint j = 0u; j < 16u; j++) {
 //          for (uint j = 0u; j < 16u; j++) {
                 activationSum += inputFeatures[j] * shared_network_weights[weightOffset + j];
@@ -377,12 +328,16 @@
 //      // Hidden Layer 2 (weights offset 272, bias offset 528)
         float hiddenLayer2[16];
 //      float hiddenLayer2[16];
+        [ForceUnroll]
+//      [ForceUnroll]
         for (uint i = 0u; i < 16u; i++) {
 //      for (uint i = 0u; i < 16u; i++) {
             float activationSum = shared_network_weights[528u + i];
 //          float activationSum = shared_network_weights[528u + i];
             uint weightOffset = 272u + i * 16u;
 //          uint weightOffset = 272u + i * 16u;
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint j = 0u; j < 16u; j++) {
 //          for (uint j = 0u; j < 16u; j++) {
                 activationSum += hiddenLayer1[j] * shared_network_weights[weightOffset + j];
@@ -398,12 +353,16 @@
 //      // Hidden Layer 3 (weights offset 544, bias offset 800)
         float hiddenLayer3[16];
 //      float hiddenLayer3[16];
+        [ForceUnroll]
+//      [ForceUnroll]
         for (uint i = 0u; i < 16u; i++) {
 //      for (uint i = 0u; i < 16u; i++) {
             float activationSum = shared_network_weights[800u + i];
 //          float activationSum = shared_network_weights[800u + i];
             uint weightOffset = 544u + i * 16u;
 //          uint weightOffset = 544u + i * 16u;
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint j = 0u; j < 16u; j++) {
 //          for (uint j = 0u; j < 16u; j++) {
                 activationSum += hiddenLayer2[j] * shared_network_weights[weightOffset + j];
@@ -419,12 +378,16 @@
 //      // Hidden Layer 4 (weights offset 816, bias offset 1072)
         float hiddenLayer4[16];
 //      float hiddenLayer4[16];
+        [ForceUnroll]
+//      [ForceUnroll]
         for (uint i = 0u; i < 16u; i++) {
 //      for (uint i = 0u; i < 16u; i++) {
             float activationSum = shared_network_weights[1072u + i];
 //          float activationSum = shared_network_weights[1072u + i];
             uint weightOffset = 816u + i * 16u;
 //          uint weightOffset = 816u + i * 16u;
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint j = 0u; j < 16u; j++) {
 //          for (uint j = 0u; j < 16u; j++) {
                 activationSum += hiddenLayer3[j] * shared_network_weights[weightOffset + j];
@@ -438,14 +401,18 @@
 
         // Output Layer (weights offset 1088, bias offset 1136)
 //      // Output Layer (weights offset 1088, bias offset 1136)
-        vec3 outputRadiance = vec3(0.0);
-//      vec3 outputRadiance = vec3(0.0);
+        float3 outputRadiance = float3(0.0);
+//      float3 outputRadiance = float3(0.0);
+        [ForceUnroll]
+//      [ForceUnroll]
         for (uint i = 0u; i < 3u; i++) {
 //      for (uint i = 0u; i < 3u; i++) {
             float activationSum = shared_network_weights[1136u + i];
 //          float activationSum = shared_network_weights[1136u + i];
             uint weightOffset = 1088u + i * 16u;
 //          uint weightOffset = 1088u + i * 16u;
+            [ForceUnroll]
+//          [ForceUnroll]
             for (uint j = 0u; j < 16u; j++) {
 //          for (uint j = 0u; j < 16u; j++) {
                 activationSum += hiddenLayer4[j] * shared_network_weights[weightOffset + j];
@@ -459,21 +426,21 @@
 
         // Clamp to prevent explosive feedback during early training
 //      // Clamp to prevent explosive feedback during early training
-        return clamp(outputRadiance, vec3(0.0), vec3(15.0));
-//      return clamp(outputRadiance, vec3(0.0), vec3(15.0));
+        return clamp(outputRadiance, float3(0.0), float3(15.0));
+//      return clamp(outputRadiance, float3(0.0), float3(15.0));
     }
 //  }
 
-    bool intersectAABB(vec3 rayOrigin, vec3 rayInverseDirection, vec3 aabbMin, vec3 aabbMax, float maxDistance) {
-//  bool intersectAABB(vec3 rayOrigin, vec3 rayInverseDirection, vec3 aabbMin, vec3 aabbMax, float maxDistance) {
-        vec3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
-//      vec3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
-        vec3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
-//      vec3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
-        vec3 tmin = min(t0, t1);
-//      vec3 tmin = min(t0, t1);
-        vec3 tmax = max(t0, t1);
-//      vec3 tmax = max(t0, t1);
+    bool intersectAABB(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
+//  bool intersectAABB(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
+        float3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
+//      float3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
+        float3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
+//      float3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
+        float3 tmin = min(t0, t1);
+//      float3 tmin = min(t0, t1);
+        float3 tmax = max(t0, t1);
+//      float3 tmax = max(t0, t1);
         float enterDistance = max(max(tmin.x, tmin.y), max(tmin.z, 0.001));
 //      float enterDistance = max(max(tmin.x, tmin.y), max(tmin.z, 0.001));
         float exitDistance = min(min(tmax.x, tmax.y), min(tmax.z, maxDistance));
@@ -483,16 +450,16 @@
     }
 //  }
 
-    bool traverseShadowRay(vec3 origin, vec3 direction, float maxDistance) {
-//  bool traverseShadowRay(vec3 origin, vec3 direction, float maxDistance) {
-        vec3 directionSign = sign(direction);
-//      vec3 directionSign = sign(direction);
+    bool traverseShadowRay(float3 origin, float3 direction, float maxDistance) {
+//  bool traverseShadowRay(float3 origin, float3 direction, float maxDistance) {
+        float3 directionSign = sign(direction);
+//      float3 directionSign = sign(direction);
         directionSign += 1.0 - abs(directionSign);
 //      directionSign += 1.0 - abs(directionSign);
-        vec3 safeDirection = direction + step(abs(direction), vec3(1e-8)) * directionSign * 1e-8;
-//      vec3 safeDirection = direction + step(abs(direction), vec3(1e-8)) * directionSign * 1e-8;
-        vec3 invDir = 1.0 / safeDirection;
-//      vec3 invDir = 1.0 / safeDirection;
+        float3 safeDirection = direction + step(abs(direction), float3(1e-8)) * directionSign * 1e-8;
+//      float3 safeDirection = direction + step(abs(direction), float3(1e-8)) * directionSign * 1e-8;
+        float3 invDir = 1.0 / safeDirection;
+//      float3 invDir = 1.0 / safeDirection;
         int stack[64];
 //      int stack[64];
         int stackPointer = 0;
@@ -518,19 +485,19 @@
 //          if (node.aabbMinAndLeftChild.w < 0.0) {
                 int triangleIndex = int(node.aabbMaxAndRightChild.w);
 //              int triangleIndex = int(node.aabbMaxAndRightChild.w);
-                vec3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
-//              vec3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
-                vec3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
-//              vec3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
-                vec3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
-//              vec3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
+                float3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
+//              float3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
+                float3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
+//              float3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
+                float3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
+//              float3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
 
-                vec3 edge1 = v1 - v0;
-//              vec3 edge1 = v1 - v0;
-                vec3 edge2 = v2 - v0;
-//              vec3 edge2 = v2 - v0;
-                vec3 rayCrossEdge2 = cross(direction, edge2);
-//              vec3 rayCrossEdge2 = cross(direction, edge2);
+                float3 edge1 = v1 - v0;
+//              float3 edge1 = v1 - v0;
+                float3 edge2 = v2 - v0;
+//              float3 edge2 = v2 - v0;
+                float3 rayCrossEdge2 = cross(direction, edge2);
+//              float3 rayCrossEdge2 = cross(direction, edge2);
                 float determinant = dot(edge1, rayCrossEdge2);
 //              float determinant = dot(edge1, rayCrossEdge2);
 
@@ -538,14 +505,14 @@
 //              if (abs(determinant) > 1.0e-7) {
                     float inverseDeterminant = 1.0 / determinant;
 //                  float inverseDeterminant = 1.0 / determinant;
-                    vec3 originToVertex0 = origin - v0;
-//                  vec3 originToVertex0 = origin - v0;
+                    float3 originToVertex0 = origin - v0;
+//                  float3 originToVertex0 = origin - v0;
                     float u = dot(originToVertex0, rayCrossEdge2) * inverseDeterminant;
 //                  float u = dot(originToVertex0, rayCrossEdge2) * inverseDeterminant;
                     if (u >= 0.0 && u <= 1.0) {
 //                  if (u >= 0.0 && u <= 1.0) {
-                        vec3 originCrossEdge1 = cross(originToVertex0, edge1);
-//                      vec3 originCrossEdge1 = cross(originToVertex0, edge1);
+                        float3 originCrossEdge1 = cross(originToVertex0, edge1);
+//                      float3 originCrossEdge1 = cross(originToVertex0, edge1);
                         float v = dot(direction, originCrossEdge1) * inverseDeterminant;
 //                      float v = dot(direction, originCrossEdge1) * inverseDeterminant;
                         if (v >= 0.0 && (u + v) <= 1.0) {
@@ -589,16 +556,16 @@
     }
 //  }
 
-    bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex, out vec2 outTexcoord, out float outDistance) {
-//  bool traverseClosestHit(vec3 origin, vec3 direction, float maxDistance, out vec3 outHitPoint, out vec3 outNormal, out int outTriangleIndex, out vec2 outTexcoord, out float outDistance) {
-        vec3 directionSign = sign(direction);
-//      vec3 directionSign = sign(direction);
+    bool traverseClosestHit(float3 origin, float3 direction, float maxDistance, out float3 outHitPoint, out float3 outNormal, out int outTriangleIndex, out float2 outTexcoord, out float outDistance) {
+//  bool traverseClosestHit(float3 origin, float3 direction, float maxDistance, out float3 outHitPoint, out float3 outNormal, out int outTriangleIndex, out float2 outTexcoord, out float outDistance) {
+        float3 directionSign = sign(direction);
+//      float3 directionSign = sign(direction);
         directionSign += 1.0 - abs(directionSign);
 //      directionSign += 1.0 - abs(directionSign);
-        vec3 safeDirection = direction + step(abs(direction), vec3(1e-8)) * directionSign * 1e-8;
-//      vec3 safeDirection = direction + step(abs(direction), vec3(1e-8)) * directionSign * 1e-8;
-        vec3 invDir = 1.0 / safeDirection;
-//      vec3 invDir = 1.0 / safeDirection;
+        float3 safeDirection = direction + step(abs(direction), float3(1e-8)) * directionSign * 1e-8;
+//      float3 safeDirection = direction + step(abs(direction), float3(1e-8)) * directionSign * 1e-8;
+        float3 invDir = 1.0 / safeDirection;
+//      float3 invDir = 1.0 / safeDirection;
         int stack[64];
 //      int stack[64];
         int stackPointer = 0;
@@ -614,8 +581,8 @@
 //      float bestU = 0.0;
         float bestV = 0.0;
 //      float bestV = 0.0;
-        vec3 bestNormal = vec3(0.0);
-//      vec3 bestNormal = vec3(0.0);
+        float3 bestNormal = float3(0.0);
+//      float3 bestNormal = float3(0.0);
 
         while (stackPointer > 0) {
 //      while (stackPointer > 0) {
@@ -635,19 +602,19 @@
 //          if (node.aabbMinAndLeftChild.w < 0.0) {
                 int triangleIndex = int(node.aabbMaxAndRightChild.w);
 //              int triangleIndex = int(node.aabbMaxAndRightChild.w);
-                vec3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
-//              vec3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
-                vec3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
-//              vec3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
-                vec3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
-//              vec3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
+                float3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
+//              float3 v0 = vertices[triangleIndex * 3 + 0].positionAndTexcoordU.xyz;
+                float3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
+//              float3 v1 = vertices[triangleIndex * 3 + 1].positionAndTexcoordU.xyz;
+                float3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
+//              float3 v2 = vertices[triangleIndex * 3 + 2].positionAndTexcoordU.xyz;
 
-                vec3 edge1 = v1 - v0;
-//              vec3 edge1 = v1 - v0;
-                vec3 edge2 = v2 - v0;
-//              vec3 edge2 = v2 - v0;
-                vec3 rayCrossEdge2 = cross(direction, edge2);
-//              vec3 rayCrossEdge2 = cross(direction, edge2);
+                float3 edge1 = v1 - v0;
+//              float3 edge1 = v1 - v0;
+                float3 edge2 = v2 - v0;
+//              float3 edge2 = v2 - v0;
+                float3 rayCrossEdge2 = cross(direction, edge2);
+//              float3 rayCrossEdge2 = cross(direction, edge2);
                 float determinant = dot(edge1, rayCrossEdge2);
 //              float determinant = dot(edge1, rayCrossEdge2);
 
@@ -655,14 +622,14 @@
 //              if (abs(determinant) > 1.0e-7) {
                     float inverseDeterminant = 1.0 / determinant;
 //                  float inverseDeterminant = 1.0 / determinant;
-                    vec3 originToVertex0 = origin - v0;
-//                  vec3 originToVertex0 = origin - v0;
+                    float3 originToVertex0 = origin - v0;
+//                  float3 originToVertex0 = origin - v0;
                     float u = dot(originToVertex0, rayCrossEdge2) * inverseDeterminant;
 //                  float u = dot(originToVertex0, rayCrossEdge2) * inverseDeterminant;
                     if (u >= 0.0 && u <= 1.0) {
 //                  if (u >= 0.0 && u <= 1.0) {
-                        vec3 originCrossEdge1 = cross(originToVertex0, edge1);
-//                      vec3 originCrossEdge1 = cross(originToVertex0, edge1);
+                        float3 originCrossEdge1 = cross(originToVertex0, edge1);
+//                      float3 originCrossEdge1 = cross(originToVertex0, edge1);
                         float v = dot(direction, originCrossEdge1) * inverseDeterminant;
 //                      float v = dot(direction, originCrossEdge1) * inverseDeterminant;
                         if (v >= 0.0 && (u + v) <= 1.0) {
@@ -679,8 +646,8 @@
 //                              bestU = u;
                                 bestV = v;
 //                              bestV = v;
-                                vec3 geomNorm = normalize(cross(edge1, edge2));
-//                              vec3 geomNorm = normalize(cross(edge1, edge2));
+                                float3 geomNorm = normalize(cross(edge1, edge2));
+//                              float3 geomNorm = normalize(cross(edge1, edge2));
                                 bestNormal = (dot(geomNorm, -direction) > 0.0) ? geomNorm : -geomNorm;
 //                              bestNormal = (dot(geomNorm, -direction) > 0.0) ? geomNorm : -geomNorm;
                             }
@@ -708,8 +675,8 @@
 
         outTriangleIndex = hitTriangle;
 //      outTriangleIndex = hitTriangle;
-        outTexcoord = vec2(0.0);
-//      outTexcoord = vec2(0.0);
+        outTexcoord = float2(0.0);
+//      outTexcoord = float2(0.0);
         outDistance = closestDist;
 //      outDistance = closestDist;
 
@@ -717,30 +684,30 @@
 //      if (hitTriangle != -1) {
             outHitPoint = origin + direction * closestDist;
 //          outHitPoint = origin + direction * closestDist;
-            vec3 n0 = vertices[hitTriangle * 3 + 0].normalAndTexcoordV.xyz;
-//          vec3 n0 = vertices[hitTriangle * 3 + 0].normalAndTexcoordV.xyz;
-            vec3 n1 = vertices[hitTriangle * 3 + 1].normalAndTexcoordV.xyz;
-//          vec3 n1 = vertices[hitTriangle * 3 + 1].normalAndTexcoordV.xyz;
-            vec3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
-//          vec3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
+            float3 n0 = vertices[hitTriangle * 3 + 0].normalAndTexcoordV.xyz;
+//          float3 n0 = vertices[hitTriangle * 3 + 0].normalAndTexcoordV.xyz;
+            float3 n1 = vertices[hitTriangle * 3 + 1].normalAndTexcoordV.xyz;
+//          float3 n1 = vertices[hitTriangle * 3 + 1].normalAndTexcoordV.xyz;
+            float3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
+//          float3 n2 = vertices[hitTriangle * 3 + 2].normalAndTexcoordV.xyz;
             // Texcoords ride in the w channels of the two position/normal vec4s, barycentric
 //          // Texcoords ride in the w channels of the two position/normal vec4s, barycentric
             // interpolated with the same weights as the shading normal above.
 //          // interpolated with the same weights as the shading normal above.
-            vec2 t0 = vec2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
-//          vec2 t0 = vec2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
-            vec2 t1 = vec2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
-//          vec2 t1 = vec2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
-            vec2 t2 = vec2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
-//          vec2 t2 = vec2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
+            float2 t0 = float2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
+//          float2 t0 = float2(vertices[hitTriangle * 3 + 0].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 0].normalAndTexcoordV.w);
+            float2 t1 = float2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
+//          float2 t1 = float2(vertices[hitTriangle * 3 + 1].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 1].normalAndTexcoordV.w);
+            float2 t2 = float2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
+//          float2 t2 = float2(vertices[hitTriangle * 3 + 2].positionAndTexcoordU.w, vertices[hitTriangle * 3 + 2].normalAndTexcoordV.w);
             outTexcoord = (1.0 - bestU - bestV) * t0 + bestU * t1 + bestV * t2;
 //          outTexcoord = (1.0 - bestU - bestV) * t0 + bestU * t1 + bestV * t2;
-            vec3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
-//          vec3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
+            float3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
+//          float3 interpolatedNormal = (1.0 - bestU - bestV) * n0 + bestU * n1 + bestV * n2;
             if (dot(interpolatedNormal, interpolatedNormal) > 1.0e-6) {
 //          if (dot(interpolatedNormal, interpolatedNormal) > 1.0e-6) {
-                vec3 smoothNormal = normalize(interpolatedNormal);
-//              vec3 smoothNormal = normalize(interpolatedNormal);
+                float3 smoothNormal = normalize(interpolatedNormal);
+//              float3 smoothNormal = normalize(interpolatedNormal);
                 outNormal = (dot(smoothNormal, -direction) > 0.0) ? smoothNormal : -smoothNormal;
 //              outNormal = (dot(smoothNormal, -direction) > 0.0) ? smoothNormal : -smoothNormal;
             } else {
@@ -760,22 +727,22 @@
 
     // Single-light direct illumination estimate at a surface point, using the same principled BSDF the
 //  // Single-light direct illumination estimate at a surface point, using the same principled BSDF the
-    // shading pass evaluates the cache with (principled_bsdf.glsl). A Lambert-only lobe here would train
-//  // shading pass evaluates the cache with (principled_bsdf.glsl). A Lambert-only lobe here would train
+    // shading pass evaluates the cache with (principled_bsdf.slang). A Lambert-only lobe here would train
+//  // shading pass evaluates the cache with (principled_bsdf.slang). A Lambert-only lobe here would train
     // the network on a target the renderer never asks for on anything glossy.
 //  // the network on a target the renderer never asks for on anything glossy.
     //
 //  //
-    // The light is sampled analytically rather than stochastically: hybrid_shading_cs.glsl samples the
-//  // The light is sampled analytically rather than stochastically: hybrid_shading_cs.glsl samples the
+    // The light is sampled analytically rather than stochastically: hybrid_shading_cs.slang samples the
+//  // The light is sampled analytically rather than stochastically: hybrid_shading_cs.slang samples the
     // facing hemisphere (area 2*PI*r*r) and weights by cos at the light, whose expectation over that
 //  // facing hemisphere (area 2*PI*r*r) and weights by cos at the light, whose expectation over that
     // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
 //  // hemisphere is 1/2, so the projected area PI*r*r used here is the same estimator with less variance.
     // Texture-resolved surface parameters at a hit, mirroring scatterPrincipled in
 //  // Texture-resolved surface parameters at a hit, mirroring scatterPrincipled in
-    // hybrid_shading_cs.glsl term for term: same packed-ORM channel assignment, same sRGB decode on
-//  // hybrid_shading_cs.glsl term for term: same packed-ORM channel assignment, same sRGB decode on
+    // hybrid_shading_cs.slang term for term: same packed-ORM channel assignment, same sRGB decode on
+//  // hybrid_shading_cs.slang term for term: same packed-ORM channel assignment, same sRGB decode on
     // albedo and emissive, same distance-derived LOD, same MIN_ROUGHNESS floor. The two have to agree,
 //  // albedo and emissive, same distance-derived LOD, same MIN_ROUGHNESS floor. The two have to agree,
     // because the network is trained here and evaluated there; a divergence would make it regress a
@@ -788,12 +755,12 @@
 //  // The only term deliberately not mirrored is the roughness anneal: pathRoughnessFloor is a
     // property of the camera path being traced, and this pass traces its own short paths.
 //  // property of the camera path being traced, and this pass traces its own short paths.
-    void resolveSurfaceMaterial(Material material, vec2 texcoord, float hitDistance,
-//  void resolveSurfaceMaterial(Material material, vec2 texcoord, float hitDistance,
-                                out vec3 outAlbedo, out float outRoughness, out float outMetallic,
-//                              out vec3 outAlbedo, out float outRoughness, out float outMetallic,
-                                out float outTransmission, out vec3 outEmission) {
-//                              out float outTransmission, out vec3 outEmission) {
+    void resolveSurfaceMaterial(Material material, float2 texcoord, float hitDistance,
+//  void resolveSurfaceMaterial(Material material, float2 texcoord, float hitDistance,
+                                out float3 outAlbedo, out float outRoughness, out float outMetallic,
+//                              out float3 outAlbedo, out float outRoughness, out float outMetallic,
+                                out float outTransmission, out float3 outEmission) {
+//                              out float outTransmission, out float3 outEmission) {
         outAlbedo = material.albedo.rgb;
 //      outAlbedo = material.albedo.rgb;
         outRoughness = material.roughness;
@@ -805,31 +772,31 @@
 
         float textureLodLevel = max(0.0, log2(hitDistance * 0.1));
 //      float textureLodLevel = max(0.0, log2(hitDistance * 0.1));
-        vec2 scaledTexcoord = texcoord * material.uvScale;
-//      vec2 scaledTexcoord = texcoord * material.uvScale;
+        float2 scaledTexcoord = texcoord * material.uvScale;
+//      float2 scaledTexcoord = texcoord * material.uvScale;
 
         if (material.textureIndexAlbedo > -0.5) {
 //      if (material.textureIndexAlbedo > -0.5) {
-            outAlbedo *= pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, vec3(2.2));
-//          outAlbedo *= pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, vec3(2.2));
+            outAlbedo *= pow(uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, float3(2.2));
+//          outAlbedo *= pow(uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexAlbedo), textureLodLevel).rgb, float3(2.2));
         }
 //      }
         if (material.textureIndexRoughness > -0.5) {
 //      if (material.textureIndexRoughness > -0.5) {
-            outRoughness = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
-//          outRoughness = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
+            outRoughness = uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
+//          outRoughness = uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexRoughness), textureLodLevel).r;
         }
 //      }
         if (material.textureIndexMetallic > -0.5) {
 //      if (material.textureIndexMetallic > -0.5) {
-            outMetallic = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
-//          outMetallic = textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
+            outMetallic = uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
+//          outMetallic = uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexMetallic), textureLodLevel).g;
         }
 //      }
         if (material.textureIndexTransmission > -0.5) {
 //      if (material.textureIndexTransmission > -0.5) {
-            outTransmission *= textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
-//          outTransmission *= textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
+            outTransmission *= uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
+//          outTransmission *= uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexTransmission), textureLodLevel).b;
         }
 //      }
         outRoughness = max(outRoughness, MIN_ROUGHNESS);
@@ -837,8 +804,8 @@
 
         if (material.textureIndexEmissive > -0.5) {
 //      if (material.textureIndexEmissive > -0.5) {
-            outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, vec3(2.2));
-//          outEmission = material.emissive * pow(textureLod(uSceneTextureArray, vec3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, vec3(2.2));
+            outEmission = material.emissive * pow(uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, float3(2.2));
+//          outEmission = material.emissive * pow(uSceneTextureArray.SampleLevel(float3(scaledTexcoord, material.textureIndexEmissive), textureLodLevel).rgb, float3(2.2));
         } else {
 //      } else {
             outEmission = material.emissive * outAlbedo;
@@ -848,12 +815,12 @@
     }
 //  }
 
-    vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-//  vec3 estimateDirectLighting(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-                                vec3 albedo, float roughness, float metallic, float transmission) {
-//                              vec3 albedo, float roughness, float metallic, float transmission) {
-        if (uPointLightCount <= 0) return vec3(0.0);
-//      if (uPointLightCount <= 0) return vec3(0.0);
+    float3 estimateDirectLighting(float3 surfacePoint, float3 surfaceNormal, float3 incomingDirection,
+//  float3 estimateDirectLighting(float3 surfacePoint, float3 surfaceNormal, float3 incomingDirection,
+                                float3 albedo, float roughness, float metallic, float transmission) {
+//                              float3 albedo, float roughness, float metallic, float transmission) {
+        if (uPointLightCount <= 0) return float3(0.0);
+//      if (uPointLightCount <= 0) return float3(0.0);
 
         float lightRand = randFloat();
 //      float lightRand = randFloat();
@@ -872,23 +839,23 @@
         }
 //      }
 
-        vec3 lightPos = uPointLights[lightIndex].position;
-//      vec3 lightPos = uPointLights[lightIndex].position;
+        float3 lightPos = uPointLights[lightIndex].position;
+//      float3 lightPos = uPointLights[lightIndex].position;
         float lightRadius = uPointLights[lightIndex].radius;
 //      float lightRadius = uPointLights[lightIndex].radius;
-        vec3 toLight = lightPos - surfacePoint;
-//      vec3 toLight = lightPos - surfacePoint;
+        float3 toLight = lightPos - surfacePoint;
+//      float3 toLight = lightPos - surfacePoint;
         float distToLight = length(toLight);
 //      float distToLight = length(toLight);
-        vec3 lightDir = toLight / max(distToLight, 1.0e-4);
-//      vec3 lightDir = toLight / max(distToLight, 1.0e-4);
+        float3 lightDir = toLight / max(distToLight, 1.0e-4);
+//      float3 lightDir = toLight / max(distToLight, 1.0e-4);
 
         float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
 //      float cosTheta = max(0.0, dot(surfaceNormal, lightDir));
-        if (cosTheta <= 0.0) return vec3(0.0);
-//      if (cosTheta <= 0.0) return vec3(0.0);
-        if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return vec3(0.0);
-//      if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return vec3(0.0);
+        if (cosTheta <= 0.0) return float3(0.0);
+//      if (cosTheta <= 0.0) return float3(0.0);
+        if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return float3(0.0);
+//      if (traverseShadowRay(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight)) return float3(0.0);
 
         float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
 //      float lightPdf = max(uPointLights[lightIndex].pdf, 1.0e-4);
@@ -901,12 +868,12 @@
 
         float unusedPdf;
 //      float unusedPdf;
-        vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
-//      vec3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
+        float3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
+//      float3 bsdfValue = evalPrincipledBSDFAndPDF(incomingDirection, lightDir, surfaceNormal,
                                                   albedo, roughness, metallic, transmission, unusedPdf);
 //                                                albedo, roughness, metallic, transmission, unusedPdf);
-        float shadowTransmittance = estimateMediumTransmittance(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
-//      float shadowTransmittance = estimateMediumTransmittance(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
+        float shadowTransmittance = estimateMediumTransmittance<GatherRandom>(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
+//      float shadowTransmittance = estimateMediumTransmittance<GatherRandom>(surfacePoint + surfaceNormal * EPSILON_OFFSET, lightDir, distToLight);
         return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf * shadowTransmittance;
 //      return bsdfValue * uPointLights[lightIndex].color * lightProjectedArea * (cosTheta / distSq) / lightPdf * shadowTransmittance;
     }
@@ -938,42 +905,42 @@
 //  // A bounce that escapes the geometry ends on the environment, which is a genuine light source in
     // an open scene, so its radiance is added rather than dropped. Omitting it trains the network to
 //  // an open scene, so its radiance is added rather than dropped. Omitting it trains the network to
-    // ignore sky lighting, and every path hybrid_shading_cs.glsl terminates on the cache then loses
-//  // ignore sky lighting, and every path hybrid_shading_cs.glsl terminates on the cache then loses
+    // ignore sky lighting, and every path hybrid_shading_cs.slang terminates on the cache then loses
+//  // ignore sky lighting, and every path hybrid_shading_cs.slang terminates on the cache then loses
     // that contribution -- a bias that grows with how much of the scene sees the sky.
 //  // that contribution -- a bias that grows with how much of the scene sees the sky.
-    vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-//  vec3 computeTrainingTarget(vec3 surfacePoint, vec3 surfaceNormal, vec3 incomingDirection,
-                               vec3 albedo, float roughness, float metallic, float transmission) {
-//                             vec3 albedo, float roughness, float metallic, float transmission) {
-        vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
-//      vec3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
+    float3 computeTrainingTarget(float3 surfacePoint, float3 surfaceNormal, float3 incomingDirection,
+//  float3 computeTrainingTarget(float3 surfacePoint, float3 surfaceNormal, float3 incomingDirection,
+                               float3 albedo, float roughness, float metallic, float transmission) {
+//                             float3 albedo, float roughness, float metallic, float transmission) {
+        float3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
+//      float3 targetRadiance = estimateDirectLighting(surfacePoint, surfaceNormal, incomingDirection,
                                                      albedo, roughness, metallic, transmission);
 //                                                   albedo, roughness, metallic, transmission);
 
         // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
 //      // With a cosine-weighted pdf the (albedo / PI) * cos / pdf factor collapses to a bare albedo.
-        vec3 throughput = albedo;
-//      vec3 throughput = albedo;
-        vec3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
-//      vec3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
-        vec3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
-//      vec3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
-        vec3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
-//      vec3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
+        float3 throughput = albedo;
+//      float3 throughput = albedo;
+        float3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
+//      float3 rayOrigin = surfacePoint + surfaceNormal * EPSILON_OFFSET;
+        float3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
+//      float3 bounceDirUnnormalized = surfaceNormal + randomUnitVector();
+        float3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
+//      float3 rayDirection = (dot(bounceDirUnnormalized, bounceDirUnnormalized) > 1.0e-6)
                           ? normalize(bounceDirUnnormalized) : surfaceNormal;
 //                        ? normalize(bounceDirUnnormalized) : surfaceNormal;
 
         for (uint bounce = 0u; bounce < 3u; bounce++) {
 //      for (uint bounce = 0u; bounce < 3u; bounce++) {
-            vec3 nextHitPoint;
-//          vec3 nextHitPoint;
-            vec3 nextHitNormal;
-//          vec3 nextHitNormal;
+            float3 nextHitPoint;
+//          float3 nextHitPoint;
+            float3 nextHitNormal;
+//          float3 nextHitNormal;
             int nextTriangleIndex;
 //          int nextTriangleIndex;
-            vec2 nextTexcoord;
-//          vec2 nextTexcoord;
+            float2 nextTexcoord;
+//          float2 nextTexcoord;
             float nextDistance;
 //          float nextDistance;
             if (!traverseClosestHit(rayOrigin, rayDirection, INF, nextHitPoint, nextHitNormal, nextTriangleIndex, nextTexcoord, nextDistance)) {
@@ -1000,8 +967,8 @@
 //          // Emissive geometry is a light source for this target, not something to skip. The reasoning
             // that emitters are "seen directly by the path tracer" only holds for emitters the camera
 //          // that emitters are "seen directly by the path tracer" only holds for emitters the camera
-            // can reach: hybrid_shading_cs.glsl terminates a path at the vertex it reads the cache on,
-//          // can reach: hybrid_shading_cs.glsl terminates a path at the vertex it reads the cache on,
+            // can reach: hybrid_shading_cs.slang terminates a path at the vertex it reads the cache on,
+//          // can reach: hybrid_shading_cs.slang terminates a path at the vertex it reads the cache on,
             // so nothing downstream ever reaches an emitter beyond it. Dropping the emission here
 //          // so nothing downstream ever reaches an emitter beyond it. Dropping the emission here
             // deletes it from the render's indirect lighting outright, and estimateDirectLighting above
@@ -1016,16 +983,16 @@
 //          // The colour is whatever scatterPrincipled would have emitted at this vertex, mapped
             // emitters included -- resolveSurfaceMaterial reproduces both of its branches.
 //          // emitters included -- resolveSurfaceMaterial reproduces both of its branches.
-            vec3 hitAlbedo;
-//          vec3 hitAlbedo;
+            float3 hitAlbedo;
+//          float3 hitAlbedo;
             float hitRoughness;
 //          float hitRoughness;
             float hitMetallic;
 //          float hitMetallic;
             float hitTransmission;
 //          float hitTransmission;
-            vec3 hitEmission;
-//          vec3 hitEmission;
+            float3 hitEmission;
+//          float3 hitEmission;
             resolveSurfaceMaterial(hitMaterial, nextTexcoord, nextDistance,
 //          resolveSurfaceMaterial(hitMaterial, nextTexcoord, nextDistance,
                                    hitAlbedo, hitRoughness, hitMetallic, hitTransmission, hitEmission);
@@ -1046,8 +1013,8 @@
 //          if (isCacheableVertex) {
                 // The cache already represents the full outgoing radiance at a vertex (its own target
 //              // The cache already represents the full outgoing radiance at a vertex (its own target
-                // is direct + indirect), which is exactly why hybrid_shading_cs.glsl skips next event
-//              // is direct + indirect), which is exactly why hybrid_shading_cs.glsl skips next event
+                // is direct + indirect), which is exactly why hybrid_shading_cs.slang skips next event
+//              // is direct + indirect), which is exactly why hybrid_shading_cs.slang skips next event
                 // estimation on the vertex it terminates a path at. So the bootstrap adds the cache
 //              // estimation on the vertex it terminates a path at. So the bootstrap adds the cache
                 // lookup alone: adding an explicit direct-lighting estimate here as well would count
@@ -1075,8 +1042,8 @@
 //          throughput *= hitAlbedo;
             rayOrigin = nextHitPoint + nextHitNormal * EPSILON_OFFSET;
 //          rayOrigin = nextHitPoint + nextHitNormal * EPSILON_OFFSET;
-            vec3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
-//          vec3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
+            float3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
+//          float3 continueDirUnnormalized = nextHitNormal + randomUnitVector();
             rayDirection = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6)
 //          rayDirection = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6)
                          ? normalize(continueDirUnnormalized) : nextHitNormal;
@@ -1095,36 +1062,40 @@
         }
 //      }
 
-        return min(targetRadiance, vec3(15.0));
-//      return min(targetRadiance, vec3(15.0));
+        return min(targetRadiance, float3(15.0));
+//      return min(targetRadiance, float3(15.0));
     }
 //  }
 
 
-    void main() {
-//  void main() {
+    [shader("compute")]
+//  [shader("compute")]
+    [numthreads(64, 1, 1)]
+//  [numthreads(64, 1, 1)]
+    void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
+//  void computeMain(uint3 globalInvocationID : SV_DispatchThreadID, uint localInvocationIndex : SV_GroupIndex) {
         // Stage the NRC EMA weights in shared memory before any early return, so that every
 //      // Stage the NRC EMA weights in shared memory before any early return, so that every
         // invocation in the workgroup reaches barrier().
 //      // invocation in the workgroup reaches barrier().
-        for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
-//      for (uint weightIndex = gl_LocalInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
+        for (uint weightIndex = localInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
+//      for (uint weightIndex = localInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
             shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
 //          shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
         }
 //      }
-        barrier();
-//      barrier();
+        GroupMemoryBarrierWithGroupSync();
+//      GroupMemoryBarrierWithGroupSync();
 
-        gRngState = gl_GlobalInvocationID.x + uTrainingStep * 1000000u + 1337u;
-//      gRngState = gl_GlobalInvocationID.x + uTrainingStep * 1000000u + 1337u;
+        gRngState = globalInvocationID.x + uTrainingStep * 1000000u + 1337u;
+//      gRngState = globalInvocationID.x + uTrainingStep * 1000000u + 1337u;
         randUint();
 //      randUint();
 
         // Start from a random primary-visible surface taken out of the G-Buffer.
 //      // Start from a random primary-visible surface taken out of the G-Buffer.
-        ivec2 pixelCoord = ivec2(
-//      ivec2 pixelCoord = ivec2(
+        int2 pixelCoord = int2(
+//      int2 pixelCoord = int2(
             clamp(int(randFloat() * float(uResolution.x)), 0, uResolution.x - 1),
 //          clamp(int(randFloat() * float(uResolution.x)), 0, uResolution.x - 1),
             clamp(int(randFloat() * float(uResolution.y)), 0, uResolution.y - 1)
@@ -1132,8 +1103,8 @@
         );
 //      );
 
-        vec4 posSample = imageLoad(textureGeometryGlobalPosition, pixelCoord);
-//      vec4 posSample = imageLoad(textureGeometryGlobalPosition, pixelCoord);
+        float4 posSample = textureGeometryGlobalPosition.Load(int3(pixelCoord, 0));
+//      float4 posSample = textureGeometryGlobalPosition.Load(int3(pixelCoord, 0));
         if (posSample.w == 0.0) return;
 //      if (posSample.w == 0.0) return;
 
@@ -1142,43 +1113,43 @@
         if (triangleIndex < 0) return;
 //      if (triangleIndex < 0) return;
 
-        vec4 normSample = imageLoad(textureGeometryGlobalNormal, pixelCoord);
-//      vec4 normSample = imageLoad(textureGeometryGlobalNormal, pixelCoord);
+        float4 normSample = textureGeometryGlobalNormal.Load(int3(pixelCoord, 0));
+//      float4 normSample = textureGeometryGlobalNormal.Load(int3(pixelCoord, 0));
         if (dot(normSample.xyz, normSample.xyz) < 1.0e-6) return;
 //      if (dot(normSample.xyz, normSample.xyz) < 1.0e-6) return;
 
-        vec4 tangentSample = imageLoad(textureGeometryGlobalTangent, pixelCoord);
-//      vec4 tangentSample = imageLoad(textureGeometryGlobalTangent, pixelCoord);
+        float4 tangentSample = textureGeometryGlobalTangent.Load(int3(pixelCoord, 0));
+//      float4 tangentSample = textureGeometryGlobalTangent.Load(int3(pixelCoord, 0));
 
-        vec3 currentPoint = posSample.xyz;
-//      vec3 currentPoint = posSample.xyz;
-        vec3 currentNormal = normalize(normSample.xyz);
-//      vec3 currentNormal = normalize(normSample.xyz);
+        float3 currentPoint = posSample.xyz;
+//      float3 currentPoint = posSample.xyz;
+        float3 currentNormal = normalize(normSample.xyz);
+//      float3 currentNormal = normalize(normSample.xyz);
         int currentTriangle = triangleIndex;
 //      int currentTriangle = triangleIndex;
-        vec3 toSurface = currentPoint - uCameraGlobalPosition;
-//      vec3 toSurface = currentPoint - uCameraGlobalPosition;
+        float3 toSurface = currentPoint - uCameraGlobalPosition;
+//      float3 toSurface = currentPoint - uCameraGlobalPosition;
         float currentDistance = length(toSurface);
 //      float currentDistance = length(toSurface);
-        vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
-//      vec3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
+        float3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
+//      float3 currentIncomingDir = (dot(toSurface, toSurface) > 1.0e-12) ? normalize(toSurface) : -currentNormal;
         // U and V are packed into the w channels of the normal and tangent targets, matching the
 //      // U and V are packed into the w channels of the normal and tangent targets, matching the
-        // reconstruction hybrid_shading_cs.glsl does for its own depth-0 vertex.
-//      // reconstruction hybrid_shading_cs.glsl does for its own depth-0 vertex.
-        vec2 currentTexcoord = vec2(normSample.w, tangentSample.w);
-//      vec2 currentTexcoord = vec2(normSample.w, tangentSample.w);
+        // reconstruction hybrid_shading_cs.slang does for its own depth-0 vertex.
+//      // reconstruction hybrid_shading_cs.slang does for its own depth-0 vertex.
+        float2 currentTexcoord = float2(normSample.w, tangentSample.w);
+//      float2 currentTexcoord = float2(normSample.w, tangentSample.w);
         // The albedo target already holds the resolved, sRGB-decoded base colour for this pixel, and
 //      // The albedo target already holds the resolved, sRGB-decoded base colour for this pixel, and
         // the shading pass shades depth 0 from exactly this value, so prefer it over a re-fetch.
 //      // the shading pass shades depth 0 from exactly this value, so prefer it over a re-fetch.
-        vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
-//      vec3 currentAlbedo = imageLoad(textureGeometryAlbedo, pixelCoord).rgb;
+        float3 currentAlbedo = textureGeometryAlbedo.Load(int3(pixelCoord, 0)).rgb;
+//      float3 currentAlbedo = textureGeometryAlbedo.Load(int3(pixelCoord, 0)).rgb;
 
         // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
 //      // Walk the path and record a single training vertex along it. Recording at deeper vertices is what
-        // keeps the training distribution aligned with where hybrid_shading_cs.glsl queries the cache,
-//      // keeps the training distribution aligned with where hybrid_shading_cs.glsl queries the cache,
+        // keeps the training distribution aligned with where hybrid_shading_cs.slang queries the cache,
+//      // keeps the training distribution aligned with where hybrid_shading_cs.slang queries the cache,
         // which is at secondary bounces that are frequently not visible from the camera at all.
 //      // which is at secondary bounces that are frequently not visible from the camera at all.
         for (uint bounce = 0u; bounce < 6u; bounce++) {
@@ -1194,16 +1165,16 @@
 //          // classified and its target built from the material the renderer will actually query about.
             // The primary vertex keeps its G-Buffer albedo; deeper vertices take the resolved one.
 //          // The primary vertex keeps its G-Buffer albedo; deeper vertices take the resolved one.
-            vec3 resolvedAlbedo;
-//          vec3 resolvedAlbedo;
+            float3 resolvedAlbedo;
+//          float3 resolvedAlbedo;
             float effectiveRoughness;
 //          float effectiveRoughness;
             float effectiveMetallic;
 //          float effectiveMetallic;
             float effectiveTransmission;
 //          float effectiveTransmission;
-            vec3 resolvedEmission;
-//          vec3 resolvedEmission;
+            float3 resolvedEmission;
+//          float3 resolvedEmission;
             resolveSurfaceMaterial(material, currentTexcoord, currentDistance,
 //          resolveSurfaceMaterial(material, currentTexcoord, currentDistance,
                                    resolvedAlbedo, effectiveRoughness, effectiveMetallic,
@@ -1233,8 +1204,8 @@
 
             if (isCacheable) {
 //          if (isCacheable) {
-                vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
-//              vec3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
+                float3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
+//              float3 targetRadiance = computeTrainingTarget(currentPoint, currentNormal, currentIncomingDir,
                                                             currentAlbedo, effectiveRoughness, effectiveMetallic,
 //                                                          currentAlbedo, effectiveRoughness, effectiveMetallic,
                                                             effectiveTransmission);
@@ -1249,8 +1220,8 @@
 //                  // 1. Material-aware adaptive sampling: smooth surfaces act as mirrors and need the
                     //    cache for screen-space reflections, rough ones are already served well by ReSTIR DI.
 //                  //    cache for screen-space reflections, rough ones are already served well by ReSTIR DI.
-                    float materialProb = mix(0.80, 0.10, effectiveRoughness);
-//                  float materialProb = mix(0.80, 0.10, effectiveRoughness);
+                    float materialProb = lerp(0.80, 0.10, effectiveRoughness);
+//                  float materialProb = lerp(0.80, 0.10, effectiveRoughness);
 
                     // 2. Luminance-driven sampling: high-energy areas dominate the variance.
 //                  // 2. Luminance-driven sampling: high-energy areas dominate the variance.
@@ -1277,8 +1248,8 @@
 //                  // nrcTrainingRecords. The bounds check below is the guard that keeps that true if
                     // the dispatch size in hybrid_renderer.py is ever raised without resizing the buffer.
 //                  // the dispatch size in hybrid_renderer.py is ever raised without resizing the buffer.
-                    uint storeIndex = atomicAdd(uTrainingRecordCount, 1u);
-//                  uint storeIndex = atomicAdd(uTrainingRecordCount, 1u);
+                    uint storeIndex = trainingRecordCounter[0].add(1u);
+//                  uint storeIndex = trainingRecordCounter[0].add(1u);
 
                     if (storeIndex < 8192u) {
 //                  if (storeIndex < 8192u) {
@@ -1313,19 +1284,19 @@
 
             // Continue the path with a cosine-weighted bounce off the current surface.
 //          // Continue the path with a cosine-weighted bounce off the current surface.
-            vec3 continueDirUnnormalized = currentNormal + randomUnitVector();
-//          vec3 continueDirUnnormalized = currentNormal + randomUnitVector();
-            vec3 continueDir = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6) ? normalize(continueDirUnnormalized) : currentNormal;
-//          vec3 continueDir = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6) ? normalize(continueDirUnnormalized) : currentNormal;
+            float3 continueDirUnnormalized = currentNormal + randomUnitVector();
+//          float3 continueDirUnnormalized = currentNormal + randomUnitVector();
+            float3 continueDir = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6) ? normalize(continueDirUnnormalized) : currentNormal;
+//          float3 continueDir = (dot(continueDirUnnormalized, continueDirUnnormalized) > 1.0e-6) ? normalize(continueDirUnnormalized) : currentNormal;
 
-            vec3 nextPoint;
-//          vec3 nextPoint;
-            vec3 nextNormal;
-//          vec3 nextNormal;
+            float3 nextPoint;
+//          float3 nextPoint;
+            float3 nextNormal;
+//          float3 nextNormal;
             int nextTriangle;
 //          int nextTriangle;
-            vec2 nextTexcoord;
-//          vec2 nextTexcoord;
+            float2 nextTexcoord;
+//          float2 nextTexcoord;
             float nextDistance;
 //          float nextDistance;
             if (!traverseClosestHit(currentPoint + currentNormal * EPSILON_OFFSET, continueDir, INF, nextPoint, nextNormal, nextTriangle, nextTexcoord, nextDistance)) break;
