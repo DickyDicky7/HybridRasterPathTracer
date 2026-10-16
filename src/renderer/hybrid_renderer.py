@@ -14,6 +14,10 @@ import pathlib as pl
 import pathlib as pl
 import typing
 import typing
+import functools
+import functools
+import concurrent.futures
+import concurrent.futures
 import enum
 import enum
 import time as tm
@@ -26,8 +30,8 @@ import cv2
 import cv2
 import pyoidn     # type: ignore[import-untyped]
 import pyoidn
-from src.renderer.shader_compiler import ComputeProgram, RenderProgram
-from src.renderer.shader_compiler import ComputeProgram, RenderProgram
+from src.renderer.shader_compiler import ComputeProgram, RenderProgram, prefetch_slang, compute_stages, render_stages
+from src.renderer.shader_compiler import ComputeProgram, RenderProgram, prefetch_slang, compute_stages, render_stages
 from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.camera import Camera
@@ -94,6 +98,16 @@ class HybridRenderer:
 #   resource_dir: pl.Path = pl.Path(__file__).parent.resolve(strict=False)
     shader_dir: pl.Path = (resource_dir / "../shaders").resolve(strict=False)
 #   shader_dir: pl.Path = (resource_dir / "../shaders").resolve(strict=False)
+    # 8-bit texel -> normalised float32, plain and with the sRGB (gamma 2.2) decode applied (see load_texture_layer).
+#   # 8-bit texel -> normalised float32, plain and with the sRGB (gamma 2.2) decode applied (see load_texture_layer).
+    unorm8_to_float_lut: npt.NDArray[np.float32] = np.arange(256, dtype=np.float32) / 255.0
+#   unorm8_to_float_lut: npt.NDArray[np.float32] = np.arange(256, dtype=np.float32) / 255.0
+    srgb8_to_linear_lut: npt.NDArray[np.float32] = np.power(np.arange(256, dtype=np.float32) / 255.0, 2.2)
+#   srgb8_to_linear_lut: npt.NDArray[np.float32] = np.power(np.arange(256, dtype=np.float32) / 255.0, 2.2)
+    # Worker threads preparing texture array layers (see upload_pending_textures).
+#   # Worker threads preparing texture array layers (see upload_pending_textures).
+    texture_worker_count: int = 4
+#   texture_worker_count: int = 4
     # rendercanvas key names -> the names key_state and on_key_event use (letters and digits map to themselves, upper-cased).
 #   # rendercanvas key names -> the names key_state and on_key_event use (letters and digits map to themselves, upper-cased).
     key_names: dict[str, str] = {
@@ -148,6 +162,26 @@ class HybridRenderer:
 #       # 0. Device and Window Setup
         # -----------------------------
 #       # -----------------------------
+        # Start compiling every Slang program right away: the slangc processes run in parallel, on background threads,
+#       # Start compiling every Slang program right away: the slangc processes run in parallel, on background threads,
+        # while the adapter, device and window are created below; each program constructor then collects its result.
+#       # while the adapter, device and window are created below; each program constructor then collects its result.
+        prefetch_slang(shader_dir=self.shader_dir, programs=[
+#       prefetch_slang(shader_dir=self.shader_dir, programs=[
+            render_stages(vertex_file_name="hybrid_geometry_vs.slang", fragment_file_name="hybrid_geometry_fs.slang"),
+#           render_stages(vertex_file_name="hybrid_geometry_vs.slang", fragment_file_name="hybrid_geometry_fs.slang"),
+            render_stages(vertex_file_name="hybrid_renderer_vs.slang", fragment_file_name="hybrid_renderer_fs.slang"),
+#           render_stages(vertex_file_name="hybrid_renderer_vs.slang", fragment_file_name="hybrid_renderer_fs.slang"),
+            *[compute_stages(file_name=file_name) for file_name in (
+#           *[compute_stages(file_name=file_name) for file_name in (
+                "hybrid_shading_cs.slang", "nrc_gather_cs.slang", "nrc_train_cs.slang", "cloud_noise_cs.slang", "sky_clouds_bake_cs.slang",
+#               "hybrid_shading_cs.slang", "nrc_gather_cs.slang", "nrc_train_cs.slang", "cloud_noise_cs.slang", "sky_clouds_bake_cs.slang",
+                "post_chromatic_aberration_cs.slang", "post_vignette_cs.slang", "post_tonemap_cs.slang", "post_fxaa_cs.slang",
+#               "post_chromatic_aberration_cs.slang", "post_vignette_cs.slang", "post_tonemap_cs.slang", "post_fxaa_cs.slang",
+            )],
+#           )],
+        ])
+#       ])
         # Ask for the high-performance adapter so hybrid-graphics laptops render on the discrete GPU.
 #       # Ask for the high-performance adapter so hybrid-graphics laptops render on the discrete GPU.
         self.adapter: wgpu.GPUAdapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
@@ -981,16 +1015,47 @@ class HybridRenderer:
         return channel_float
 #       return channel_float
 
-    def write_texture_array_layer(self, data_uint8: npt.NDArray[np.uint8], layer_index: int) -> None:
-#   def write_texture_array_layer(self, data_uint8: npt.NDArray[np.uint8], layer_index: int) -> None:
-        # Uploads one RGBA8 layer together with its full mip chain. Each level is the 2x2 box average of the
-#       # Uploads one RGBA8 layer together with its full mip chain. Each level is the 2x2 box average of the
-        # one above it, the same filter glGenerateMipmap applied to the 8-bit data.
-#       # one above it, the same filter glGenerateMipmap applied to the 8-bit data.
-        level_data: npt.NDArray[np.uint8] = np.ascontiguousarray(data_uint8)
-#       level_data: npt.NDArray[np.uint8] = np.ascontiguousarray(data_uint8)
-        for mip_level in range(self.texture_array_mip_count):
-#       for mip_level in range(self.texture_array_mip_count):
+    def build_mip_chain(self, data_uint8: npt.NDArray[np.uint8]) -> list[npt.NDArray[np.uint8]]:
+#   def build_mip_chain(self, data_uint8: npt.NDArray[np.uint8]) -> list[npt.NDArray[np.uint8]]:
+        # One RGBA8 layer and its full mip chain. Each level is the 2x2 box average of the one above it, the same filter
+#       # One RGBA8 layer and its full mip chain. Each level is the 2x2 box average of the one above it, the same filter
+        # glGenerateMipmap applied to the 8-bit data. The average runs in 16-bit integers: (a + b + c + d + 2) >> 2 is
+#       # glGenerateMipmap applied to the 8-bit data. The average runs in 16-bit integers: (a + b + c + d + 2) >> 2 is
+        # exactly the old float32 floor((a + b + c + d) * 0.25 + 0.5) for 8-bit inputs (every intermediate is exact
+#       # exactly the old float32 floor((a + b + c + d) * 0.25 + 0.5) for 8-bit inputs (every intermediate is exact
+        # there), without converting each level to float32 and back.
+#       # there), without converting each level to float32 and back.
+        mip_chain: list[npt.NDArray[np.uint8]] = [np.ascontiguousarray(data_uint8)]
+#       mip_chain: list[npt.NDArray[np.uint8]] = [np.ascontiguousarray(data_uint8)]
+        for _ in range(1, self.texture_array_mip_count):
+#       for _ in range(1, self.texture_array_mip_count):
+            level_data: npt.NDArray[np.uint8] = mip_chain[-1]
+#           level_data: npt.NDArray[np.uint8] = mip_chain[-1]
+            if level_data.shape[0] == 1 or level_data.shape[1] == 1:
+#           if level_data.shape[0] == 1 or level_data.shape[1] == 1:
+                break
+#               break
+            level_sum: npt.NDArray[np.uint16] = level_data[0::2, 0::2].astype(np.uint16)
+#           level_sum: npt.NDArray[np.uint16] = level_data[0::2, 0::2].astype(np.uint16)
+            level_sum += level_data[1::2, 0::2]
+#           level_sum += level_data[1::2, 0::2]
+            level_sum += level_data[0::2, 1::2]
+#           level_sum += level_data[0::2, 1::2]
+            level_sum += level_data[1::2, 1::2]
+#           level_sum += level_data[1::2, 1::2]
+            level_sum += 2
+#           level_sum += 2
+            mip_chain.append(np.ascontiguousarray((level_sum >> 2).astype(np.uint8)))
+#           mip_chain.append(np.ascontiguousarray((level_sum >> 2).astype(np.uint8)))
+        return mip_chain
+#       return mip_chain
+
+    def write_texture_array_layer(self, mip_chain: list[npt.NDArray[np.uint8]], layer_index: int) -> None:
+#   def write_texture_array_layer(self, mip_chain: list[npt.NDArray[np.uint8]], layer_index: int) -> None:
+        # Uploads one layer of the texture array together with its mip chain (see build_mip_chain).
+#       # Uploads one layer of the texture array together with its mip chain (see build_mip_chain).
+        for mip_level, level_data in enumerate(mip_chain):
+#       for mip_level, level_data in enumerate(mip_chain):
             level_height, level_width = level_data.shape[:2]
 #           level_height, level_width = level_data.shape[:2]
             self.device.queue.write_texture(
@@ -1005,16 +1070,6 @@ class HybridRenderer:
 #               size=(level_width, level_height, 1),
             )
 #           )
-            if level_width == 1 or level_height == 1:
-#           if level_width == 1 or level_height == 1:
-                break
-#               break
-            level_float: npt.NDArray[np.float32] = level_data.astype(dtype=np.float32)
-#           level_float: npt.NDArray[np.float32] = level_data.astype(dtype=np.float32)
-            level_float = (level_float[0::2, 0::2] + level_float[1::2, 0::2] + level_float[0::2, 1::2] + level_float[1::2, 1::2]) * 0.25
-#           level_float = (level_float[0::2, 0::2] + level_float[1::2, 0::2] + level_float[0::2, 1::2] + level_float[1::2, 1::2]) * 0.25
-            level_data = np.ascontiguousarray((level_float + 0.5).astype(np.uint8))
-#           level_data = np.ascontiguousarray((level_float + 0.5).astype(np.uint8))
         pass
 #       pass
 
@@ -1041,43 +1096,73 @@ class HybridRenderer:
         )
 #       )
 
+        # Decoding, resizing, quantizing and mip building are CPU work that OpenCV and numpy run without holding the
+#       # Decoding, resizing, quantizing and mip building are CPU work that OpenCV and numpy run without holding the
+        # GIL, so the layers are prepared on a small thread pool while this thread uploads the finished ones in
+#       # GIL, so the layers are prepared on a small thread pool while this thread uploads the finished ones in
+        # registration order. The worker count bounds the transient memory: a layer from a 4096^2 source passes
+#       # registration order. The worker count bounds the transient memory: a layer from a 4096^2 source passes
+        # through a 256 MB float32 intermediate (an 8192^2 source, 1 GB).
+#       # through a 256 MB float32 intermediate (an 8192^2 source, 1 GB).
+        layer_jobs: list[tuple[int, typing.Callable[[], npt.NDArray[np.uint8] | None]]] = []
+#       layer_jobs: list[tuple[int, typing.Callable[[], npt.NDArray[np.uint8] | None]]] = []
         for path, layer_index, is_srgb in self.pending_textures:
 #       for path, layer_index, is_srgb in self.pending_textures:
-            self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-#           self.load_texture_to_array(path, layer_index, is_srgb=is_srgb)
-
+            layer_jobs.append((layer_index, functools.partial(self.load_texture_layer, path, is_srgb)))
+#           layer_jobs.append((layer_index, functools.partial(self.load_texture_layer, path, is_srgb)))
         # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
 #       # Packed data maps: roughness->R, metallic->G, transmission->B in a single layer
         for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
 #       for layer_index, roughness_path, metallic_path, transmission_path in self.pending_packed_textures:
-            # Quantize each channel straight into the 8-bit layer: identical bytes to the old
-#           # Quantize each channel straight into the 8-bit layer: identical bytes to the old
-            # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
-#           # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
-            # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
-#           # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
-            packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
-#           packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
-            packed_uint8[..., 3] = 255
-#           packed_uint8[..., 3] = 255
-            for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
-#           for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
-                if source_path is None:
-#               if source_path is None:
-                    continue
-#                   continue
-                channel = self._load_data_channel(source_path)
-#               channel = self._load_data_channel(source_path)
-                if channel is not None:
-#               if channel is not None:
-                    packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-#                   packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-            packed_uint8 = np.flipud(packed_uint8)
-#           packed_uint8 = np.flipud(packed_uint8)
-            self.write_texture_array_layer(data_uint8=packed_uint8, layer_index=layer_index)
-#           self.write_texture_array_layer(data_uint8=packed_uint8, layer_index=layer_index)
+            layer_jobs.append((layer_index, functools.partial(self.pack_orm_layer, roughness_path, metallic_path, transmission_path)))
+#           layer_jobs.append((layer_index, functools.partial(self.pack_orm_layer, roughness_path, metallic_path, transmission_path)))
+
+        def prepare_layer(layer_job: tuple[int, typing.Callable[[], npt.NDArray[np.uint8] | None]]) -> tuple[int, list[npt.NDArray[np.uint8]] | None]:
+#       def prepare_layer(layer_job: tuple[int, typing.Callable[[], npt.NDArray[np.uint8] | None]]) -> tuple[int, list[npt.NDArray[np.uint8]] | None]:
+            layer_index, load_layer = layer_job
+#           layer_index, load_layer = layer_job
+            data_uint8: npt.NDArray[np.uint8] | None = load_layer()
+#           data_uint8: npt.NDArray[np.uint8] | None = load_layer()
+            return layer_index, (self.build_mip_chain(data_uint8=data_uint8) if data_uint8 is not None else None)
+#           return layer_index, (self.build_mip_chain(data_uint8=data_uint8) if data_uint8 is not None else None)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.texture_worker_count) as executor:
+#       with concurrent.futures.ThreadPoolExecutor(max_workers=self.texture_worker_count) as executor:
+            for layer_index, mip_chain in executor.map(prepare_layer, layer_jobs):
+#           for layer_index, mip_chain in executor.map(prepare_layer, layer_jobs):
+                if mip_chain is not None:
+#               if mip_chain is not None:
+                    self.write_texture_array_layer(mip_chain=mip_chain, layer_index=layer_index)
+#                   self.write_texture_array_layer(mip_chain=mip_chain, layer_index=layer_index)
         pass
 #       pass
+
+    def pack_orm_layer(self, roughness_path: pl.Path | None, metallic_path: pl.Path | None, transmission_path: pl.Path | None) -> npt.NDArray[np.uint8]:
+#   def pack_orm_layer(self, roughness_path: pl.Path | None, metallic_path: pl.Path | None, transmission_path: pl.Path | None) -> npt.NDArray[np.uint8]:
+        # Quantize each channel straight into the 8-bit layer: identical bytes to the old
+#       # Quantize each channel straight into the 8-bit layer: identical bytes to the old
+        # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
+#       # float32 intermediate (same per-element clip*255+0.5 math) at 1/4 the transient RAM
+        # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
+#       # (a 2048^2 rgba float32 buffer was 67MB per packed layer).
+        packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
+#       packed_uint8: npt.NDArray[np.uint8] = np.zeros((self.texture_array_size, self.texture_array_size, 4), dtype=np.uint8)
+        packed_uint8[..., 3] = 255
+#       packed_uint8[..., 3] = 255
+        for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
+#       for source_path, channel_index in ((roughness_path, 0), (metallic_path, 1), (transmission_path, 2)):
+            if source_path is None:
+#           if source_path is None:
+                continue
+#               continue
+            channel = self._load_data_channel(source_path)
+#           channel = self._load_data_channel(source_path)
+            if channel is not None:
+#           if channel is not None:
+                packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+#               packed_uint8[..., channel_index] = (np.clip(channel, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+        return np.flipud(packed_uint8)
+#       return np.flipud(packed_uint8)
 
     def setup_hdri(self, hdri_path: pl.Path | None = None, use_hdri: bool = False) -> None:
 #   def setup_hdri(self, hdri_path: pl.Path | None = None, use_hdri: bool = False) -> None:
@@ -1265,10 +1350,28 @@ class HybridRenderer:
         scene.build(scene_builder=self.scene_builder, renderer=self)
 #       scene.build(scene_builder=self.scene_builder, renderer=self)
 
-        # Build BVH and pack vertex / material buffers
-#       # Build BVH and pack vertex / material buffers
-        self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
-#       self.num_triangles, bvh_data, vertices_data, materials_data = self.scene_builder.build()
+        # Build BVH and pack vertex / material buffers, on a background thread: the build is numpy work that runs
+#       # Build BVH and pack vertex / material buffers, on a background thread: the build is numpy work that runs
+        # outside the GIL, and so is the texture decoding upload_pending_textures does meanwhile on this thread and
+#       # outside the GIL, and so is the texture decoding upload_pending_textures does meanwhile on this thread and
+        # its pool, so the two largest pieces of a scene load overlap instead of adding up.
+#       # its pool, so the two largest pieces of a scene load overlap instead of adding up.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="scene build") as scene_build_executor:
+#       with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="scene build") as scene_build_executor:
+            scene_build: concurrent.futures.Future[tuple[int, bytes, bytes, bytes]] = scene_build_executor.submit(self.scene_builder.build)
+#           scene_build: concurrent.futures.Future[tuple[int, bytes, bytes, bytes]] = scene_build_executor.submit(self.scene_builder.build)
+
+            # Upload all registered textures to the texture array
+#           # Upload all registered textures to the texture array
+            if self.texture_array is not None:
+#           if self.texture_array is not None:
+                self.texture_array.destroy()
+#               self.texture_array.destroy()
+            self.upload_pending_textures()
+#           self.upload_pending_textures()
+
+            self.num_triangles, bvh_data, vertices_data, materials_data = scene_build.result()
+#           self.num_triangles, bvh_data, vertices_data, materials_data = scene_build.result()
 
         # Upload to GPU buffers
 #       # Upload to GPU buffers
@@ -1294,15 +1397,6 @@ class HybridRenderer:
 #           self.ssbo_materials.destroy()
         self.ssbo_materials = self.create_buffer(data=materials_data, label="scene materials")
 #       self.ssbo_materials = self.create_buffer(data=materials_data, label="scene materials")
-
-        # Upload all registered textures to the texture array
-#       # Upload all registered textures to the texture array
-        if self.texture_array is not None:
-#       if self.texture_array is not None:
-            self.texture_array.destroy()
-#           self.texture_array.destroy()
-        self.upload_pending_textures()
-#       self.upload_pending_textures()
 
         # NRC input-domain normalisation, derived from the BVH root AABB
 #       # NRC input-domain normalisation, derived from the BVH root AABB
@@ -1438,18 +1532,20 @@ class HybridRenderer:
         self.nrc_training_step = 0
 #       self.nrc_training_step = 0
 
-    def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
-#   def load_texture_to_array(self, path: pl.Path, layer_index: int, is_srgb: bool = False) -> bool:
-        # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
-#       # Loads a texture from disk and uploads it to a specific layer in the 2D Texture Array.
+    def load_texture_layer(self, path: pl.Path, is_srgb: bool = False) -> npt.NDArray[np.uint8] | None:
+#   def load_texture_layer(self, path: pl.Path, is_srgb: bool = False) -> npt.NDArray[np.uint8] | None:
+        # Loads a texture from disk and converts it into one RGBA8 layer of the 2D Texture Array (None on failure).
+#       # Loads a texture from disk and converts it into one RGBA8 layer of the 2D Texture Array (None on failure).
         # Texture Arrays allow the shader to access many different textures using a single sampler + index.
 #       # Texture Arrays allow the shader to access many different textures using a single sampler + index.
+        # Runs on upload_pending_textures' worker threads, so it only does CPU work; the upload happens on the caller.
+#       # Runs on upload_pending_textures' worker threads, so it only does CPU work; the upload happens on the caller.
         if not path.exists():
 #       if not path.exists():
             print(f"Warning: Texture not found: {path}")
 #           print(f"Warning: Texture not found: {path}")
-            return False
-#           return False
+            return None
+#           return None
 
         loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
 #       loaded_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
@@ -1457,8 +1553,8 @@ class HybridRenderer:
 #       if loaded_data is None:
             print(f"Warning: Failed to load texture: {path}")
 #           print(f"Warning: Failed to load texture: {path}")
-            return False
-#           return False
+            return None
+#           return None
 
         # Ensure RGBA
 #       # Ensure RGBA
@@ -1487,10 +1583,8 @@ class HybridRenderer:
 #       if loaded_data.dtype == np.uint8 and loaded_data.shape[0] == self.texture_array_size and loaded_data.shape[1] == self.texture_array_size:
             # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
 #           # Flip vertically: the shaders keep OpenGL's convention that texture row 0 is the bottom of the image.
-            self.write_texture_array_layer(data_uint8=np.flipud(loaded_data), layer_index=layer_index)
-#           self.write_texture_array_layer(data_uint8=np.flipud(loaded_data), layer_index=layer_index)
-            return True
-#           return True
+            return typing.cast(npt.NDArray[np.uint8], np.flipud(loaded_data))
+#           return typing.cast(npt.NDArray[np.uint8], np.flipud(loaded_data))
 
         # Convert to normalized float first so resizing is done on linear data
 #       # Convert to normalized float first so resizing is done on linear data
@@ -1499,25 +1593,39 @@ class HybridRenderer:
 
         if loaded_data.dtype == np.uint8:
 #       if loaded_data.dtype == np.uint8:
-            data_float = (loaded_data.astype(dtype=np.float32) / 255.0)
-#           data_float = (loaded_data.astype(dtype=np.float32) / 255.0)
-        elif loaded_data.dtype == np.uint16:
-#       elif loaded_data.dtype == np.uint16:
-            data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
-#           data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
+            # An 8-bit texel has only 256 possible values, so normalising (and for colour maps the sRGB -> Linear decode,
+#           # An 8-bit texel has only 256 possible values, so normalising (and for colour maps the sRGB -> Linear decode,
+            # Approximate Gamma 2.2, applied before resize so filtering happens in linear space) is a table lookup
+#           # Approximate Gamma 2.2, applied before resize so filtering happens in linear space) is a table lookup
+            # holding exactly the float32 values the per-texel divide and pow() produced -- one gather over the full
+#           # holding exactly the float32 values the per-texel divide and pow() produced -- one gather over the full
+            # resolution source instead of a conversion, a divide and a transcendental pass.
+#           # resolution source instead of a conversion, a divide and a transcendental pass.
+            data_float = self.unorm8_to_float_lut[loaded_data]
+#           data_float = self.unorm8_to_float_lut[loaded_data]
+            if is_srgb:
+#           if is_srgb:
+                data_float[..., :3] = self.srgb8_to_linear_lut[loaded_data[..., :3]]
+#               data_float[..., :3] = self.srgb8_to_linear_lut[loaded_data[..., :3]]
         else:
 #       else:
-            data_float = loaded_data.astype(dtype=np.float32)
-#           data_float = loaded_data.astype(dtype=np.float32)
+            if loaded_data.dtype == np.uint16:
+#           if loaded_data.dtype == np.uint16:
+                data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
+#               data_float = (loaded_data.astype(dtype=np.float32) / 65535.0)
+            else:
+#           else:
+                data_float = loaded_data.astype(dtype=np.float32)
+#               data_float = loaded_data.astype(dtype=np.float32)
 
-        # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
-#       # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
-        if is_srgb:
-#       if is_srgb:
-            # Approximate Gamma 2.2
-#           # Approximate Gamma 2.2
-            data_float[..., :3] = np.power(data_float[..., :3], 2.2)
-#           data_float[..., :3] = np.power(data_float[..., :3], 2.2)
+            # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
+#           # Apply sRGB -> Linear conversion if requested (before resize so filtering happens in linear space)
+            if is_srgb:
+#           if is_srgb:
+                # Approximate Gamma 2.2
+#               # Approximate Gamma 2.2
+                data_float[..., :3] = np.power(data_float[..., :3], 2.2)
+#               data_float[..., :3] = np.power(data_float[..., :3], 2.2)
 
         # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
 #       # Resize to the texture array size. INTER_AREA avoids aliasing when shrinking; INTER_LINEAR when enlarging.
@@ -1549,13 +1657,8 @@ class HybridRenderer:
         data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 #       data_uint8: npt.NDArray[np.uint8] = (np.clip(data_float, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
-        # Upload the layer together with its mip chain.
-#       # Upload the layer together with its mip chain.
-        self.write_texture_array_layer(data_uint8=data_uint8, layer_index=layer_index)
-#       self.write_texture_array_layer(data_uint8=data_uint8, layer_index=layer_index)
-
-        return True
-#       return True
+        return data_uint8
+#       return data_uint8
 
 
     """

@@ -1,3 +1,5 @@
+import concurrent.futures
+import concurrent.futures
 import json
 import json
 import os
@@ -184,7 +186,62 @@ def describe_resource(parameter: dict[str, typing.Any]) -> tuple[dict[str, typin
     return {"storage_texture": {"access": storage_access, "format": STORAGE_TEXTURE_FORMATS[parameter["format"]], "view_dimension": view_dimension}}, view_dimension
 #   return {"storage_texture": {"access": storage_access, "format": STORAGE_TEXTURE_FORMATS[parameter["format"]], "view_dimension": view_dimension}}, view_dimension
 
+def compute_stages(file_name: str) -> list[tuple[str, str, str]]:
+    # The (file name, entry point, stage) list of a compute program (see ComputeProgram).
+#   # The (file name, entry point, stage) list of a compute program (see ComputeProgram).
+    return [(file_name, "computeMain", "compute")]
+#   return [(file_name, "computeMain", "compute")]
+
+def render_stages(vertex_file_name: str, fragment_file_name: str) -> list[tuple[str, str, str]]:
+    # The (file name, entry point, stage) list of a vertex + fragment program (see RenderProgram).
+#   # The (file name, entry point, stage) list of a vertex + fragment program (see RenderProgram).
+    return [(vertex_file_name, "vertexMain", "vertex"), (fragment_file_name, "fragmentMain", "fragment")]
+#   return [(vertex_file_name, "vertexMain", "vertex"), (fragment_file_name, "fragmentMain", "fragment")]
+
+# slangc runs started ahead of time by prefetch_slang, keyed by (shader_dir, stages), until compile_slang collects them.
+prefetched_shaders: dict[tuple[str, tuple[tuple[str, str, str], ...]], concurrent.futures.Future[SlangShader]] = {}
+
+def prefetch_slang(shader_dir: pl.Path, programs: list[list[tuple[str, str, str]]]) -> None:
+    """
+    Starts slangc for every listed program at once, each on its own background thread. Every compile is a separate
+#   Starts slangc for every listed program at once, each on its own background thread. Every compile is a separate
+    slangc process, so they run in parallel and start-up pays for the slowest program instead of the sum of all of
+#   slangc process, so they run in parallel and start-up pays for the slowest program instead of the sum of all of
+    them -- and the caller keeps creating the device and window meanwhile. compile_slang picks the results up.
+#   them -- and the caller keeps creating the device and window meanwhile. compile_slang picks the results up.
+    """
+    executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(programs)), thread_name_prefix="slangc")
+#   executor: concurrent.futures.ThreadPoolExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(programs)), thread_name_prefix="slangc")
+    for stages in programs:
+#   for stages in programs:
+        prefetch_key: tuple[str, tuple[tuple[str, str, str], ...]] = (str(shader_dir), tuple(stages))
+#       prefetch_key: tuple[str, tuple[tuple[str, str, str], ...]] = (str(shader_dir), tuple(stages))
+        if prefetch_key not in prefetched_shaders:
+#       if prefetch_key not in prefetched_shaders:
+            prefetched_shaders[prefetch_key] = executor.submit(run_slangc, shader_dir, stages)
+#           prefetched_shaders[prefetch_key] = executor.submit(run_slangc, shader_dir, stages)
+    executor.shutdown(wait=False)
+#   executor.shutdown(wait=False)
+    pass
+#   pass
+
 def compile_slang(shader_dir: pl.Path, stages: list[tuple[str, str, str]]) -> SlangShader:
+    """
+    Compiles one shader program to WGSL with slangc, or collects the result prefetch_slang already started for it
+#   Compiles one shader program to WGSL with slangc, or collects the result prefetch_slang already started for it
+    (re-raising its compile error, if any). Each stage is (file name, entry point, stage).
+#   (re-raising its compile error, if any). Each stage is (file name, entry point, stage).
+    """
+    prefetched_shader: concurrent.futures.Future[SlangShader] | None = prefetched_shaders.pop((str(shader_dir), tuple(stages)), None)
+#   prefetched_shader: concurrent.futures.Future[SlangShader] | None = prefetched_shaders.pop((str(shader_dir), tuple(stages)), None)
+    if prefetched_shader is not None:
+#   if prefetched_shader is not None:
+        return prefetched_shader.result()
+#       return prefetched_shader.result()
+    return run_slangc(shader_dir=shader_dir, stages=stages)
+#   return run_slangc(shader_dir=shader_dir, stages=stages)
+
+def run_slangc(shader_dir: pl.Path, stages: list[tuple[str, str, str]]) -> SlangShader:
     """
     Compiles one shader program to WGSL with slangc. Each stage is (file name, entry point, stage);
 #   Compiles one shader program to WGSL with slangc. Each stage is (file name, entry point, stage);
@@ -291,6 +348,11 @@ class ShaderProgram:
 #   # on the CPU through program["uName"] = value, exactly like moderngl, and uploaded when the program
     # records its work. Resources are bound by their shader names from a name -> GPU object mapping.
 #   # records its work. Resources are bound by their shader names from a name -> GPU object mapping.
+    # Bind groups kept per program before the cache is reset (a frame uses at most a handful).
+#   # Bind groups kept per program before the cache is reset (a frame uses at most a handful).
+    bind_group_cache_limit: int = 32
+#   bind_group_cache_limit: int = 32
+
     def __init__(self, device: wgpu.GPUDevice, shader_dir: pl.Path, stages: list[tuple[str, str, str]], label: str) -> None:
 #   def __init__(self, device: wgpu.GPUDevice, shader_dir: pl.Path, stages: list[tuple[str, str, str]], label: str) -> None:
         self.device: wgpu.GPUDevice = device
@@ -355,6 +417,10 @@ class ShaderProgram:
 #       if self.shader.uniform_binding is not None:
             self.uniform_buffer = device.create_buffer(label=label, size=self.shader.uniform_size, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
 #           self.uniform_buffer = device.create_buffer(label=label, size=self.shader.uniform_size, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
+        # Bind groups already built, keyed by the identity of the objects they bind (see create_bind_group).
+#       # Bind groups already built, keyed by the identity of the objects they bind (see create_bind_group).
+        self.bind_group_cache: dict[tuple[int, ...], tuple[wgpu.GPUBindGroup, list[typing.Any]]] = {}
+#       self.bind_group_cache: dict[tuple[int, ...], tuple[wgpu.GPUBindGroup, list[typing.Any]]] = {}
         pass
 #       pass
 
@@ -435,6 +501,39 @@ class ShaderProgram:
 #       # Combined texture-samplers take a (texture, sampler) pair. A plain texture also accepts such a
         # pair (its sampler is ignored), so one mapping serves passes that sample and passes that load.
 #       # pair (its sampler is ignored), so one mapping serves passes that sample and passes that load.
+        #
+#       #
+        # What a pass binds rarely changes from one frame to the next (only the ping-pong pairs alternate, and a scene
+#       # What a pass binds rarely changes from one frame to the next (only the ping-pong pairs alternate, and a scene
+        # switch replaces the scene buffers), so bind groups -- and the texture views inside them -- are reused, keyed by
+#       # switch replaces the scene buffers), so bind groups -- and the texture views inside them -- are reused, keyed by
+        # the identity of the bound objects. A cache entry keeps those objects referenced, so no id() in a live key can
+#       # the identity of the bound objects. A cache entry keeps those objects referenced, so no id() in a live key can
+        # be recycled for a different object; the cache is simply dropped if scene switches ever grow it past the limit.
+#       # be recycled for a different object; the cache is simply dropped if scene switches ever grow it past the limit.
+        bound_objects: list[typing.Any] = []
+#       bound_objects: list[typing.Any] = []
+        for name in self.shader.resource_bindings:
+#       for name in self.shader.resource_bindings:
+            bound_resource: typing.Any = resources.get(name)
+#           bound_resource: typing.Any = resources.get(name)
+            if isinstance(bound_resource, tuple):
+#           if isinstance(bound_resource, tuple):
+                bound_objects.extend(bound_resource)
+#               bound_objects.extend(bound_resource)
+            else:
+#           else:
+                bound_objects.append(bound_resource)
+#               bound_objects.append(bound_resource)
+        cache_key: tuple[int, ...] = tuple(id(bound_object) for bound_object in bound_objects)
+#       cache_key: tuple[int, ...] = tuple(id(bound_object) for bound_object in bound_objects)
+        cached_bind_group: tuple[wgpu.GPUBindGroup, list[typing.Any]] | None = self.bind_group_cache.get(cache_key)
+#       cached_bind_group: tuple[wgpu.GPUBindGroup, list[typing.Any]] | None = self.bind_group_cache.get(cache_key)
+        if cached_bind_group is not None:
+#       if cached_bind_group is not None:
+            return cached_bind_group[0]
+#           return cached_bind_group[0]
+
         entries: list[dict[str, typing.Any]] = []
 #       entries: list[dict[str, typing.Any]] = []
         if self.uniform_buffer is not None:
@@ -471,8 +570,16 @@ class ShaderProgram:
 #               resource = resource.create_view(dimension=resource_binding.view_dimension)
             entries.append({"binding": resource_binding.binding, "resource": resource})
 #           entries.append({"binding": resource_binding.binding, "resource": resource})
-        return self.device.create_bind_group(label=self.label, layout=self.bind_group_layout, entries=entries)
-#       return self.device.create_bind_group(label=self.label, layout=self.bind_group_layout, entries=entries)
+        bind_group: wgpu.GPUBindGroup = self.device.create_bind_group(label=self.label, layout=self.bind_group_layout, entries=entries)
+#       bind_group: wgpu.GPUBindGroup = self.device.create_bind_group(label=self.label, layout=self.bind_group_layout, entries=entries)
+        if len(self.bind_group_cache) >= self.bind_group_cache_limit:
+#       if len(self.bind_group_cache) >= self.bind_group_cache_limit:
+            self.bind_group_cache.clear()
+#           self.bind_group_cache.clear()
+        self.bind_group_cache[cache_key] = (bind_group, bound_objects)
+#       self.bind_group_cache[cache_key] = (bind_group, bound_objects)
+        return bind_group
+#       return bind_group
 
 class ComputeProgram(ShaderProgram):
     # Compute counterpart of moderngl's ComputeShader. run() records one dispatch into the frame's
@@ -481,8 +588,8 @@ class ComputeProgram(ShaderProgram):
 #   # command encoder; WebGPU inserts the memory barriers between passes that GL needed explicitly.
     def __init__(self, device: wgpu.GPUDevice, shader_dir: pl.Path, file_name: str) -> None:
 #   def __init__(self, device: wgpu.GPUDevice, shader_dir: pl.Path, file_name: str) -> None:
-        super().__init__(device=device, shader_dir=shader_dir, stages=[(file_name, "computeMain", "compute")], label=file_name)
-#       super().__init__(device=device, shader_dir=shader_dir, stages=[(file_name, "computeMain", "compute")], label=file_name)
+        super().__init__(device=device, shader_dir=shader_dir, stages=compute_stages(file_name=file_name), label=file_name)
+#       super().__init__(device=device, shader_dir=shader_dir, stages=compute_stages(file_name=file_name), label=file_name)
         self.pipeline: wgpu.GPUComputePipeline = device.create_compute_pipeline(
 #       self.pipeline: wgpu.GPUComputePipeline = device.create_compute_pipeline(
             label=file_name,
@@ -542,8 +649,8 @@ class RenderProgram(ShaderProgram):
 #       depth_stencil: dict[str, typing.Any] | None = None,
     ) -> None:
 #   ) -> None:
-        stages: list[tuple[str, str, str]] = [(vertex_file_name, "vertexMain", "vertex"), (fragment_file_name, "fragmentMain", "fragment")]
-#       stages: list[tuple[str, str, str]] = [(vertex_file_name, "vertexMain", "vertex"), (fragment_file_name, "fragmentMain", "fragment")]
+        stages: list[tuple[str, str, str]] = render_stages(vertex_file_name=vertex_file_name, fragment_file_name=fragment_file_name)
+#       stages: list[tuple[str, str, str]] = render_stages(vertex_file_name=vertex_file_name, fragment_file_name=fragment_file_name)
         super().__init__(device=device, shader_dir=shader_dir, stages=stages, label=vertex_file_name)
 #       super().__init__(device=device, shader_dir=shader_dir, stages=stages, label=vertex_file_name)
         self.pipeline: wgpu.GPURenderPipeline = device.create_render_pipeline(

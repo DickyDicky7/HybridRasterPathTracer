@@ -8,6 +8,12 @@
 //  import math_constants;
     import principled_bsdf;
 //  import principled_bsdf;
+    // Neural Radiance Cache network (neural_radiance_cache): layout, workgroup weight copy, input encoding and the
+//  // Neural Radiance Cache network (neural_radiance_cache): layout, workgroup weight copy, input encoding and the
+    // forward pass, shared with nrc_train_cs.slang so inference and training read the network the same way.
+//  // forward pass, shared with nrc_train_cs.slang so inference and training read the network the same way.
+    import neural_radiance_cache;
+//  import neural_radiance_cache;
     import sky_environment;
 //  import sky_environment;
     import volumetric_common;
@@ -134,12 +140,8 @@
 //  // vertex was reached along. For the first vertex, taken from the G-Buffer, that is the camera ray.
     uniform float3 uCameraGlobalPosition;
 //  uniform float3 uCameraGlobalPosition;
-    // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_train_cs.slang exactly.
-//  // NRC input-domain normalisation; must match hybrid_shading_cs.slang and nrc_train_cs.slang exactly.
-    uniform float3 uNRCPositionOffset;
-//  uniform float3 uNRCPositionOffset;
-    uniform float uNRCPositionScale;
-//  uniform float uNRCPositionScale;
+    // The NRC input-domain normalisation (uNRCPositionOffset / uNRCPositionScale) belongs to neural_radiance_cache.
+//  // The NRC input-domain normalisation (uNRCPositionOffset / uNRCPositionScale) belongs to neural_radiance_cache.
 
     // Environment lighting inputs (HDRI, baked cloud layer) and the cloud noise volume belong to the imported
 //  // Environment lighting inputs (HDRI, baked cloud layer) and the cloud noise volume belong to the imported
@@ -162,13 +164,6 @@
 //  // vertex and the target has to be built from the same material the renderer will ask about.
     Sampler2DArray<float4> uSceneTextureArray;
 //  Sampler2DArray<float4> uSceneTextureArray;
-
-    // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
-//  // Workgroup-resident copy of the NRC Exponential Moving Average weights, filled once per
-    // workgroup at the top of computeMain() so every cache query reads shared memory instead of the SSBO.
-//  // workgroup at the top of computeMain() so every cache query reads shared memory instead of the SSBO.
-    groupshared float shared_network_weights[1139];
-//  groupshared float shared_network_weights[1139];
 
     static const float EPSILON_OFFSET = 0.001;
 //  static const float EPSILON_OFFSET = 0.001;
@@ -231,206 +226,6 @@
     }
 //  }
 
-    // Neural Radiance Cache forward pass.
-//  // Neural Radiance Cache forward pass.
-    // Multi-Layer Perceptron: 16 inputs -> 16 hidden (x4, ReLU) -> 3 outputs.
-//  // Multi-Layer Perceptron: 16 inputs -> 16 hidden (x4, ReLU) -> 3 outputs.
-    //
-//  //
-    // Reads the weights out of shared_network_weights, which computeMain() fills once per workgroup with the
-//  // Reads the weights out of shared_network_weights, which computeMain() fills once per workgroup with the
-    // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
-//  // Exponential Moving Average copy of the network. Two reasons this matters: it turns 1139 scalar
-    // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
-//  // SSBO loads per query into shared-memory loads, and reading the weights straight from the SSBO
-    // inside this deeply inlined function made the NVIDIA GLSL compiler (the original OpenGL backend)
-//  // inside this deeply inlined function made the NVIDIA GLSL compiler (the original OpenGL backend)
-    // give up with "error C5025: lvalue in array access too complex", failing the whole program link.
-//  // give up with "error C5025: lvalue in array access too complex", failing the whole program link.
-    //
-//  //
-    // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
-//  // Activations are flat scalar arrays rather than vec4[4] blocks for the same reason: assigning a
-    // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
-//  // dynamically indexed component of a dynamically indexed vec4 array ("h[i / 4u][i % 4u] = ...")
-    // tripped the same compiler limit. This layout also matches nrc_train_cs.slang exactly, so inference
-//  // tripped the same compiler limit. This layout also matches nrc_train_cs.slang exactly, so inference
-    // and training cannot drift apart.
-//  // and training cannot drift apart.
-    float3 evaluateNeuralRadianceCache(float3 position, float3 normal) {
-//  float3 evaluateNeuralRadianceCache(float3 position, float3 normal) {
-        float3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
-//      float3 scaledPos = (position - uNRCPositionOffset) * uNRCPositionScale;
-
-        // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
-//      // 16-dimensional input feature vector (position, normal, and frequency positional encoding)
-        float inputFeatures[16];
-//      float inputFeatures[16];
-        inputFeatures[0] = scaledPos.x;
-//      inputFeatures[0] = scaledPos.x;
-        inputFeatures[1] = scaledPos.y;
-//      inputFeatures[1] = scaledPos.y;
-        inputFeatures[2] = scaledPos.z;
-//      inputFeatures[2] = scaledPos.z;
-        inputFeatures[3] = normal.x;
-//      inputFeatures[3] = normal.x;
-        inputFeatures[4] = normal.y;
-//      inputFeatures[4] = normal.y;
-        inputFeatures[5] = normal.z;
-//      inputFeatures[5] = normal.z;
-        inputFeatures[6] = sin(scaledPos.x * PI);
-//      inputFeatures[6] = sin(scaledPos.x * PI);
-        inputFeatures[7] = sin(scaledPos.y * PI);
-//      inputFeatures[7] = sin(scaledPos.y * PI);
-        inputFeatures[8] = sin(scaledPos.z * PI);
-//      inputFeatures[8] = sin(scaledPos.z * PI);
-        inputFeatures[9] = cos(scaledPos.x * PI);
-//      inputFeatures[9] = cos(scaledPos.x * PI);
-        inputFeatures[10] = cos(scaledPos.y * PI);
-//      inputFeatures[10] = cos(scaledPos.y * PI);
-        inputFeatures[11] = cos(scaledPos.z * PI);
-//      inputFeatures[11] = cos(scaledPos.z * PI);
-        inputFeatures[12] = sin(scaledPos.x * TWO_PI);
-//      inputFeatures[12] = sin(scaledPos.x * TWO_PI);
-        inputFeatures[13] = sin(scaledPos.y * TWO_PI);
-//      inputFeatures[13] = sin(scaledPos.y * TWO_PI);
-        inputFeatures[14] = sin(scaledPos.z * TWO_PI);
-//      inputFeatures[14] = sin(scaledPos.z * TWO_PI);
-        inputFeatures[15] = 1.0;
-//      inputFeatures[15] = 1.0;
-
-        // Hidden Layer 1 (weights offset 0, bias offset 256)
-//      // Hidden Layer 1 (weights offset 0, bias offset 256)
-        float hiddenLayer1[16];
-//      float hiddenLayer1[16];
-        [ForceUnroll]
-//      [ForceUnroll]
-        for (uint i = 0u; i < 16u; i++) {
-//      for (uint i = 0u; i < 16u; i++) {
-            float activationSum = shared_network_weights[256u + i];
-//          float activationSum = shared_network_weights[256u + i];
-            uint weightOffset = i * 16u;
-//          uint weightOffset = i * 16u;
-            [ForceUnroll]
-//          [ForceUnroll]
-            for (uint j = 0u; j < 16u; j++) {
-//          for (uint j = 0u; j < 16u; j++) {
-                activationSum += inputFeatures[j] * shared_network_weights[weightOffset + j];
-//              activationSum += inputFeatures[j] * shared_network_weights[weightOffset + j];
-            }
-//          }
-            hiddenLayer1[i] = max(0.0, activationSum); // ReLU
-//          hiddenLayer1[i] = max(0.0, activationSum); // ReLU
-        }
-//      }
-
-        // Hidden Layer 2 (weights offset 272, bias offset 528)
-//      // Hidden Layer 2 (weights offset 272, bias offset 528)
-        float hiddenLayer2[16];
-//      float hiddenLayer2[16];
-        [ForceUnroll]
-//      [ForceUnroll]
-        for (uint i = 0u; i < 16u; i++) {
-//      for (uint i = 0u; i < 16u; i++) {
-            float activationSum = shared_network_weights[528u + i];
-//          float activationSum = shared_network_weights[528u + i];
-            uint weightOffset = 272u + i * 16u;
-//          uint weightOffset = 272u + i * 16u;
-            [ForceUnroll]
-//          [ForceUnroll]
-            for (uint j = 0u; j < 16u; j++) {
-//          for (uint j = 0u; j < 16u; j++) {
-                activationSum += hiddenLayer1[j] * shared_network_weights[weightOffset + j];
-//              activationSum += hiddenLayer1[j] * shared_network_weights[weightOffset + j];
-            }
-//          }
-            hiddenLayer2[i] = max(0.0, activationSum); // ReLU
-//          hiddenLayer2[i] = max(0.0, activationSum); // ReLU
-        }
-//      }
-
-        // Hidden Layer 3 (weights offset 544, bias offset 800)
-//      // Hidden Layer 3 (weights offset 544, bias offset 800)
-        float hiddenLayer3[16];
-//      float hiddenLayer3[16];
-        [ForceUnroll]
-//      [ForceUnroll]
-        for (uint i = 0u; i < 16u; i++) {
-//      for (uint i = 0u; i < 16u; i++) {
-            float activationSum = shared_network_weights[800u + i];
-//          float activationSum = shared_network_weights[800u + i];
-            uint weightOffset = 544u + i * 16u;
-//          uint weightOffset = 544u + i * 16u;
-            [ForceUnroll]
-//          [ForceUnroll]
-            for (uint j = 0u; j < 16u; j++) {
-//          for (uint j = 0u; j < 16u; j++) {
-                activationSum += hiddenLayer2[j] * shared_network_weights[weightOffset + j];
-//              activationSum += hiddenLayer2[j] * shared_network_weights[weightOffset + j];
-            }
-//          }
-            hiddenLayer3[i] = max(0.0, activationSum); // ReLU
-//          hiddenLayer3[i] = max(0.0, activationSum); // ReLU
-        }
-//      }
-
-        // Hidden Layer 4 (weights offset 816, bias offset 1072)
-//      // Hidden Layer 4 (weights offset 816, bias offset 1072)
-        float hiddenLayer4[16];
-//      float hiddenLayer4[16];
-        [ForceUnroll]
-//      [ForceUnroll]
-        for (uint i = 0u; i < 16u; i++) {
-//      for (uint i = 0u; i < 16u; i++) {
-            float activationSum = shared_network_weights[1072u + i];
-//          float activationSum = shared_network_weights[1072u + i];
-            uint weightOffset = 816u + i * 16u;
-//          uint weightOffset = 816u + i * 16u;
-            [ForceUnroll]
-//          [ForceUnroll]
-            for (uint j = 0u; j < 16u; j++) {
-//          for (uint j = 0u; j < 16u; j++) {
-                activationSum += hiddenLayer3[j] * shared_network_weights[weightOffset + j];
-//              activationSum += hiddenLayer3[j] * shared_network_weights[weightOffset + j];
-            }
-//          }
-            hiddenLayer4[i] = max(0.0, activationSum); // ReLU
-//          hiddenLayer4[i] = max(0.0, activationSum); // ReLU
-        }
-//      }
-
-        // Output Layer (weights offset 1088, bias offset 1136)
-//      // Output Layer (weights offset 1088, bias offset 1136)
-        float3 outputRadiance = float3(0.0);
-//      float3 outputRadiance = float3(0.0);
-        [ForceUnroll]
-//      [ForceUnroll]
-        for (uint i = 0u; i < 3u; i++) {
-//      for (uint i = 0u; i < 3u; i++) {
-            float activationSum = shared_network_weights[1136u + i];
-//          float activationSum = shared_network_weights[1136u + i];
-            uint weightOffset = 1088u + i * 16u;
-//          uint weightOffset = 1088u + i * 16u;
-            [ForceUnroll]
-//          [ForceUnroll]
-            for (uint j = 0u; j < 16u; j++) {
-//          for (uint j = 0u; j < 16u; j++) {
-                activationSum += hiddenLayer4[j] * shared_network_weights[weightOffset + j];
-//              activationSum += hiddenLayer4[j] * shared_network_weights[weightOffset + j];
-            }
-//          }
-            outputRadiance[int(i)] = activationSum;
-//          outputRadiance[int(i)] = activationSum;
-        }
-//      }
-
-        // Clamp to prevent explosive feedback during early training
-//      // Clamp to prevent explosive feedback during early training
-        return clamp(outputRadiance, float3(0.0), float3(15.0));
-//      return clamp(outputRadiance, float3(0.0), float3(15.0));
-    }
-//  }
-
     bool intersectAABB(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
 //  bool intersectAABB(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
         float3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
@@ -447,6 +242,27 @@
 //      float exitDistance = min(min(tmax.x, tmax.y), min(tmax.z, maxDistance));
         return enterDistance <= exitDistance;
 //      return enterDistance <= exitDistance;
+    }
+//  }
+
+    // Same slab test as intersectAABB, returning the entry distance (INF on a miss) so traversal can order children.
+//  // Same slab test as intersectAABB, returning the entry distance (INF on a miss) so traversal can order children.
+    float aabbEntryDistance(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
+//  float aabbEntryDistance(float3 rayOrigin, float3 rayInverseDirection, float3 aabbMin, float3 aabbMax, float maxDistance) {
+        float3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
+//      float3 t0 = (aabbMin - rayOrigin) * rayInverseDirection;
+        float3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
+//      float3 t1 = (aabbMax - rayOrigin) * rayInverseDirection;
+        float3 tmin = min(t0, t1);
+//      float3 tmin = min(t0, t1);
+        float3 tmax = max(t0, t1);
+//      float3 tmax = max(t0, t1);
+        float enterDistance = max(max(tmin.x, tmin.y), max(tmin.z, 0.001));
+//      float enterDistance = max(max(tmin.x, tmin.y), max(tmin.z, 0.001));
+        float exitDistance = min(min(tmax.x, tmax.y), min(tmax.z, maxDistance));
+//      float exitDistance = min(min(tmax.x, tmax.y), min(tmax.z, maxDistance));
+        return (enterDistance <= exitDistance) ? enterDistance : INF;
+//      return (enterDistance <= exitDistance) ? enterDistance : INF;
     }
 //  }
 
@@ -660,12 +476,40 @@
 //              }
             } else {
 //          } else {
+                // Near-first: both children are tested here and the farther one is pushed first, so the nearer subtree
+//              // Near-first: both children are tested here and the farther one is pushed first, so the nearer subtree
+                // is walked next and tightens closestDist before the farther one is popped (and, usually, culled).
+//              // is walked next and tightens closestDist before the farther one is popped (and, usually, culled).
+                // Children the ray misses are never pushed at all.
+//              // Children the ray misses are never pushed at all.
+                int leftChildIndex = int(node.aabbMinAndLeftChild.w);
+//              int leftChildIndex = int(node.aabbMinAndLeftChild.w);
+                int rightChildIndex = int(node.aabbMaxAndRightChild.w);
+//              int rightChildIndex = int(node.aabbMaxAndRightChild.w);
+                Node leftChild = nodes[leftChildIndex];
+//              Node leftChild = nodes[leftChildIndex];
+                Node rightChild = nodes[rightChildIndex];
+//              Node rightChild = nodes[rightChildIndex];
+                float leftChildDistance = aabbEntryDistance(origin, invDir, leftChild.aabbMinAndLeftChild.xyz, leftChild.aabbMaxAndRightChild.xyz, closestDist);
+//              float leftChildDistance = aabbEntryDistance(origin, invDir, leftChild.aabbMinAndLeftChild.xyz, leftChild.aabbMaxAndRightChild.xyz, closestDist);
+                float rightChildDistance = aabbEntryDistance(origin, invDir, rightChild.aabbMinAndLeftChild.xyz, rightChild.aabbMaxAndRightChild.xyz, closestDist);
+//              float rightChildDistance = aabbEntryDistance(origin, invDir, rightChild.aabbMinAndLeftChild.xyz, rightChild.aabbMaxAndRightChild.xyz, closestDist);
+                bool isLeftNearer = leftChildDistance < rightChildDistance;
+//              bool isLeftNearer = leftChildDistance < rightChildDistance;
                 if (stackPointer < 62) {
 //              if (stackPointer < 62) {
-                    stack[stackPointer++] = int(node.aabbMinAndLeftChild.w);
-//                  stack[stackPointer++] = int(node.aabbMinAndLeftChild.w);
-                    stack[stackPointer++] = int(node.aabbMaxAndRightChild.w);
-//                  stack[stackPointer++] = int(node.aabbMaxAndRightChild.w);
+                    if (max(leftChildDistance, rightChildDistance) < INF) {
+//                  if (max(leftChildDistance, rightChildDistance) < INF) {
+                        stack[stackPointer++] = isLeftNearer ? rightChildIndex : leftChildIndex;
+//                      stack[stackPointer++] = isLeftNearer ? rightChildIndex : leftChildIndex;
+                    }
+//                  }
+                    if (min(leftChildDistance, rightChildDistance) < INF) {
+//                  if (min(leftChildDistance, rightChildDistance) < INF) {
+                        stack[stackPointer++] = isLeftNearer ? leftChildIndex : rightChildIndex;
+//                      stack[stackPointer++] = isLeftNearer ? leftChildIndex : rightChildIndex;
+                    }
+//                  }
                 }
 //              }
             }
@@ -1078,10 +922,26 @@
 //      // Stage the NRC EMA weights in shared memory before any early return, so that every
         // invocation in the workgroup reaches barrier().
 //      // invocation in the workgroup reaches barrier().
-        for (uint weightIndex = localInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
-//      for (uint weightIndex = localInvocationIndex; weightIndex < 1139u; weightIndex += 64u) {
-            shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
-//          shared_network_weights[weightIndex] = neuralNetworkWeights[1139u + weightIndex];
+        // The EMA copy, staged as float4 segments of the network (see neural_radiance_cache.slang).
+//      // The EMA copy, staged as float4 segments of the network (see neural_radiance_cache.slang).
+        for (uint segment = localInvocationIndex; segment < NRC_NETWORK_FLOAT4_COUNT; segment += 64u) {
+//      for (uint segment = localInvocationIndex; segment < NRC_NETWORK_FLOAT4_COUNT; segment += 64u) {
+            float4 segmentWeights = float4(0.0);
+//          float4 segmentWeights = float4(0.0);
+            [ForceUnroll]
+//          [ForceUnroll]
+            for (uint lane = 0u; lane < 4u; lane++) {
+//          for (uint lane = 0u; lane < 4u; lane++) {
+                if (segment * 4u + lane < NRC_NETWORK_FLOAT_COUNT) {
+//              if (segment * 4u + lane < NRC_NETWORK_FLOAT_COUNT) {
+                    segmentWeights[lane] = neuralNetworkWeights[NRC_EMA_WEIGHTS_OFFSET + segment * 4u + lane];
+//                  segmentWeights[lane] = neuralNetworkWeights[NRC_EMA_WEIGHTS_OFFSET + segment * 4u + lane];
+                }
+//              }
+            }
+//          }
+            nrcStoreSharedWeights(segment, segmentWeights);
+//          nrcStoreSharedWeights(segment, segmentWeights);
         }
 //      }
         GroupMemoryBarrierWithGroupSync();

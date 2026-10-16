@@ -121,6 +121,50 @@
 //      entryDistance = max(max(max(slabMin.x, slabMin.y), slabMin.z), 0.0);
         exitDistance = min(min(min(slabMax.x, slabMax.y), slabMax.z), segmentEnd);
 //      exitDistance = min(min(min(slabMax.x, slabMax.y), slabMax.z), segmentEnd);
+        if (exitDistance > entryDistance && uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_CLOUD) {
+//      if (exitDistance > entryDistance && uMediumVolumes[volumeIndex].kind == MEDIUM_KIND_CLOUD) {
+            // A cloud is further clipped to the ellipsoid inscribed in its box: mediumVolumeDensity's shape mask is exactly 0
+//          // A cloud is further clipped to the ellipsoid inscribed in its box: mediumVolumeDensity's shape mask is exactly 0
+            // wherever the box-normalized radius reaches 1, so the density outside that ellipsoid is 0. Walking only the
+//          // wherever the box-normalized radius reaches 1, so the density outside that ellipsoid is 0. Walking only the
+            // inner part is exact, not an approximation -- delta tracking's free flights are memoryless, so null collisions
+//          // inner part is exact, not an approximation -- delta tracking's free flights are memoryless, so null collisions
+            // skipped in empty space cannot move the first real one, and ratio tracking's factor there is 1 - 0 = 1 -- but it
+//          // skipped in empty space cannot move the first real one, and ratio tracking's factor there is 1 - 0 = 1 -- but it
+            // spares every tracking step (up to two noise fetches each) the box corners used to cost.
+//          // spares every tracking step (up to two noise fetches each) the box corners used to cost.
+            // Ray against the unit sphere in box-normalized space: |localOrigin + t * localDirection|^2 = 1.
+//          // Ray against the unit sphere in box-normalized space: |localOrigin + t * localDirection|^2 = 1.
+            float3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
+//          float3 volumeCentre = 0.5 * (uMediumVolumes[volumeIndex].aabbMin + uMediumVolumes[volumeIndex].aabbMax);
+            float3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
+//          float3 volumeHalfExtent = 0.5 * (uMediumVolumes[volumeIndex].aabbMax - uMediumVolumes[volumeIndex].aabbMin);
+            float3 localOrigin = (rayOrigin - volumeCentre) / volumeHalfExtent;
+//          float3 localOrigin = (rayOrigin - volumeCentre) / volumeHalfExtent;
+            float3 localDirection = rayDirection / volumeHalfExtent;
+//          float3 localDirection = rayDirection / volumeHalfExtent;
+            float quadraticA = dot(localDirection, localDirection);
+//          float quadraticA = dot(localDirection, localDirection);
+            float quadraticHalfB = dot(localOrigin, localDirection);
+//          float quadraticHalfB = dot(localOrigin, localDirection);
+            float quadraticC = dot(localOrigin, localOrigin) - 1.0;
+//          float quadraticC = dot(localOrigin, localOrigin) - 1.0;
+            float discriminant = quadraticHalfB * quadraticHalfB - quadraticA * quadraticC;
+//          float discriminant = quadraticHalfB * quadraticHalfB - quadraticA * quadraticC;
+            if (discriminant <= 0.0) {
+//          if (discriminant <= 0.0) {
+                return false;
+//              return false;
+            }
+//          }
+            float rootSpan = sqrt(discriminant);
+//          float rootSpan = sqrt(discriminant);
+            entryDistance = max(entryDistance, (-quadraticHalfB - rootSpan) / quadraticA);
+//          entryDistance = max(entryDistance, (-quadraticHalfB - rootSpan) / quadraticA);
+            exitDistance = min(exitDistance, (-quadraticHalfB + rootSpan) / quadraticA);
+//          exitDistance = min(exitDistance, (-quadraticHalfB + rootSpan) / quadraticA);
+        }
+//      }
         return exitDistance > entryDistance;
 //      return exitDistance > entryDistance;
     }
