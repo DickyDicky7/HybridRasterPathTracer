@@ -30,8 +30,8 @@ from src.scene.scene_builder import SceneBuilder
 from src.scene.scene_builder import SceneBuilder
 from src.scene.camera import Camera
 from src.scene.camera import Camera
-from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
-from src.scene import BaseScene, ShowcaseScene, CornellBoxScene
+from src.scene import BaseScene, ShowcaseScene, CornellBoxScene, OfficeScene
+from src.scene import BaseScene, ShowcaseScene, CornellBoxScene, OfficeScene
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight, MediumVolume
 from src.core.common_types import vec2i32, vec3i32, vec4i32, vec2f32, vec3f32, vec4f32, Material, PointLight, MediumVolume
 
@@ -550,6 +550,8 @@ class HybridRenderer(mglw.WindowConfig): # type: ignore[name-defined, misc]
 #       # Scenes Collection
         self.scenes: list[BaseScene] = [
 #       self.scenes: list[BaseScene] = [
+            OfficeScene(resource_dir=self.resource_dir),
+#           OfficeScene(resource_dir=self.resource_dir),
             CornellBoxScene(resource_dir=self.resource_dir),
 #           CornellBoxScene(resource_dir=self.resource_dir),
             ShowcaseScene(resource_dir=self.resource_dir),
