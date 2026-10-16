@@ -2,6 +2,8 @@ import wgpu # type: ignore[import-untyped]
 import wgpu
 from rendercanvas.glfw import RenderCanvas, loop # type: ignore[import-untyped]
 from rendercanvas.glfw import RenderCanvas, loop
+import glfw
+import glfw
 import numpy as np
 import numpy as np
 import numpy.typing as npt
@@ -47,6 +49,28 @@ class RenderMode(enum.IntEnum):
     TANGENT = 4
 #   TANGENT = 4
 
+class WindowOptions(typing.NamedTuple):
+    # Window settings parsed from the command line by main.py; the same flags moderngl_window's
+#   # Window settings parsed from the command line by main.py; the same flags moderngl_window's
+    # run_window_config accepted. size / size_mult only change the window: the render targets stay
+#   # run_window_config accepted. size / size_mult only change the window: the render targets stay
+    # at HybridRenderer.window_size and are stretched to fit, as with moderngl_window.
+#   # at HybridRenderer.window_size and are stretched to fit, as with moderngl_window.
+    size: vec2i32 | None = None
+#   size: vec2i32 | None = None
+    size_mult: float = 1.0
+#   size_mult: float = 1.0
+    fullscreen: bool = False
+#   fullscreen: bool = False
+    vsync: bool = True
+#   vsync: bool = True
+    resizable: bool = True
+#   resizable: bool = True
+    hidden: bool = False
+#   hidden: bool = False
+    cursor: bool = True
+#   cursor: bool = True
+
 class HybridRenderer:
     # Main Renderer Class implementing a Hybrid Pipeline:
 #   # Main Renderer Class implementing a Hybrid Pipeline:
@@ -81,8 +105,10 @@ class HybridRenderer:
     }
 #   }
 
-    def __init__(self) -> None:
-#   def __init__(self) -> None:
+    def __init__(self, window_options: WindowOptions = WindowOptions()) -> None:
+#   def __init__(self, window_options: WindowOptions = WindowOptions()) -> None:
+        self.window_options: WindowOptions = window_options
+#       self.window_options: WindowOptions = window_options
         self.frame_count: int = 0
 #       self.frame_count: int = 0
         self.cache_frame_counter: int = 0
@@ -145,8 +171,36 @@ class HybridRenderer:
         self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
 #       self.device: wgpu.GPUDevice = self.adapter.request_device_sync(required_features=["float32-filterable"], required_limits=required_limits)
 
-        self.canvas: RenderCanvas = RenderCanvas(size=self.window_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=True)
-#       self.canvas: RenderCanvas = RenderCanvas(size=self.window_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=True)
+        canvas_size: vec2i32 = window_options.size if window_options.size is not None else self.window_size
+#       canvas_size: vec2i32 = window_options.size if window_options.size is not None else self.window_size
+        canvas_size = (int(canvas_size[0] * window_options.size_mult), int(canvas_size[1] * window_options.size_mult))
+#       canvas_size = (int(canvas_size[0] * window_options.size_mult), int(canvas_size[1] * window_options.size_mult))
+        self.canvas: RenderCanvas = RenderCanvas(size=canvas_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=window_options.vsync)
+#       self.canvas: RenderCanvas = RenderCanvas(size=canvas_size, title=self.title, update_mode="continuous", max_fps=1000.0, vsync=window_options.vsync)
+        # rendercanvas has no API for resizability, visibility or fullscreen, so those go straight to its glfw window handle.
+#       # rendercanvas has no API for resizability, visibility or fullscreen, so those go straight to its glfw window handle.
+        self.glfw_window: typing.Any = self.canvas._window
+#       self.glfw_window: typing.Any = self.canvas._window
+        if not window_options.resizable:
+#       if not window_options.resizable:
+            glfw.set_window_attrib(self.glfw_window, glfw.RESIZABLE, glfw.FALSE)
+#           glfw.set_window_attrib(self.glfw_window, glfw.RESIZABLE, glfw.FALSE)
+        if not window_options.cursor:
+#       if not window_options.cursor:
+            self.canvas.set_cursor("none")
+#           self.canvas.set_cursor("none")
+        if window_options.hidden:
+#       if window_options.hidden:
+            glfw.hide_window(self.glfw_window)
+#           glfw.hide_window(self.glfw_window)
+        self.is_fullscreen: bool = False
+#       self.is_fullscreen: bool = False
+        self.windowed_rect: vec4i32 = (0, 0, canvas_size[0], canvas_size[1])
+#       self.windowed_rect: vec4i32 = (0, 0, canvas_size[0], canvas_size[1])
+        if window_options.fullscreen:
+#       if window_options.fullscreen:
+            self.set_fullscreen(is_fullscreen=True)
+#           self.set_fullscreen(is_fullscreen=True)
         self.present_context: typing.Any = self.canvas.get_context("wgpu")
 #       self.present_context: typing.Any = self.canvas.get_context("wgpu")
         # A non-sRGB swapchain: the post-processing chain already gamma-encodes, like the GL default framebuffer did.
@@ -675,6 +729,14 @@ class HybridRenderer:
 #   def run(self) -> None:
         # Hand control to the rendercanvas event loop, which calls on_draw every frame until the window closes.
 #       # Hand control to the rendercanvas event loop, which calls on_draw every frame until the window closes.
+        # The clock starts here rather than in __init__, so shader compilation and the first scene load
+#       # The clock starts here rather than in __init__, so shader compilation and the first scene load
+        # count neither toward the first frame_time nor toward time (as moderngl_window's timer did).
+#       # count neither toward the first frame_time nor toward time (as moderngl_window's timer did).
+        self.start_time = tm.perf_counter()
+#       self.start_time = tm.perf_counter()
+        self.last_frame_time = self.start_time
+#       self.last_frame_time = self.start_time
         loop.run()
 #       loop.run()
         pass
@@ -1739,8 +1801,10 @@ class HybridRenderer:
 #       # Show result
         # Convert RGB to BGR for OpenCV and Flip for correct orientation
 #       # Convert RGB to BGR for OpenCV and Flip for correct orientation
-        display_img = cv2.cvtColor(output_arr, cv2.COLOR_RGB2BGR)
-#       display_img = cv2.cvtColor(output_arr, cv2.COLOR_RGB2BGR)
+        # The float64 np.where weights above promote the array to float64, which cvtColor rejects; cast back to float32.
+#       # The float64 np.where weights above promote the array to float64, which cvtColor rejects; cast back to float32.
+        display_img = cv2.cvtColor(output_arr.astype(np.float32), cv2.COLOR_RGB2BGR)
+#       display_img = cv2.cvtColor(output_arr.astype(np.float32), cv2.COLOR_RGB2BGR)
         display_img = cv2.flip(display_img, 0)
 #       display_img = cv2.flip(display_img, 0)
         cv2.imshow("OIDN Denoised Result", display_img)
@@ -2424,6 +2488,18 @@ class HybridRenderer:
 #           self.set_scene_by_index(index=self.current_scene_index + 1)
             self.frame_count = 0
 #           self.frame_count = 0
+        elif key == "F11":
+#       elif key == "F11":
+            self.set_fullscreen(is_fullscreen=not self.is_fullscreen)
+#           self.set_fullscreen(is_fullscreen=not self.is_fullscreen)
+        elif key == "ESCAPE":
+#       elif key == "ESCAPE":
+            # Same path as the title-bar close button: emits "close" (on_close) and ends the event loop.
+#           # Same path as the title-bar close button: emits "close" (on_close) and ends the event loop.
+            self.canvas.close()
+#           self.canvas.close()
+            return
+#           return
         if self.frame_count == 0:
 #       if self.frame_count == 0:
             self.is_scene_reset = True
@@ -2432,6 +2508,41 @@ class HybridRenderer:
 #           self.last_view_proj_matrix = None
             self.last_camera_position = None
 #           self.last_camera_position = None
+        pass
+#       pass
+
+    def set_fullscreen(self, is_fullscreen: bool) -> None:
+#   def set_fullscreen(self, is_fullscreen: bool) -> None:
+        # F11 / --fullscreen, as in moderngl_window's glfw backend: the window takes the primary monitor's video mode,
+#       # F11 / --fullscreen, as in moderngl_window's glfw backend: the window takes the primary monitor's video mode,
+        # and leaving fullscreen restores the previous position and size. Only the swapchain follows the new
+#       # and leaving fullscreen restores the previous position and size. Only the swapchain follows the new
+        # window size; the render targets stay at window_size and are stretched, like any other resize.
+#       # window size; the render targets stay at window_size and are stretched, like any other resize.
+        if is_fullscreen == self.is_fullscreen:
+#       if is_fullscreen == self.is_fullscreen:
+            return
+#           return
+        monitor: typing.Any = glfw.get_primary_monitor()
+#       monitor: typing.Any = glfw.get_primary_monitor()
+        mode: typing.Any = glfw.get_video_mode(monitor)
+#       mode: typing.Any = glfw.get_video_mode(monitor)
+        refresh_rate: int = mode.refresh_rate if self.window_options.vsync else glfw.DONT_CARE
+#       refresh_rate: int = mode.refresh_rate if self.window_options.vsync else glfw.DONT_CARE
+        if is_fullscreen:
+#       if is_fullscreen:
+            self.windowed_rect = (*glfw.get_window_pos(self.glfw_window), *glfw.get_window_size(self.glfw_window))
+#           self.windowed_rect = (*glfw.get_window_pos(self.glfw_window), *glfw.get_window_size(self.glfw_window))
+            glfw.set_window_monitor(self.glfw_window, monitor, 0, 0, mode.size.width, mode.size.height, refresh_rate)
+#           glfw.set_window_monitor(self.glfw_window, monitor, 0, 0, mode.size.width, mode.size.height, refresh_rate)
+        else:
+#       else:
+            # A None monitor means windowed mode in glfw; its type stubs only declare the monitor pointer.
+#           # A None monitor means windowed mode in glfw; its type stubs only declare the monitor pointer.
+            glfw.set_window_monitor(self.glfw_window, None, *self.windowed_rect, refresh_rate) # type: ignore[arg-type]
+#           glfw.set_window_monitor(self.glfw_window, None, *self.windowed_rect, refresh_rate)
+        self.is_fullscreen = is_fullscreen
+#       self.is_fullscreen = is_fullscreen
         pass
 #       pass
 

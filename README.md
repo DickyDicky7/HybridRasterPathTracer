@@ -124,6 +124,8 @@
     <li><b>I:</b> Denoise current frame with Intel OIDN</li>
     <li><b>C:</b> Toggle the volumetric sky cloud layer</li>
     <li><b>M:</b> Toggle in-scene participating media (fog / cloud volumes)</li>
+    <li><b>F11:</b> Toggle fullscreen</li>
+    <li><b>Esc:</b> Quit</li>
   </ul>
 </div>
 <!--
@@ -136,6 +138,8 @@
     <li><b>I:</b> Denoise current frame with Intel OIDN</li>
     <li><b>C:</b> Toggle the volumetric sky cloud layer</li>
     <li><b>M:</b> Toggle in-scene participating media (fog / cloud volumes)</li>
+    <li><b>F11:</b> Toggle fullscreen</li>
+    <li><b>Esc:</b> Quit</li>
   </ul>
 </div>
 -->
